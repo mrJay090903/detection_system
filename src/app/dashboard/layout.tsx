@@ -15,6 +15,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const [isLoading, setIsLoading] = useState(true)
+  
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
   useEffect(() => {
