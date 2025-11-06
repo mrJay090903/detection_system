@@ -41,7 +41,7 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
       title: "",
       abstract: "",
       year: new Date().getFullYear(),
-      course: "",
+      course: COURSES[0],
       researchers: [],
     }
   )
