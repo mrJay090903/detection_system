@@ -1,12 +1,13 @@
 "use client"
 
-import { redirect } from "next/navigation"
 import { useEffect, useState } from "react"
-import { getCurrentFaculty } from "@/lib/auth"
+import { getCurrentFaculty, type Faculty } from "@/lib/auth"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { signOut } from "@/lib/auth"
 import { toast } from "sonner"
+import { usePathname, useRouter } from "next/navigation"
+import { useMobile } from "@/hooks/use-mobile"
 
 
 export default function DashboardLayout({
@@ -15,19 +16,31 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const [isLoading, setIsLoading] = useState(true)
+  const [faculty, setFaculty] = useState<Faculty | null>(null)
+  const router = useRouter()
+  const pathname = usePathname()
+  const isMobile = useMobile()
   
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
   useEffect(() => {
     const checkAuth = async () => {
-      const faculty = await getCurrentFaculty()
-      if (!faculty) {
-        redirect("/")
+      const facultyData = await getCurrentFaculty()
+      if (!facultyData) {
+        router.push("/")
+      } else {
+        setFaculty(facultyData)
+        setIsLoading(false)
       }
-      setIsLoading(false)
     }
     checkAuth()
-  }, [])
+  }, [router])
+
+  useEffect(() => {
+    if (isMobile) {
+      setIsSidebarCollapsed(true)
+    }
+  }, [pathname, isMobile])
 
   const handleSignOut = async () => {
     try {
@@ -54,8 +67,8 @@ export default function DashboardLayout({
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b sticky top-0 bg-background z-10">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center">
+          <div className={`transition-all duration-300 py-4 ${isSidebarCollapsed ? "md:px-2" : "px-4"}`}>
             <Button
               variant="ghost"
               size="icon"
@@ -80,11 +93,15 @@ export default function DashboardLayout({
                 <path d="M21 18H3M21 12H3M21 6H3"/>
               </svg>
             </Button>
-            <h1 className="text-xl font-bold">Faculty Dashboard</h1>
           </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            Sign Out
-          </Button>
+          <div className="flex-1 container mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 className="text-xl font-bold">
+              Research Similarity Detection System
+            </h1>
+            <Button variant="outline" onClick={handleSignOut}>
+              Sign Out
+            </Button>
+          </div>
         </div>
       </header>
 

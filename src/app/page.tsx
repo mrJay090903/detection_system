@@ -1,9 +1,35 @@
-import { Button } from "@/components/ui/button";
-import Image from "next/image";
-import LiquidEther from "@/components/ui/LiquidEther";
-import { LoginForm } from "@/components/ui/login-form";
+"use client"
+
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import Image from "next/image"
+import LiquidEther from "@/components/ui/LiquidEther"
+import { LoginForm } from "@/components/ui/login-form"
+import { Loader2 } from "lucide-react"
+import { toast } from "sonner"
 
 export default function Home() {
+  const [proposedTitle, setProposedTitle] = useState("")
+  const [proposedConcept, setProposedConcept] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleCheckSimilarity = () => {
+    if (!proposedTitle.trim() || !proposedConcept.trim()) {
+      toast.error("Please fill in both research title and concept")
+      return
+    }
+
+    // Navigate to results page with query parameters
+    const params = new URLSearchParams({
+      title: proposedTitle.trim(),
+      concept: proposedConcept.trim(),
+    })
+    window.location.href = `/similarity-results?${params.toString()}`
+  }
+
   return (
     <div className="min-h-screen bg-background relative">
       {/* Background Effect */}
@@ -50,31 +76,46 @@ export default function Home() {
           <div className="space-y-6 p-6 bg-card rounded-lg shadow-lg border">
             <div className="space-y-4">
               <div>
-                <label htmlFor="title" className="block text-sm font-medium mb-2">
+                <Label htmlFor="title" className="mb-2">
                   Proposed Research Title
-                </label>
-                <input
-                  type="text"
+                </Label>
+                <Input
                   id="title"
+                  type="text"
                   placeholder="Enter your research title"
-                  className="w-full px-4 py-2 rounded-md border bg-background"
+                  value={proposedTitle}
+                  onChange={(e) => setProposedTitle(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
 
               <div>
-                <label htmlFor="concept" className="block text-sm font-medium mb-2">
+                <Label htmlFor="concept" className="mb-2">
                   Research Concept
-                </label>
-                <textarea
+                </Label>
+                <Textarea
                   id="concept"
                   rows={6}
                   placeholder="Describe your research concept..."
-                  className="w-full px-4 py-2 rounded-md border bg-background resize-none"
+                  value={proposedConcept}
+                  onChange={(e) => setProposedConcept(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
 
-              <Button className="w-full">
-                Check Similarity
+              <Button 
+                className="w-full" 
+                onClick={handleCheckSimilarity}
+                disabled={isLoading || !proposedTitle.trim() || !proposedConcept.trim()}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Checking Similarity...
+                  </>
+                ) : (
+                  "Check Similarity"
+                )}
               </Button>
             </div>
           </div>
@@ -97,5 +138,5 @@ export default function Home() {
         </div>
       </main>
     </div>
-  );
+  )
 }
