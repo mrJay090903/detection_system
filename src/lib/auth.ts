@@ -75,7 +75,7 @@ export async function getCurrentFaculty() {
     .select('*')
     .eq('id', session.user.id)
     .single()
-
+ 
   if (facultyError) {
     return null
   }
