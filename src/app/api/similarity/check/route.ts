@@ -595,8 +595,8 @@ async function generateGeminiReport(
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
 
-  // Get top 5 most similar researches
-  const topSimilar = similarities.slice(0, 5)
+  // Get top 3 most similar researches
+  const topSimilar = similarities.slice(0, 3)
 
   const prompt = `You are an expert research analyst. Analyze the similarity between a proposed research and existing researches.
 
@@ -789,7 +789,7 @@ export async function POST(request: NextRequest) {
       success: true,
       proposedTitle,
       proposedConcept,
-      similarities: similarities.slice(0, 10), // Return top 10
+      similarities: similarities.slice(0, 3), // Return top 3
       report,
       totalComparisons: similarities.length,
     })

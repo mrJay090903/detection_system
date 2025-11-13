@@ -193,7 +193,7 @@ export function SimilarityResults() {
               {result.similarities.length > 0 && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Similarity Percentage Graph</CardTitle>
+                    <CardTitle>Top 3 Similarity Percentage Graph</CardTitle>
                     <CardDescription>
                       Visual representation of similarity scores
                     </CardDescription>
@@ -201,7 +201,7 @@ export function SimilarityResults() {
                   <CardContent>
                     <ResponsiveContainer width="100%" height={400}>
                       <BarChart
-                        data={result.similarities.slice(0, 10).map((s, i) => ({
+                        data={result.similarities.slice(0, 3).map((s, i) => ({
                           name: `#${i + 1}`,
                           title: s.title.substring(0, 30) + (s.title.length > 30 ? '...' : ''),
                           overall: (s.overallSimilarity * 100).toFixed(1),
@@ -241,7 +241,7 @@ export function SimilarityResults() {
               {result.similarities.length > 0 ? (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Similarity Results</CardTitle>
+                    <CardTitle>Top 3 Similarity Results</CardTitle>
                     <CardDescription>
                       Top {result.similarities.length} most similar researches from database
                     </CardDescription>
