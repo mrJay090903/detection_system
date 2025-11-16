@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pdf from 'pdf-parse'
+import { PDFParse } from 'pdf-parse'
 import mammoth from 'mammoth'
 
 export async function POST(request: NextRequest) {
@@ -27,7 +27,8 @@ export async function POST(request: NextRequest) {
     if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
       // Extract text from PDF
       try {
-        const pdfData = await pdf(buffer)
+        const pdfParser = new PDFParse({ data: buffer })
+        const pdfData = await pdfParser.getText()
         extractedText = pdfData.text
       } catch (error) {
         console.error('PDF parsing error:', error)
