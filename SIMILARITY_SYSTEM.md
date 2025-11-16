@@ -5,6 +5,7 @@
 - **Cosine Similarity Algorithm**: Compares proposed research titles and concepts against existing researches
 - **Gemini AI Integration**: Generates comprehensive similarity analysis reports
 - **Real-time Analysis**: Instant similarity checking with detailed results
+- **PDF & Document Upload**: Upload PDF or DOCX files for automatic text extraction
 
 ## Setup Instructions
 
@@ -55,16 +56,20 @@ The Python script expects JSON input via stdin:
 
 ### Flow
 
-1. **User Input**: User enters research title and concept on the landing page
-2. **Similarity Check**: Clicking "Check Similarity" triggers:
+1. **User Input**: User enters research title and concept on the landing page, OR uploads a PDF/DOCX file
+2. **File Upload (Optional)**: 
+   - Click "Upload PDF or DOCX" button
+   - Select a PDF (.pdf) or Word document (.docx) file (max 10MB)
+   - Text is automatically extracted and populated in the concept field
+3. **Similarity Check**: Clicking "Check Similarity" triggers:
    - Fetches all existing researches from database
    - Calculates cosine similarity using TF-IDF vectorization
    - Compares proposed title vs existing titles (40% weight)
    - Compares proposed concept vs existing abstracts (60% weight)
-3. **Report Generation**: 
+4. **Report Generation**: 
    - Top similar researches are sent to Gemini API
    - Gemini generates a comprehensive analysis report
-4. **Results Display**: Report is shown in a dialog with:
+5. **Results Display**: Report is shown in a dialog with:
    - Similarity scores for top matches
    - AI-generated detailed analysis
    - Recommendations
@@ -76,6 +81,15 @@ The system uses TF-IDF (Term Frequency-Inverse Document Frequency) vectorization
 - Calculates cosine similarity between vectors
 - Returns similarity scores from 0 (no similarity) to 1 (identical)
 
+### PDF/Document Upload Feature
+
+The system supports uploading documents for text extraction:
+- **Supported formats**: PDF (.pdf) and Word Documents (.docx)
+- **File size limit**: 10MB maximum
+- **Text extraction**: Uses `pdf-parse` for PDFs and `mammoth` for DOCX files
+- **Auto-fill**: Extracted text is automatically populated in the research concept field
+- The extracted text is then processed using the same TF-IDF vectorization algorithm
+
 ### Gemini AI Report
 
 The AI report includes:
@@ -86,7 +100,32 @@ The AI report includes:
 - Recommendations
 - Conclusion
 
-## API Endpoint
+## API Endpoints
+
+### POST `/api/extract-text`
+
+**Request:**
+- Content-Type: multipart/form-data
+- Body: FormData with 'file' field containing PDF or DOCX file
+
+**Response:**
+```json
+{
+  "success": true,
+  "text": "Extracted text content...",
+  "fileName": "document.pdf",
+  "fileSize": 12345,
+  "extractedLength": 500
+}
+```
+
+**Error Response:**
+```json
+{
+  "error": "Error message",
+  "details": "Additional error details"
+}
+```
 
 ### POST `/api/similarity/check`
 
@@ -120,11 +159,23 @@ The AI report includes:
 
 ## Usage
 
+### Method 1: Manual Text Entry
+
 1. Navigate to the landing page
 2. Enter your proposed research title
 3. Enter your research concept/abstract
 4. Click "Check Similarity"
 5. Review the similarity report in the dialog
+
+### Method 2: Document Upload
+
+1. Navigate to the landing page
+2. Enter your proposed research title
+3. Click "Upload PDF or DOCX" button
+4. Select your PDF or DOCX file (max 10MB)
+5. The text will be automatically extracted and filled in the concept field
+6. Click "Check Similarity"
+7. Review the similarity report in the dialog
 
 ## Notes
 
@@ -132,4 +183,7 @@ The AI report includes:
 - Similarity scores are percentages (0-100%)
 - Higher scores indicate more similarity
 - The AI report provides context and recommendations beyond raw scores
+- Supported file formats for upload: PDF (.pdf), Word Document (.docx)
+- Legacy Word format (.doc) is not supported - please convert to .docx or PDF
+- Maximum file size: 10MB
 
