@@ -11,6 +11,14 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
   BarChart,
   Bar,
   XAxis,
@@ -20,7 +28,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts"
-import { Loader2, ArrowLeft, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react"
+import { Loader2, ArrowLeft, TrendingUp, AlertTriangle, CheckCircle, Eye } from "lucide-react"
 import Link from "next/link"
 
 interface SimilarityResult {
@@ -52,6 +60,8 @@ export function SimilarityResults() {
   const [isLoading, setIsLoading] = useState(true)
   const [result, setResult] = useState<SimilarityResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [viewProposedConcept, setViewProposedConcept] = useState(false)
+  const [viewAbstractIndex, setViewAbstractIndex] = useState<number | null>(null)
 
   useEffect(() => {
     const checkSimilarity = async () => {
@@ -179,12 +189,28 @@ export function SimilarityResults() {
                 <p className="text-base">{result.proposedTitle}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-muted-foreground mb-1">
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">
                   Concept:
                 </h3>
-                <p className="text-base whitespace-pre-wrap">
-                  {result.proposedConcept}
-                </p>
+                <div className="p-3 bg-muted/50 border rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">
+                        {result.proposedConcept.length.toLocaleString()} characters
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setViewProposedConcept(true)}
+                      className="gap-2"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Content
+                    </Button>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -288,9 +314,17 @@ export function SimilarityResults() {
                                 )}
                               </div>
                             )}
-                            <p className="text-sm mt-2 line-clamp-3">
-                              {similarity.abstract}
-                            </p>
+                            <div className="mt-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setViewAbstractIndex(index)}
+                                className="gap-2"
+                              >
+                                <Eye className="h-4 w-4" />
+                                View Abstract
+                              </Button>
+                            </div>
                           </div>
                           <div className="text-right ml-4">
                             <div className="text-2xl font-bold">
@@ -743,6 +777,44 @@ export function SimilarityResults() {
           </div>
         </div>
       </main>
+
+      {/* Dialog for viewing proposed concept */}
+      <Dialog open={viewProposedConcept} onOpenChange={setViewProposedConcept}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Proposed Research Concept</DialogTitle>
+            <DialogDescription>
+              {result.proposedTitle} ({result.proposedConcept.length.toLocaleString()} characters)
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-[60vh] w-full rounded-md border p-4">
+            <div className="whitespace-pre-wrap text-sm">
+              {result.proposedConcept}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog for viewing existing research abstract */}
+      {viewAbstractIndex !== null && result.similarities[viewAbstractIndex] && (
+        <Dialog open={viewAbstractIndex !== null} onOpenChange={() => setViewAbstractIndex(null)}>
+          <DialogContent className="max-w-3xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle>{result.similarities[viewAbstractIndex].title}</DialogTitle>
+              <DialogDescription>
+                {result.similarities[viewAbstractIndex].year && `Year: ${result.similarities[viewAbstractIndex].year}`}
+                {result.similarities[viewAbstractIndex].course && ` • Course: ${result.similarities[viewAbstractIndex].course}`}
+                {` • ${result.similarities[viewAbstractIndex].abstract.length.toLocaleString()} characters`}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="h-[60vh] w-full rounded-md border p-4">
+              <div className="whitespace-pre-wrap text-sm">
+                {result.similarities[viewAbstractIndex].abstract}
+              </div>
+            </ScrollArea>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }

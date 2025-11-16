@@ -17,7 +17,9 @@ export async function POST(request: NextRequest) {
     const fileType = file.type
     const fileName = file.name.toLowerCase()
     
-    // Convert file to buffer
+    // IMPORTANT: File is only processed in memory for text extraction
+    // The file is NOT saved to disk or database - it's only scanned to read the content
+    // Convert file to buffer for in-memory processing
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
     
