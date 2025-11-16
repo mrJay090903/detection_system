@@ -22,6 +22,7 @@ import {
 } from "recharts"
 import { Loader2, ArrowLeft, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react"
 import Link from "next/link"
+import { UploadedFileViewDialog } from "@/components/uploaded-file-view-dialog"
 
 interface SimilarityResult {
   id?: string
@@ -52,6 +53,22 @@ export function SimilarityResults() {
   const [isLoading, setIsLoading] = useState(true)
   const [result, setResult] = useState<SimilarityResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<{
+    name: string
+    content: string
+  } | null>(null)
+
+  useEffect(() => {
+    // Check if there's an uploaded file in sessionStorage
+    const storedFile = sessionStorage.getItem('uploadedFile')
+    if (storedFile) {
+      try {
+        setUploadedFile(JSON.parse(storedFile))
+      } catch (e) {
+        console.error('Failed to parse uploaded file:', e)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const checkSimilarity = async () => {
@@ -182,9 +199,22 @@ export function SimilarityResults() {
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">
                   Concept:
                 </h3>
-                <p className="text-base whitespace-pre-wrap">
-                  {result.proposedConcept}
-                </p>
+                {uploadedFile ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Uploaded from: {uploadedFile.name}
+                    </p>
+                    <UploadedFileViewDialog
+                      fileName={uploadedFile.name}
+                      fileContent={uploadedFile.content}
+                      triggerText="View Uploaded Content"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-base whitespace-pre-wrap">
+                    {result.proposedConcept}
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

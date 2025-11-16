@@ -10,22 +10,49 @@ import LiquidEther from "@/components/ui/LiquidEther"
 import { LoginForm } from "@/components/ui/login-form"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { FileUpload } from "@/components/file-upload"
+import { UploadedFileViewDialog } from "@/components/uploaded-file-view-dialog"
+import { Separator } from "@/components/ui/separator"
 
 export default function Home() {
   const [proposedTitle, setProposedTitle] = useState("")
   const [proposedConcept, setProposedConcept] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [uploadedFile, setUploadedFile] = useState<{
+    name: string
+    content: string
+  } | null>(null)
+
+  const handleFileUpload = (file: File, extractedText: string) => {
+    setUploadedFile({
+      name: file.name,
+      content: extractedText,
+    })
+    // Don't auto-fill the concept field - user can view via button
+    // The extracted text will be used for TF-IDF analysis when they click Check Similarity
+    toast.success(`File "${file.name}" uploaded and ready for analysis`)
+  }
 
   const handleCheckSimilarity = () => {
-    if (!proposedTitle.trim() || !proposedConcept.trim()) {
+    // Use uploaded file content if available, otherwise use manual input
+    const conceptToAnalyze = uploadedFile?.content || proposedConcept
+    
+    if (!proposedTitle.trim() || !conceptToAnalyze.trim()) {
       toast.error("Please fill in both research title and concept")
       return
+    }
+
+    // Store uploaded file info in sessionStorage if available
+    if (uploadedFile) {
+      sessionStorage.setItem('uploadedFile', JSON.stringify(uploadedFile))
+    } else {
+      sessionStorage.removeItem('uploadedFile')
     }
 
     // Navigate to results page with query parameters
     const params = new URLSearchParams({
       title: proposedTitle.trim(),
-      concept: proposedConcept.trim(),
+      concept: conceptToAnalyze.trim(),
     })
     window.location.href = `/similarity-results?${params.toString()}`
   }
@@ -103,10 +130,36 @@ export default function Home() {
                 />
               </div>
 
+              <div className="flex items-center gap-4 my-4">
+                <Separator className="flex-1" />
+                <span className="text-sm text-muted-foreground">OR</span>
+                <Separator className="flex-1" />
+              </div>
+
+              <div>
+                <Label className="mb-2">Upload Research Document</Label>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Upload a file to extract text for TF-IDF analysis
+                </p>
+                <FileUpload
+                  onFileUpload={handleFileUpload}
+                  disabled={isLoading}
+                />
+                {uploadedFile && (
+                  <div className="mt-3">
+                    <UploadedFileViewDialog
+                      fileName={uploadedFile.name}
+                      fileContent={uploadedFile.content}
+                      triggerText="View Uploaded File"
+                    />
+                  </div>
+                )}
+              </div>
+
               <Button 
                 className="w-full" 
                 onClick={handleCheckSimilarity}
-                disabled={isLoading || !proposedTitle.trim() || !proposedConcept.trim()}
+                disabled={isLoading || !proposedTitle.trim() || (!proposedConcept.trim() && !uploadedFile)}
               >
                 {isLoading ? (
                   <>
