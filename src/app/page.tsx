@@ -44,7 +44,7 @@ export default function Home() {
         .trim()
       setProposedTitle(titleFromFile)
     }
-    
+      
     toast.success(`File "${file.name}" uploaded and text extracted successfully`)
   }
 
