@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
+// Configure longer timeout for AI processing
+export const maxDuration = 60 // 60 seconds max
+export const dynamic = 'force-dynamic'
+
 // Get semantic embeddings using Gemini
 async function getEmbedding(text: string, genAI: GoogleGenerativeAI): Promise<number[]> {
   try {
@@ -57,7 +61,7 @@ function cosineSimilarityEmbeddings(vec1: number[], vec2: number[]): number {
   return Math.max(0, Math.min(1, dotProduct / denominator))
 }
 
-// Generate comprehensive explanation for similarity
+// Generate comprehensive explanation for similarity using Python
 async function generateSimilarityExplanation(
   proposedTitle: string,
   proposedConcept: string,
@@ -68,69 +72,39 @@ async function generateSimilarityExplanation(
   genAI: GoogleGenerativeAI
 ): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
+    // Use Python script to call Gemini API
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const execAsync = promisify(exec)
     
-    const prompt = `You are a helpful research assistant. Explain in simple, easy-to-understand language why a proposed research is similar to an existing research. Use plain English, avoid jargon, and make it easy for anyone to understand.
-
-PROPOSED RESEARCH:
-Title: "${proposedTitle}"
-Concept/Abstract: "${proposedConcept}"
-
-EXISTING RESEARCH FROM DATABASE:
-Title: "${existingTitle}"
-Abstract: "${existingAbstract}"
-
-SIMILARITY SCORES:
-Lexical Similarity: ${(lexicalSim * 100).toFixed(2)}% (word-based matching)
-Semantic Similarity: ${(semanticSim * 100).toFixed(2)}% (meaning-based matching)
-
-IMPORTANT: Compare these two researches:
-1. Proposed Title: "${proposedTitle}" vs Existing Title: "${existingTitle}"
-2. Proposed Abstract: "${proposedConcept}" vs Existing Abstract: "${existingAbstract}"
-
-Write a SPECIFIC and DETAILED explanation that clearly explains WHY they are similar. Follow this EXACT format:
-
-**Explanation:** [Write a detailed paragraph starting with "Both studies share..."]
-
-FORMAT REQUIREMENTS:
-1. Start with: "Both studies share the same purpose of [EXACT purpose from both abstracts - quote specific phrases]"
-
-2. Then say: "The methods ([list EXACT method names from BOTH abstracts - e.g., BERT, cosine similarity, NLP, IoT, etc.]) and objectives ([list EXACT objectives from BOTH abstracts - e.g., academic integrity, plagiarism detection, etc.]) are nearly identical, despite different wording."
-
-3. Add 2-4 more sentences that are SPECIFIC about:
-   - What EXACT technologies appear in BOTH abstracts? (e.g., "both use BERT", "both employ cosine similarity", "both utilize NLP")
-   - What EXACT objectives/goals are mentioned in BOTH? (e.g., "both aim to detect plagiarism", "both focus on academic integrity")
-   - What EXACT problem domain do BOTH address? (e.g., "both target academic papers", "both focus on research similarity")
-   - What EXACT tools, frameworks, or approaches do BOTH mention? (List them specifically)
-
-EXAMPLE OF GOOD EXPLANATION:
-"Both studies share the same purpose of detecting plagiarism and text similarity in academic works using AI and NLP. The methods (BERT, cosine similarity) and objectives (academic integrity) are nearly identical, despite different wording. Both researches utilize transformer-based models like BERT to identify semantic similarities in academic papers. Both employ cosine similarity algorithms to measure text similarity. Both aim to maintain academic integrity and prevent plagiarism in academic writing. The target domain is identical - both focus on academic research papers and student theses."
-
-CRITICAL REQUIREMENTS:
-- Start with "Both studies share..." or "Both researches share..."
-- Mention EXACT technology names from BOTH abstracts (BERT, RoBERTa, cosine similarity, NLP, IoT, etc.)
-- Mention EXACT objectives from BOTH abstracts (academic integrity, plagiarism detection, etc.)
-- Quote or reference specific phrases that appear in BOTH abstracts
-- Be EXTREMELY SPECIFIC - don't say "both use AI" say "both use BERT and NLP"
-- Don't be vague - always mention exact names of technologies, methods, or objectives
-- List ALL technologies/methods that appear in BOTH abstracts
-- Make it clear WHY they are similar by citing exact, specific similarities
-- Write in simple, clear language but be very specific about details
-
-WRITING STYLE:
-- Use simple, everyday language - like explaining to a friend
-- Avoid academic jargon - say "they use the same method" not "they employ identical methodologies"
-- Use examples - "both mention BERT" instead of "both utilize transformer architectures"
-- Be direct - "These are very similar" not "There exists a high degree of similarity"
-- Keep sentences short and clear
-- Use bullet points or lists when helpful
-- Make it easy to understand - imagine explaining to someone who isn't a researcher`
-
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    return response.text()
+    const input = JSON.stringify({
+      action: 'explanation',
+      proposedTitle,
+      proposedConcept,
+      existingTitle,
+      existingAbstract,
+      lexicalSim: lexicalSim * 100,
+      semanticSim: semanticSim * 100
+    })
+    
+    const { stdout, stderr } = await execAsync(
+      `echo '${input.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`
+    )
+    
+    if (stderr) {
+      console.error('Python script stderr:', stderr)
+    }
+    
+    const result = JSON.parse(stdout)
+    
+    if (result.success) {
+      return result.explanation
+    } else {
+      throw new Error(result.error || 'Unknown error from Python script')
+    }
   } catch (error) {
-    console.error('Error generating explanation:', error)
+    console.error('Error calling Python Gemini API:', error)
+    
     // Deep comprehensive fallback explanation
     const avgSim = ((lexicalSim + semanticSim) / 2) * 100
     const isConceptual = semanticSim > lexicalSim + 0.15
@@ -139,65 +113,50 @@ WRITING STYLE:
     const semanticPercent = (semanticSim * 100).toFixed(1)
     
     if (avgSim >= 70) {
-      return `**Are the titles similar?** 
-Yes, the titles "${proposedTitle}" and "${existingTitle}" share similar words and talk about the same topic.
+      return `**How similar are they?**
+These two researches are very similar - almost like twins! They share ${avgSim.toFixed(0)}% similarity overall.
 
-**What problem are they solving?**
-Both researches are trying to solve the same problem. ${isConceptual ? `Even though they use different words, they mean the same thing - like saying "car" vs "automobile". The semantic similarity (${semanticPercent}%) is much higher than word similarity (${lexicalPercent}%), which means they have the same ideas even if written differently.` : isLexical ? `They use many of the same words (${lexicalPercent}% word similarity), showing they're talking about the same thing.` : `They are very similar in both words (${lexicalPercent}%) and meaning (${semanticPercent}%).`}
+**What are they both trying to do?**
+Both researches are trying to solve the same problem. ${isConceptual ? `They use different words to say it, but they mean the same thing - like saying "car" vs "automobile".` : `They even use many of the same exact words to describe it.`}
 
-**What methods do they use?**
-Both researches use similar technologies, tools, or methods to solve the problem.
+**How are they doing it?**
+Both use similar technologies, tools, or methods to solve the problem. They're taking the same approach.
 
-**What makes them similar?**
-- They share many of the same words and phrases
-- They use similar technologies or tools
-- They have the same goals or objectives
-- They solve the same problem in similar ways
+**Why should you care about this similarity?**
+Both of these researches are working on the same thing in the same way. ${isConceptual ? `Even though the words look different (word matching: ${lexicalPercent}%, meaning matching: ${semanticPercent}%), the ideas behind them are basically identical. Think of it like two people describing the same movie using different words - the story is still the same.` : `They use the same words (${lexicalPercent}% match) and have the same ideas (${semanticPercent}% match). This means they're not just in the same field - they're doing almost exactly the same thing.`} This is a really high level of similarity.
 
-**Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which means these two researches are very similar. ${isConceptual ? `Even though the words are different, the ideas are the same.` : `They use many of the same words and have similar ideas.`}
-
-**Bottom line**
-These researches are too similar - they might be copies or lack originality. You should review them carefully.`
+**What's the bottom line?**
+These are too similar - one might be copying the other or they lack originality. You should look at them carefully to make sure they're different enough.`
     } else if (avgSim >= 40) {
-      return `**Are the titles similar?**
-The titles "${proposedTitle}" and "${existingTitle}" share some similar words, but they might focus on slightly different things.
+      return `**How similar are they?**
+These researches are somewhat similar - like cousins rather than twins. They share ${avgSim.toFixed(0)}% similarity.
 
-**What problem are they solving?**
-${isConceptual ? `They might be solving related problems, but not exactly the same. The meaning similarity (${semanticPercent}%) is higher than word similarity (${lexicalPercent}%), so they have similar ideas but different wording.` : isLexical ? `They share some words (${lexicalPercent}% word similarity), which means they're in the same research area, but they might solve different problems.` : `They have some overlap in both words (${lexicalPercent}%) and meaning (${semanticPercent}%), but they're not identical.`}
+**What are they both trying to do?**
+${isConceptual ? `They're working on related problems, but not exactly the same thing. They have similar ideas but explain them differently.` : `They're in the same field and share some of the same goals, but they have different focuses.`}
 
-**What methods do they use?**
-They might use some similar tools or methods, but also have differences in their approach.
+**How are they doing it?**
+They might use some of the same tools or methods, but they also have their own unique approaches.
 
-**What makes them similar?**
-- They share some words or phrases
-- They might use some of the same technologies
-- They're in the same research area
-- But they have enough differences to be considered separate
+**Why should you care about this similarity?**
+Both of these researches are in the same area of study. ${isConceptual ? `The meaning similarity (${semanticPercent}%) is higher than word similarity (${lexicalPercent}%), which means they share similar concepts but describe them differently - like two recipes for similar dishes using different ingredients.` : `They share some common words (${lexicalPercent}%) and ideas (${semanticPercent}%), so they're working in the same neighborhood but on different streets.`} There's enough overlap that they're related, but enough difference that they're not the same.
 
-**Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which means they're somewhat similar but not too much. They're related but different enough.
-
-**Bottom line**
-These researches are somewhat similar but different enough. They're probably okay, but you should still review them to make sure they're original enough.`
+**What's the bottom line?**
+These are similar enough to be in the same field, but different enough to be separate works. They're probably okay, but double-check to make sure they're original enough.`
     } else {
-      return `**Are the titles similar?**
-The titles "${proposedTitle}" and "${existingTitle}" are different and talk about different topics.
+      return `**How similar are they?**
+These researches have low similarity at ${avgSim.toFixed(0)}%.
 
-**What problem are they solving?**
-They are solving different problems. ${isConceptual ? `Even though there might be a small connection in meaning (${semanticPercent}%), they are clearly different researches.` : `They don't share many words (${lexicalPercent}%) or similar meanings (${semanticPercent}%).`}
+**What are they both trying to do?**
+${isConceptual ? `They work on different problems with minimal conceptual overlap.` : `They address different topics and goals.`}
 
-**What methods do they use?**
-They use different methods, tools, or technologies to solve their problems.
+**How are they doing it?**
+Different methodologies and approaches are used.
 
-**What makes them similar?**
-Not much - they are different researches with different goals and methods.
+**Why should you care about this similarity?**
+${isConceptual ? `Small meaning overlap (${semanticPercent}%) with low word matching (${lexicalPercent}%) suggests minimal connection.` : `Both word matching (${lexicalPercent}%) and meaning matching (${semanticPercent}%) are low, indicating distinct research areas.`}
 
-**Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which is low. This means they are different researches.
-
-**Bottom line**
-These researches are different enough - they are original and don't overlap much.`
+**What's the bottom line?**
+The researches are sufficiently different and appear to be original works.`
     }
   }
 }
@@ -227,6 +186,7 @@ async function calculateCosineSimilarity(
   semanticSimilarity: number
   similarityType: 'Lexical' | 'Conceptual' | 'Both'
   explanation: string
+  verification?: string
 }>> {
   // Enhanced TF-IDF cosine similarity with improved preprocessing
   
@@ -463,9 +423,65 @@ async function calculateCosineSimilarity(
   const proposedTitleVec = calculateTfIdf(proposedTitle, allTitles)
   const proposedConceptVec = calculateTfIdf(proposedConcept, allAbstracts)
 
-  // Process all researches with both lexical and semantic similarity
+  // Process all researches with AI-based similarity calculation
   const results = await Promise.all(
     existingResearches.map(async (research, index) => {
+      // Try AI-based similarity first
+      let aiSimilarity = null
+      try {
+        const { exec } = await import('child_process')
+        const { promisify } = await import('util')
+        const execAsync = promisify(exec)
+        
+        const input = JSON.stringify({
+          action: 'calculate',
+          proposedTitle,
+          proposedConcept,
+          existingTitle: research.title,
+          existingAbstract: research.abstract
+        })
+        
+        const { stdout } = await execAsync(
+          `echo '${input.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`,
+          { timeout: 30000 } // 30 second timeout
+        )
+        
+        const result = JSON.parse(stdout)
+        if (result.success) {
+          aiSimilarity = {
+            titleSimilarity: result.titleSimilarity,
+            abstractSimilarity: result.abstractSimilarity,
+            overallSimilarity: result.overallSimilarity,
+            reasoning: result.reasoning
+          }
+        }
+      } catch (aiError) {
+        console.warn('AI similarity calculation failed, falling back to traditional method:', aiError)
+      }
+      
+      // If AI similarity succeeded, use it; otherwise fall back to traditional TF-IDF + embeddings
+      let combinedTitleSim, combinedAbstractSim, overallSim, lexicalSim, semanticSim, similarityType
+      
+      if (aiSimilarity) {
+        // Use AI-calculated similarity
+        combinedTitleSim = aiSimilarity.titleSimilarity
+        combinedAbstractSim = aiSimilarity.abstractSimilarity
+        overallSim = aiSimilarity.overallSimilarity
+        
+        // For backward compatibility, set lexical and semantic based on AI result
+        lexicalSim = overallSim * 0.4  // Approximate
+        semanticSim = overallSim * 0.6  // Approximate
+        
+        // Determine similarity type based on AI reasoning
+        if (overallSim > 0.7) {
+          similarityType = 'Both'
+        } else if (overallSim > 0.4) {
+          similarityType = 'Conceptual'
+        } else {
+          similarityType = 'Lexical'
+        }
+      } else {
+        // Fallback: Traditional lexical and semantic similarity calculation
       // Lexical similarity
       const existingTitleVec = calculateTfIdf(research.title, allTitles)
       const existingAbstractVec = calculateTfIdf(research.abstract, allAbstracts)
@@ -488,7 +504,7 @@ async function calculateCosineSimilarity(
       
       const enhancedTitleLexical = titleLexicalSim * 0.7 + titleOverlap * 0.3
       const enhancedAbstractLexical = abstractLexicalSim * 0.7 + abstractOverlap * 0.3
-      const lexicalSim = enhancedTitleLexical * 0.4 + enhancedAbstractLexical * 0.6
+      lexicalSim = enhancedTitleLexical * 0.4 + enhancedAbstractLexical * 0.6
 
       // Semantic similarity using embeddings
       let titleSemanticSim = 0
@@ -511,10 +527,19 @@ async function calculateCosineSimilarity(
 
       semanticSim = titleSemanticSim * 0.4 + abstractSemanticSim * 0.6
 
-      // Enhanced accuracy: Prioritize semantic similarity more (25% lexical, 75% semantic)
-      // This improves accuracy for detecting conceptual similarity even with different wording
-      const combinedTitleSim = enhancedTitleLexical * 0.25 + titleSemanticSim * 0.75
-      const combinedAbstractSim = enhancedAbstractLexical * 0.25 + abstractSemanticSim * 0.75
+      // Enhanced accuracy: Adjust weights based on whether semantic embeddings are available
+      let combinedTitleSim, combinedAbstractSim
+      
+      if (proposedTitleEmbedding.length > 0 && titleSemanticSim > 0) {
+        // Semantic embeddings available: Prioritize semantic similarity (30% lexical, 70% semantic)
+        combinedTitleSim = enhancedTitleLexical * 0.30 + titleSemanticSim * 0.70
+        combinedAbstractSim = enhancedAbstractLexical * 0.30 + abstractSemanticSim * 0.70
+      } else {
+        // Semantic embeddings unavailable: Use only lexical with improved accuracy
+        console.warn('Semantic embeddings unavailable, using enhanced lexical similarity only')
+        combinedTitleSim = enhancedTitleLexical
+        combinedAbstractSim = enhancedAbstractLexical
+      }
       
       // Boost overall similarity if both lexical and semantic are high (indicates strong match)
       let overallSim = combinedTitleSim * 0.4 + combinedAbstractSim * 0.6
@@ -530,7 +555,6 @@ async function calculateCosineSimilarity(
       }
 
       // Determine similarity type
-      let similarityType: 'Lexical' | 'Conceptual' | 'Both'
       if (lexicalSim > 0.5 && semanticSim > 0.5) {
         similarityType = 'Both'
       } else if (semanticSim > lexicalSim + 0.2) {
@@ -538,6 +562,7 @@ async function calculateCosineSimilarity(
       } else {
         similarityType = 'Lexical'
       }
+      } // End of fallback block
 
       // Generate explanation
       const explanation = await generateSimilarityExplanation(
@@ -545,10 +570,42 @@ async function calculateCosineSimilarity(
         proposedConcept,
         research.title,
         research.abstract,
-        lexicalSim,
-        semanticSim,
+        (lexicalSim || 0) * 100,
+        (semanticSim || 0) * 100,
         genAI
       )
+
+      // Verify similarity scores using AI
+      let verification = ''
+      try {
+        const { exec } = await import('child_process')
+        const { promisify } = await import('util')
+        const execAsync = promisify(exec)
+        
+        const verifyInput = JSON.stringify({
+          action: 'verify',
+          proposedTitle,
+          proposedConcept,
+          existingTitle: research.title,
+          existingAbstract: research.abstract,
+          titleSimilarity: combinedTitleSim * 100,
+          abstractSimilarity: combinedAbstractSim * 100,
+          overallSimilarity: overallSim * 100
+        })
+        
+        const { stdout } = await execAsync(
+          `echo '${verifyInput.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`,
+          { timeout: 30000 }
+        )
+        
+        const verifyResult = JSON.parse(stdout)
+        if (verifyResult.success) {
+          verification = verifyResult.verification
+        }
+      } catch (verifyError) {
+        console.error('Verification error:', verifyError)
+        // Continue without verification if it fails
+      }
 
       return {
         id: research.id,
@@ -559,10 +616,11 @@ async function calculateCosineSimilarity(
         titleSimilarity: Math.round(combinedTitleSim * 10000) / 10000,
         abstractSimilarity: Math.round(combinedAbstractSim * 10000) / 10000,
         overallSimilarity: Math.round(overallSim * 10000) / 10000,
-        lexicalSimilarity: Math.round(lexicalSim * 10000) / 10000,
-        semanticSimilarity: Math.round(semanticSim * 10000) / 10000,
-        similarityType,
+        lexicalSimilarity: Math.round((lexicalSim || 0) * 10000) / 10000,
+        semanticSimilarity: Math.round((semanticSim || 0) * 10000) / 10000,
+        similarityType: similarityType as 'Lexical' | 'Conceptual' | 'Both',
         explanation,
+        verification
       }
     })
   )
@@ -591,9 +649,6 @@ async function generateGeminiReport(
     console.error('GEMINI_API_KEY is missing from .env file')
     throw new Error('GEMINI_API_KEY is not set in environment variables. Please add it to your .env file.')
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
 
   // Get top 3 most similar researches
   const topSimilar = similarities.slice(0, 3)
@@ -630,37 +685,229 @@ Please generate a comprehensive similarity analysis report that includes:
 Format the report in a clear, professional manner suitable for academic review.`
 
   try {
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    return response.text()
+    // Use Python script to call Gemini API
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const execAsync = promisify(exec)
+    
+    const input = JSON.stringify({
+      action: 'report',
+      proposedTitle,
+      proposedConcept,
+      similarities: topSimilar
+    })
+    
+    const { stdout, stderr } = await execAsync(
+      `echo '${input.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`
+    )
+    
+    if (stderr) {
+      console.error('Python script stderr:', stderr)
+    }
+    
+    const result = JSON.parse(stdout)
+    
+    if (result.success) {
+      return result.report
+    } else {
+      throw new Error(result.error || 'Unknown error from Python script')
+    }
   } catch (error) {
-    console.error('Gemini API error:', error)
-    throw new Error('Failed to generate report from Gemini API')
+    console.error('Gemini API error details:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      fullError: error
+    })
+    // Return a fallback report instead of throwing
+    return `# Similarity Analysis Report
+
+## Proposed Research
+**Title:** ${proposedTitle}
+
+**Concept:** ${proposedConcept}
+
+## Top Similar Researches
+
+${topSimilar.map((r, i) => `
+### ${i + 1}. ${r.title}
+- **Year:** ${r.year || 'N/A'}
+- **Course:** ${r.course || 'N/A'}
+- **Overall Similarity:** ${(r.overallSimilarity * 100).toFixed(2)}%
+- **Title Similarity:** ${(r.titleSimilarity * 100).toFixed(2)}%
+- **Abstract Similarity:** ${(r.abstractSimilarity * 100).toFixed(2)}%
+
+**Abstract:** ${r.abstract}
+`).join('\n')}
+
+## Analysis Summary
+
+${topSimilar.length > 0 && topSimilar[0].overallSimilarity > 0.7 
+  ? '⚠️ **HIGH SIMILARITY DETECTED** - The proposed research shows high similarity with existing work. Consider revising to ensure originality.'
+  : topSimilar.length > 0 && topSimilar[0].overallSimilarity > 0.4
+  ? '⚡ **MODERATE SIMILARITY** - The proposed research has some overlap with existing work but maintains sufficient distinction.'
+  : '✅ **LOW SIMILARITY** - The proposed research appears to be sufficiently original and distinct from existing work.'}
+
+---
+*Note: AI report generation temporarily unavailable. Using fallback format.*`
   }
 }
 
+// AI-Powered Similarity Calculation using Python Gemini API
+async function calculateAISimilarity(
+  proposedTitle: string,
+  proposedConcept: string,
+  existingResearches: Array<{ 
+    id?: string
+    title: string
+    abstract: string
+    year?: number
+    course?: string
+  }>,
+  genAI: GoogleGenerativeAI
+): Promise<Array<{
+  id?: string
+  title: string
+  abstract: string
+  year?: number
+  course?: string
+  titleSimilarity: number
+  abstractSimilarity: number
+  overallSimilarity: number
+  lexicalSimilarity: number
+  semanticSimilarity: number
+  similarityType: 'Lexical' | 'Conceptual' | 'Both'
+  explanation: string
+  verification?: string
+}>> {
+  const results = []
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  console.log(`Calculating AI similarity for ${existingResearches.length} researches...`)
+  console.log(`Proposed concept length: ${proposedConcept.length} characters`)
+
+  // Process researches in batches of 3 with timeout
+  const BATCH_SIZE = 3
+  const TIMEOUT_MS = 30000 // 30 seconds per request (increased)
+
+  for (let i = 0; i < existingResearches.length; i += BATCH_SIZE) {
+    const batch = existingResearches.slice(i, i + BATCH_SIZE)
+    
+    const batchPromises = batch.map(async (existing) => {
+      try {
+        const input = JSON.stringify({
+          action: 'calculate',
+          proposedTitle,
+          proposedConcept: proposedConcept.substring(0, 3000), // Limit to 3000 chars for faster processing
+          existingTitle: existing.title,
+          existingAbstract: existing.abstract
+        })
+        
+        console.log(`⏳ Processing: "${existing.title.substring(0, 40)}..."`)
+        
+        // Execute Python script with timeout
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS)
+        })
+        
+        const execPromise = execAsync(
+          `echo '${input.replace(/'/g, "'\\''")}' | timeout 30 python3 /workspaces/detection_system/scripts/gemini_api.py`,
+          { maxBuffer: 1024 * 1024 * 10, timeout: TIMEOUT_MS }
+        )
+        
+        const { stdout, stderr } = await Promise.race([execPromise, timeoutPromise])
+        
+        if (stderr && !stderr.includes('injecting env')) {
+          console.error('Python script stderr:', stderr)
+        }
+        
+        const result = JSON.parse(stdout)
+        
+        if (result.success) {
+          // AI calculation succeeded - note: Python returns values as decimals (0-1.0)
+          const titleSim = result.titleSimilarity
+          const abstractSim = result.abstractSimilarity
+          const overallSim = result.overallSimilarity
+          
+          console.log(`✓ AI similarity for "${existing.title.substring(0, 50)}": ${(overallSim * 100).toFixed(1)}%`)
+          
+          return {
+            ...existing,
+            titleSimilarity: titleSim,
+            abstractSimilarity: abstractSim,
+            overallSimilarity: overallSim,
+            lexicalSimilarity: overallSim,
+            semanticSimilarity: overallSim,
+            similarityType: 'Both' as const,
+            explanation: result.reasoning || 'AI-powered similarity analysis',
+            verification: `AI Analysis: ${(overallSim * 100).toFixed(1)}% similarity detected`
+          }
+        } else {
+          throw new Error(result.error || 'AI calculation failed')
+        }
+      } catch (error) {
+        console.error(`✗ AI similarity failed for "${existing.title.substring(0, 30)}", using TF-IDF fallback:`, error instanceof Error ? error.message : 'Unknown error')
+        
+        // Fallback to TF-IDF method for this research
+        const tfidfResults = await calculateCosineSimilarity(
+          proposedTitle,
+          proposedConcept,
+          [existing],
+          genAI
+        )
+        
+        return tfidfResults[0] || null
+      }
+    })
+
+    // Wait for batch to complete
+    const batchResults = await Promise.all(batchPromises)
+    results.push(...batchResults.filter(r => r !== null))
+  }
+
+  // Sort by overall similarity (descending)
+  results.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
+
+  console.log(`AI similarity complete. Top result: ${results[0]?.overallSimilarity ? (results[0].overallSimilarity * 100).toFixed(1) + '%' : 'N/A'}`)
+
+  return results
+}
+
 export async function POST(request: NextRequest) {
+  console.log('=== Similarity Check API Started ===')
+  const startTime = Date.now()
+  
   try {
+    console.log('Parsing request body...')
     const { proposedTitle, proposedConcept } = await request.json()
 
     if (!proposedTitle || !proposedConcept) {
+      console.log('Missing required fields')
       return NextResponse.json(
         { error: 'Proposed title and concept are required' },
         { status: 400 }
       )
     }
 
+    console.log('Request validated:', {
+      titleLength: proposedTitle.length,
+      conceptLength: proposedConcept.length
+    })
+
     // Get Supabase client (using public client for similarity check - no auth required)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     
     if (!supabaseUrl || !supabaseKey) {
+      console.error('Supabase configuration missing')
       return NextResponse.json(
         { error: 'Supabase configuration is missing' },
         { status: 500 }
       )
     }
 
+    console.log('Creating Supabase client...')
     const supabase = createClient(supabaseUrl, supabaseKey)
 
     // Fetch all existing researches from the database
@@ -736,17 +983,90 @@ export async function POST(request: NextRequest) {
     }
     const genAI = new GoogleGenerativeAI(apiKey)
 
-    // Calculate similarity (lexical + semantic)
-    console.log('Calculating similarity (lexical + semantic)...')
+    // Calculate similarity using hybrid approach: TF-IDF first, then AI for top matches
+    console.log('Calculating TF-IDF similarity for all researches...')
     console.log('Proposed title:', proposedTitle)
     console.log('Proposed concept length:', proposedConcept.length)
     
-    const similarities = await calculateCosineSimilarity(
+    // First pass: Fast TF-IDF similarity for all researches
+    const tfidfSimilarities = await calculateCosineSimilarity(
       proposedTitle,
       proposedConcept,
       existingResearches,
       genAI
     )
+    
+    console.log(`TF-IDF complete. Found ${tfidfSimilarities.length} comparisons.`)
+    
+    // Second pass: Use AI for ALL matches (simplified approach)
+    console.log('Running AI analysis on all matches (using fast flash-lite model)...')
+    
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const fs = await import('fs')
+    const path = await import('path')
+    const os = await import('os')
+    const execAsync = promisify(exec)
+    
+    const aiEnhancedResults = await Promise.all(
+      tfidfSimilarities.map(async (match, index) => {
+        try {
+          // Use temp file to avoid shell escaping issues
+          const tempDir = os.tmpdir()
+          const inputFile = path.join(tempDir, `ai-calc-${Date.now()}-${index}.json`)
+          
+          const input = {
+            action: 'calculate',
+            proposedTitle,
+            proposedConcept: proposedConcept.substring(0, 5000),
+            existingTitle: match.title,
+            existingAbstract: match.abstract
+          }
+          
+          fs.writeFileSync(inputFile, JSON.stringify(input))
+          
+          console.log(`⏳ AI analyzing ${index + 1}/${tfidfSimilarities.length}: "${match.title.substring(0, 40)}..."`)
+          
+          const { stdout, stderr } = await execAsync(
+            `timeout 25 python3 /workspaces/detection_system/scripts/gemini_api.py < "${inputFile}"`,
+            { maxBuffer: 1024 * 1024, timeout: 25000 }
+          )
+          
+          // Cleanup
+          try { fs.unlinkSync(inputFile) } catch {}
+          
+          if (stderr && !stderr.includes('injecting env')) {
+            console.error(`Stderr for ${match.title.substring(0, 30)}:`, stderr)
+          }
+          
+          const result = JSON.parse(stdout)
+          
+          if (result.success && result.overallSimilarity != null) {
+            console.log(`✓ AI: ${(result.overallSimilarity * 100).toFixed(1)}%`)
+            return {
+              ...match,
+              titleSimilarity: result.titleSimilarity || match.titleSimilarity,
+              abstractSimilarity: result.abstractSimilarity || match.abstractSimilarity,
+              overallSimilarity: result.overallSimilarity,
+              explanation: result.reasoning || match.explanation,
+              verification: `AI Analysis: ${(result.overallSimilarity * 100).toFixed(1)}% similarity`
+            }
+          } else {
+            console.log(`⚠ AI returned invalid result, using TF-IDF`)
+            throw new Error('Invalid AI result')
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+          console.log(`✗ AI failed for match ${index + 1}: ${errorMsg}, using TF-IDF`)
+        }
+        
+        // Return original TF-IDF result if AI fails
+        return match
+      })
+    )
+    
+    // Sort by overall similarity
+    const similarities = aiEnhancedResults.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
 
     console.log(`Similarity calculation complete. Found ${similarities.length} comparisons.`)
     
@@ -764,11 +1084,61 @@ export async function POST(request: NextRequest) {
     // Generate report using Gemini API
     let report = ''
     try {
-      report = await generateGeminiReport(
+      // Use Node.js fs to write input to a temp file instead of echo
+      const fs = await import('fs')
+      const path = await import('path')
+      const os = await import('os')
+      
+      const tempDir = os.tmpdir()
+      const inputFile = path.join(tempDir, `report-input-${Date.now()}.json`)
+      
+      const reportInput = {
+        action: 'report',
         proposedTitle,
         proposedConcept,
-        similarities
+        similarities: similarities.slice(0, 3).map(s => ({
+          id: s.id,
+          title: s.title,
+          abstract: s.abstract,
+          year: s.year,
+          course: s.course,
+          titleSimilarity: s.titleSimilarity,
+          abstractSimilarity: s.abstractSimilarity,
+          overallSimilarity: s.overallSimilarity,
+          lexicalSimilarity: s.lexicalSimilarity,
+          semanticSimilarity: s.semanticSimilarity,
+          similarityType: s.similarityType,
+          explanation: s.explanation,
+          verification: s.verification
+        }))
+      }
+      
+      // Write to temp file
+      fs.writeFileSync(inputFile, JSON.stringify(reportInput))
+      
+      const { exec } = await import('child_process')
+      const { promisify } = await import('util')
+      const execAsync = promisify(exec)
+      
+      const { stdout: reportOutput } = await execAsync(
+        `python3 /workspaces/detection_system/scripts/gemini_api.py < "${inputFile}"`,
+        { maxBuffer: 1024 * 1024 * 10, timeout: 30000 }
       )
+      
+      // Clean up temp file
+      try {
+        fs.unlinkSync(inputFile)
+      } catch (cleanupError) {
+        console.error('Failed to cleanup temp file:', cleanupError)
+      }
+      
+      const reportResult = JSON.parse(reportOutput)
+      
+      if (reportResult.success) {
+        report = reportResult.report
+      } else {
+        throw new Error(reportResult.error || 'Report generation failed')
+      }
     } catch (geminiError) {
       console.error('Gemini error:', geminiError)
       // Return results even if Gemini fails
@@ -794,11 +1164,23 @@ export async function POST(request: NextRequest) {
       totalComparisons: similarities.length,
     })
   } catch (error) {
-    console.error('Similarity check error:', error)
+    const elapsed = Date.now() - startTime
+    console.error('=== Similarity Check API Error ===')
+    console.error('Error after', elapsed, 'ms:', error)
+    console.error('Stack:', error instanceof Error ? error.stack : 'No stack')
+    
     return NextResponse.json(
-      { error: 'Failed to check similarity', details: String(error) },
+      { 
+        success: false,
+        error: 'Failed to check similarity', 
+        details: error instanceof Error ? error.message : String(error),
+        elapsed: `${elapsed}ms`
+      },
       { status: 500 }
     )
+  } finally {
+    const elapsed = Date.now() - startTime
+    console.log(`=== Similarity Check API Complete in ${elapsed}ms ===`)
   }
 }
 

@@ -28,6 +28,8 @@ export function FileUpload({ onFileUpload, disabled }: FileUploadProps) {
 
     setUploadedFile(file)
     setIsProcessing(true)
+    
+    toast.loading(`Processing ${file.name}...`, { id: 'file-upload' })
 
     try {
       const formData = new FormData()
@@ -39,14 +41,34 @@ export function FileUpload({ onFileUpload, disabled }: FileUploadProps) {
       })
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Unknown error" }))
-        console.error("API Error:", errorData)
-        throw new Error(errorData.error || "Failed to extract text from file")
+        let errorMessage = "Failed to extract text from file"
+        try {
+          const responseText = await response.text()
+          console.log("API Response Text:", responseText)
+          
+          if (responseText) {
+            try {
+              const errorData = JSON.parse(responseText)
+              console.log("Parsed error data:", errorData)
+              errorMessage = errorData.error || errorMessage
+            } catch (jsonError) {
+              console.error("Response is not JSON:", responseText)
+              errorMessage = responseText.substring(0, 200) // Show first 200 chars
+            }
+          } else {
+            errorMessage = `Server returned empty response (${response.status})`
+          }
+        } catch (parseError) {
+          console.error("Failed to read error response:", parseError)
+          errorMessage = `Server error (${response.status}): ${response.statusText}`
+        }
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
       
       if (data.success) {
+        toast.success(`Successfully extracted text from ${file.name}`, { id: 'file-upload' })
         onFileUpload(file, data.text)
       } else {
         throw new Error(data.error || "Failed to process file")
@@ -54,7 +76,7 @@ export function FileUpload({ onFileUpload, disabled }: FileUploadProps) {
     } catch (error) {
       console.error("Error processing file:", error)
       const errorMessage = error instanceof Error ? error.message : "Failed to process file"
-      toast.error(errorMessage)
+      toast.error(errorMessage, { id: 'file-upload' })
       setUploadedFile(null)
     } finally {
       setIsProcessing(false)

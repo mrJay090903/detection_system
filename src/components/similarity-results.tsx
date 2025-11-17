@@ -11,6 +11,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   BarChart,
   Bar,
   XAxis,
@@ -37,6 +44,7 @@ interface SimilarityResult {
   semanticSimilarity?: number
   similarityType?: 'Lexical' | 'Conceptual' | 'Both'
   explanation?: string
+  verification?: string
 }
 
 interface SimilarityResponse {
@@ -57,6 +65,8 @@ export function SimilarityResults() {
     name: string
     content: string
   } | null>(null)
+  const [selectedVerification, setSelectedVerification] = useState<string | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   useEffect(() => {
     // Check if there's an uploaded file in sessionStorage
@@ -93,11 +103,19 @@ export function SimilarityResults() {
           }),
         })
 
-        const data = await response.json()
-
         if (!response.ok) {
-          throw new Error(data.error || "Failed to check similarity")
+          let errorMessage = "Failed to check similarity"
+          try {
+            const data = await response.json()
+            errorMessage = data.error || errorMessage
+          } catch (parseError) {
+            console.error("Failed to parse error response:", parseError)
+            errorMessage = `Server error (${response.status}): ${response.statusText}`
+          }
+          throw new Error(errorMessage)
         }
+
+        const data = await response.json()
 
         if (data.success) {
           setResult(data)
@@ -211,74 +229,28 @@ export function SimilarityResults() {
                     />
                   </div>
                 ) : (
-                  <p className="text-base whitespace-pre-wrap">
-                    {result.proposedConcept}
-                  </p>
+                  <div className="max-h-60 overflow-y-auto border rounded-md p-3 bg-muted/30">
+                    <p className="text-sm whitespace-pre-wrap">
+                      {result.proposedConcept}
+                    </p>
+                  </div>
                 )}
               </div>
             </CardContent>
           </Card>
 
-              {/* Similarity Graph */}
-              {result.similarities.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top 3 Similarity Percentage Graph</CardTitle>
-                    <CardDescription>
-                      Visual representation of similarity scores
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <BarChart
-                        data={result.similarities.slice(0, 3).map((s, i) => ({
-                          name: `#${i + 1}`,
-                          title: s.title.substring(0, 30) + (s.title.length > 30 ? '...' : ''),
-                          overall: (s.overallSimilarity * 100).toFixed(1),
-                          titleSim: (s.titleSimilarity * 100).toFixed(1),
-                          abstractSim: (s.abstractSimilarity * 100).toFixed(1),
-                        }))}
-                        margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="name"
-                          angle={-45}
-                          textAnchor="end"
-                          height={80}
-                          tick={{ fontSize: 12 }}
-                        />
-                        <YAxis
-                          label={{ value: 'Similarity (%)', angle: -90, position: 'insideLeft' }}
-                          domain={[0, 100]}
-                          tick={{ fontSize: 12 }}
-                        />
-                        <Tooltip
-                          formatter={(value: number) => `${value}%`}
-                          contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
-                        />
-                        <Legend />
-                        <Bar dataKey="overall" fill="#0088FE" name="Overall Similarity" />
-                        <Bar dataKey="titleSim" fill="#00C49F" name="Title Similarity" />
-                        <Bar dataKey="abstractSim" fill="#FFBB28" name="Abstract Similarity" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              )}
-
               {/* Similarity Results */}
-              {result.similarities.length > 0 ? (
+              {result.similarities.length > 0 && result.similarities[0].overallSimilarity >= 0.20 ? (
                 <Card>
                   <CardHeader>
                     <CardTitle>Top 3 Similarity Results</CardTitle>
                     <CardDescription>
-                      Top {result.similarities.length} most similar researches from database
+                      Top similar researches from database (showing matches above 20%)
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                  {result.similarities.map((similarity, index) => {
+                  {result.similarities.slice(0, 3).filter(s => s.overallSimilarity >= 0.20).map((similarity, index) => {
                     const overallPercent = similarity.overallSimilarity * 100
                     const riskLevel =
                       overallPercent >= 70
@@ -324,7 +296,7 @@ export function SimilarityResults() {
                           </div>
                           <div className="text-right ml-4">
                             <div className="text-2xl font-bold">
-                              {overallPercent.toFixed(2)}%
+                              {overallPercent.toFixed(1)}%
                             </div>
                             <div className="text-xs text-muted-foreground mb-1">
                               Overall Similarity
@@ -340,6 +312,27 @@ export function SimilarityResults() {
                             >
                               {riskLevel} Risk
                             </div>
+                            
+                            {/* AI Analysis Button */}
+                            {similarity.verification && (
+                              <button
+                                onClick={() => {
+                                  setSelectedVerification(similarity.verification || null)
+                                  setIsModalOpen(true)
+                                }}
+                                className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-lg font-medium text-xs transition-all shadow-md hover:shadow-lg"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M12 8V4H8"/>
+                                  <rect width="16" height="12" x="4" y="8" rx="2"/>
+                                  <path d="M2 14h2"/>
+                                  <path d="M20 14h2"/>
+                                  <path d="M15 13v2"/>
+                                  <path d="M9 13v2"/>
+                                </svg>
+                                View AI Analysis
+                              </button>
+                            )}
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t">
@@ -412,214 +405,6 @@ export function SimilarityResults() {
                             </div>
                           </div>
                         )}
-                        
-                        {/* Explanation - Why is this similar? */}
-                        <div className="mt-4 pt-4 border-t">
-                          <div className="flex items-center gap-2 mb-4">
-                            <div className="p-2 bg-primary/10 rounded-lg">
-                              <svg 
-                                xmlns="http://www.w3.org/2000/svg" 
-                                width="20" 
-                                height="20" 
-                                viewBox="0 0 24 24" 
-                                fill="none" 
-                                stroke="currentColor" 
-                                strokeWidth="2" 
-                                strokeLinecap="round" 
-                                strokeLinejoin="round"
-                                className="text-primary"
-                              >
-                                <circle cx="12" cy="12" r="10"/>
-                                <path d="M12 16v-4"/>
-                                <path d="M12 8h.01"/>
-                              </svg>
-                            </div>
-                            <h5 className="text-base font-bold text-foreground">
-                              Why is this similar?
-                            </h5>
-                          </div>
-                          {similarity.explanation ? (
-                            <div className="space-y-4">
-                              {similarity.explanation.split('\n').map((paragraph, idx) => {
-                                const trimmed = paragraph.trim()
-                                if (!trimmed) return null
-                                
-                                // Handle markdown-style bold headers (e.g., **Explanation:** or **Are the titles similar?**)
-                                const boldMatch = trimmed.match(/^\*\*(.+?)\*\*(.*)$/)
-                                if (boldMatch) {
-                                  const header = boldMatch[1].replace(/:/g, '')
-                                  let content = boldMatch[2].trim()
-                                  
-                                  // Highlight specific technologies, methods, and objectives in content
-                                  const highlightSpecificTerms = (text: string) => {
-                                    // Common technology and method terms
-                                    const techTerms = [
-                                      'BERT', 'RoBERTa', 'GPT', 'NLP', 'AI', 'IoT', 'blockchain', 
-                                      'cosine similarity', 'TF-IDF', 'machine learning', 'deep learning',
-                                      'transformer', 'neural network', 'Arduino', 'Raspberry Pi',
-                                      'academic integrity', 'plagiarism detection', 'text similarity',
-                                      'semantic analysis', 'embedding', 'vectorization'
-                                    ]
-                                    let highlighted = text
-                                    techTerms.forEach(term => {
-                                      const regex = new RegExp(`\b${term.replace(/[.*+?^${}()|[\\]/g, '\$&')}\b`, 'gi')
-                                      highlighted = highlighted.replace(regex, (match) => 
-                                        `<span class="font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded">${match}</span>`
-                                      )
-                                    })
-                                    return highlighted
-                                  }
-                                  
-                                  if (content) {
-                                    content = highlightSpecificTerms(content)
-                                  }
-                                  
-                                  // Check if this is the main explanation section
-                                  const isExplanation = header.toLowerCase().includes('explanation')
-                                  
-                                  // Get icon based on header content
-                                  const getIcon = (headerText: string) => {
-                                    if (headerText.toLowerCase().includes('explanation')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                                          <path d="M13 8H8"/>
-                                          <path d="M17 12H8"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('title')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('problem')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <circle cx="12" cy="12" r="10"/>
-                                          <path d="M12 16v-4"/>
-                                          <path d="M12 8h.01"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('method')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('makes') || headerText.toLowerCase().includes('similar')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('why')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                                          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-                                          <line x1="12" y1="22.08" x2="12" y2="12"/>
-                                        </svg>
-                                      )
-                                    }
-                                    if (headerText.toLowerCase().includes('bottom') || headerText.toLowerCase().includes('line')) {
-                                      return (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                                        </svg>
-                                      )
-                                    }
-                                    return (
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 16v-4"/>
-                                        <path d="M12 8h.01"/>
-                                      </svg>
-                                    )
-                                  }
-                                  
-                                  const isBottomLine = header.toLowerCase().includes('bottom') || header.toLowerCase().includes('line')
-                                  
-                                  return (
-                                    <div 
-                                      key={idx} 
-                                      className={`${isExplanation ? 'bg-primary/5 border-l-4 border-l-primary' : isBottomLine ? 'bg-primary/5 border-l-4 border-l-primary' : 'bg-card'} rounded-lg p-4 border shadow-sm`}
-                                    >
-                                      <div className="flex items-start gap-3 mb-2">
-                                        <div className={`p-1.5 rounded-md ${isExplanation || isBottomLine ? 'bg-primary/10' : 'bg-muted'}`}>
-                                          {getIcon(header)}
-                                        </div>
-                                        <h6 className={`font-bold text-foreground ${isExplanation || isBottomLine ? 'text-base' : 'text-sm'} flex-1`}>
-                                          {header}
-                                        </h6>
-                                      </div>
-                                      {content && (
-                                        <div className={isExplanation ? 'mt-3' : 'ml-11'}>
-                                          {content.includes('•') || content.includes('-') ? (
-                                            <ul className="space-y-2 text-sm text-foreground/90 leading-relaxed">
-                                              {content.split(/[•-]/).filter(item => item.trim()).map((item, i) => (
-                                                <li key={i} className="flex items-start gap-2">
-                                                  <span className="text-primary mt-1.5 shrink-0">•</span>
-                                                  <span dangerouslySetInnerHTML={{ __html: item.trim() }} />
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <p 
-                                              className={`text-sm text-foreground/90 leading-relaxed ${isExplanation ? 'text-base' : ''}`}
-                                              dangerouslySetInnerHTML={{ __html: content }}
-                                            />
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )
-                                }
-                                
-                                // Regular paragraph
-                                return (
-                                  <div key={idx} className="bg-card rounded-lg p-3 border">
-                                    <p className="text-sm text-foreground/90 leading-relaxed">
-                                      {trimmed}
-                                    </p>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="bg-card rounded-lg p-4 border shadow-sm">
-                                <div className="flex items-start gap-3 mb-2">
-                                  <div className="p-1.5 rounded-md bg-muted">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <circle cx="12" cy="12" r="10"/>
-                                      <path d="M12 16v-4"/>
-                                      <path d="M12 8h.01"/>
-                                    </svg>
-                                  </div>
-                                  <h6 className="font-bold text-sm text-foreground flex-1">
-                                    {similarity.similarityType === 'Conceptual' ? 'Conceptual Similarity' : similarity.similarityType === 'Lexical' ? 'Word-Based Similarity' : 'Both Types of Similarity'}
-                                  </h6>
-                                </div>
-                                <div className="ml-11 space-y-2">
-                                  <p className="text-sm text-foreground/90 leading-relaxed">
-                                    {similarity.similarityType === 'Conceptual' 
-                                      ? `These researches share similar core concepts and objectives, even though they use different wording. The semantic similarity (${similarity.semanticSimilarity ? (similarity.semanticSimilarity * 100).toFixed(1) : 'N/A'}%) being higher than lexical similarity (${similarity.lexicalSimilarity ? (similarity.lexicalSimilarity * 100).toFixed(1) : 'N/A'}%) indicates they address the same fundamental research problem or use similar methodologies despite different terminology.`
-                                      : similarity.similarityType === 'Lexical'
-                                      ? `These researches use similar words and phrases, indicating potential overlap in terminology and key concepts. The lexical similarity (${similarity.lexicalSimilarity ? (similarity.lexicalSimilarity * 100).toFixed(1) : 'N/A'}%) shows significant word overlap.`
-                                      : `These researches are similar both in wording and conceptual meaning, suggesting significant overlap in research focus and methodology. Both lexical (${similarity.lexicalSimilarity ? (similarity.lexicalSimilarity * 100).toFixed(1) : 'N/A'}%) and semantic (${similarity.semanticSimilarity ? (similarity.semanticSimilarity * 100).toFixed(1) : 'N/A'}%) similarities are high.`
-                                    }
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
                       </div>
                     )
                   })}
@@ -627,9 +412,31 @@ export function SimilarityResults() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                No similar researches found in the database.
+            <Card className="border-green-200 bg-gradient-to-br from-green-50 to-emerald-50">
+              <CardContent className="py-12">
+                <div className="text-center space-y-4">
+                  <div className="flex justify-center">
+                    <div className="rounded-full bg-green-100 p-4">
+                      <CheckCircle className="h-16 w-16 text-green-600" />
+                    </div>
+                  </div>
+                  <h3 className="text-2xl font-bold text-green-800">
+                    🎉 Congratulations!
+                  </h3>
+                  <p className="text-lg text-green-700 max-w-md mx-auto">
+                    Your research appears to be <span className="font-bold">unique</span>! No significant similarities found in our database.
+                  </p>
+                  <p className="text-sm text-green-600">
+                    All comparisons showed less than 20% similarity.
+                  </p>
+                  <div className="pt-4">
+                    <Link href="/">
+                      <Button className="bg-green-600 hover:bg-green-700">
+                        Check Another Research
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -649,13 +456,53 @@ export function SimilarityResults() {
 
             {/* Right Column - Summary Panel */}
             <div className="lg:col-span-1 space-y-6">
-              {/* Summary Statistics */}
-              <Card className="sticky top-24">
+              {/* Combined Summary and Graph */}
+              <Card>
                 <CardHeader>
                   <CardTitle>Summary</CardTitle>
                   <CardDescription>Quick overview</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Similarity Graph */}
+                  {result.similarities.length > 0 && result.similarities[0].overallSimilarity >= 0.20 && (
+                    <div className="pb-4 border-b">
+                      <h3 className="text-sm font-medium mb-3">Top 3 Similarity Graph</h3>
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart
+                          data={result.similarities.slice(0, 3).filter(s => s.overallSimilarity >= 0.20).map((s, i) => ({
+                            name: `#${i + 1}`,
+                            title: s.title.substring(0, 20) + (s.title.length > 20 ? '...' : ''),
+                            overall: (s.overallSimilarity * 100).toFixed(1),
+                            titleSim: (s.titleSimilarity * 100).toFixed(1),
+                            abstractSim: (s.abstractSimilarity * 100).toFixed(1),
+                          }))}
+                          margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis
+                            dataKey="name"
+                            angle={-45}
+                            textAnchor="end"
+                            height={60}
+                            tick={{ fontSize: 11 }}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 11 }}
+                            domain={[0, 100]}
+                          />
+                          <Tooltip
+                            formatter={(value: number) => `${value}%`}
+                            contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', fontSize: '12px' }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '11px' }} />
+                          <Bar dataKey="overall" fill="#0088FE" name="Overall" />
+                          <Bar dataKey="titleSim" fill="#00C49F" name="Title" />
+                          <Bar dataKey="abstractSim" fill="#FFBB28" name="Concept" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                  
                   {/* Total Comparisons */}
                   <div className="p-3 bg-muted/50 rounded-lg">
                     <div className="text-sm text-muted-foreground mb-1">
@@ -735,35 +582,6 @@ export function SimilarityResults() {
                       </div>
                     </div>
                   )}
-
-                  {/* Similarity Breakdown */}
-                  {result.similarities.length > 0 && (
-                    <div className="space-y-2 pt-2 border-t">
-                      <div className="text-sm font-medium mb-2">Breakdown</div>
-                      <div className="space-y-1 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Avg Title Similarity:</span>
-                          <span className="font-medium">
-                            {( 
-                              result.similarities.reduce((sum, s) => sum + s.titleSimilarity, 0) / 
-                              result.similarities.length * 
-                              100
-                            ).toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Avg Abstract Similarity:</span>
-                          <span className="font-medium">
-                            {( 
-                              result.similarities.reduce((sum, s) => sum + s.abstractSimilarity, 0) / 
-                              result.similarities.length * 
-                              100
-                            ).toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
 
@@ -773,6 +591,158 @@ export function SimilarityResults() {
           </div>
         </div>
       </main>
+
+      {/* AI Analysis Modal */}
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3 text-2xl">
+              <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 8V4H8"/>
+                  <rect width="16" height="12" x="4" y="8" rx="2"/>
+                  <path d="M2 14h2"/>
+                  <path d="M20 14h2"/>
+                  <path d="M15 13v2"/>
+                  <path d="M9 13v2"/>
+                </svg>
+              </div>
+              AI Similarity Analysis
+            </DialogTitle>
+            <DialogDescription>
+              Computer verified and analyzed the similarity scores
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedVerification && (
+            <div className="space-y-4 mt-4">
+              {(() => {
+                const sections = selectedVerification.split('\n\n')
+                const parsedSections: {color: string, title: string, content: string, isWhy?: boolean}[] = []
+                
+                sections.forEach(section => {
+                  const trimmed = section.trim()
+                  if (!trimmed || trimmed.includes('===')) return
+                  
+                  if (trimmed.toLowerCase().includes('system score')) {
+                    parsedSections.push({
+                      color: 'blue',
+                      title: '📊 What the Computer Calculated',
+                      content: trimmed.replace(/^[^:]+:\s*/i, '')
+                    })
+                  } else if (trimmed.toLowerCase().includes('ai evaluation') || trimmed.toLowerCase().includes('ai accuracy')) {
+                    parsedSections.push({
+                      color: 'purple',
+                      title: '🤖 AI Says',
+                      content: trimmed.replace(/^[^:]+:\s*/i, '')
+                    })
+                  } else if (trimmed.toLowerCase().includes('corrected')) {
+                    parsedSections.push({
+                      color: 'green',
+                      title: '✅ Corrected Score',
+                      content: trimmed.replace(/^[^:]+:\s*/i, '')
+                    })
+                  } else if (trimmed.toLowerCase().includes('reasoning')) {
+                    parsedSections.push({
+                      color: 'orange',
+                      title: '💡 Why?',
+                      content: trimmed.replace(/^[^:]+:\s*/i, ''),
+                      isWhy: true
+                    })
+                  } else if (trimmed.toLowerCase().includes('final')) {
+                    parsedSections.push({
+                      color: 'pink',
+                      title: '🎯 Final Answer',
+                      content: trimmed.replace(/^[^:]+:\s*/i, '')
+                    })
+                  }
+                })
+                
+                return parsedSections.map((section, idx) => (
+                  <div key={idx} className="bg-white dark:bg-gray-900 rounded-2xl border-2 shadow-lg overflow-hidden">
+                    <div className={`px-6 py-4 bg-gradient-to-r ${
+                      section.color === 'blue' ? 'from-blue-500/10 to-blue-600/5' :
+                      section.color === 'purple' ? 'from-purple-500/10 to-purple-600/5' :
+                      section.color === 'green' ? 'from-green-500/10 to-green-600/5' :
+                      section.color === 'orange' ? 'from-orange-500/10 to-orange-600/5' :
+                      'from-pink-500/10 to-pink-600/5'
+                    } border-b-2`}>
+                      <h4 className="text-lg font-bold text-foreground">{section.title}</h4>
+                    </div>
+                    
+                    <div className="p-6">
+                      <div className="space-y-3">
+                        {section.content.split('\n').map((line, lineIdx) => {
+                          const trimmedLine = line.trim()
+                          if (!trimmedLine) return null
+                          
+                          if (trimmedLine.startsWith('-') || trimmedLine.startsWith('*')) {
+                            const text = trimmedLine.substring(1).trim()
+                            const boldMatch = text.match(/^\*\*(.+?)\*\*(.*)$/)
+                            
+                            if (boldMatch) {
+                              const label = boldMatch[1].replace(':', '')
+                              const content = boldMatch[2].trim()
+                              
+                              return (
+                                <div key={lineIdx} className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-xl p-4 border-l-4 border-orange-400">
+                                  <div className="flex items-start gap-3">
+                                    <span className="text-2xl flex-shrink-0">
+                                      {label.toLowerCase().includes('title') ? '📝' : '📄'}
+                                    </span>
+                                    <div className="flex-1">
+                                      <div className="font-bold text-foreground mb-2 text-base">{label}</div>
+                                      <div className="text-sm text-foreground/80 leading-relaxed">{content}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            }
+                            
+                            const parts = text.split(':')
+                            return (
+                              <div key={lineIdx} className="flex items-start gap-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+                                <span className="text-2xl flex-shrink-0 mt-0.5">
+                                  {text.toLowerCase().includes('title') ? '📝' :
+                                   text.toLowerCase().includes('abstract') || text.toLowerCase().includes('concept') ? '📄' :
+                                   text.toLowerCase().includes('overall') ? '🎯' : '📊'}
+                                </span>
+                                <div className="flex-1">
+                                  {parts.length > 1 ? (
+                                    <>
+                                      <div className="font-semibold text-foreground mb-1">{parts[0]}</div>
+                                      <div className="text-2xl font-bold text-primary">{parts[1].trim()}</div>
+                                    </>
+                                  ) : (
+                                    <div className="text-foreground leading-relaxed">{text}</div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          }
+                          
+                          return (
+                            <p key={lineIdx} className="text-base text-foreground/90 leading-relaxed">
+                              {trimmedLine}
+                            </p>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              })()}
+              
+              <div className="text-center pt-4">
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-full">
+                  <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+                  <span className="text-sm font-medium text-muted-foreground">Powered by Gemini AI</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

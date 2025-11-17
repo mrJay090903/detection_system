@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,6 +16,7 @@ import { UploadedFileViewDialog } from "@/components/uploaded-file-view-dialog"
 import { Separator } from "@/components/ui/separator"
 
 export default function Home() {
+  const router = useRouter()
   const [proposedTitle, setProposedTitle] = useState("")
   const [proposedConcept, setProposedConcept] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -28,9 +30,52 @@ export default function Home() {
       name: file.name,
       content: extractedText,
     })
-    // Don't auto-fill the concept field - user can view via button
-    // The extracted text will be used for TF-IDF analysis when they click Check Similarity
-    toast.success(`File "${file.name}" uploaded and ready for analysis`)
+    // Auto-fill the concept field with extracted text
+    // For long documents, try to extract the core concept/abstract
+    const processedText = extractCoreContent(extractedText)
+    setProposedConcept(processedText)
+    toast.success(`File "${file.name}" uploaded and text extracted successfully`)
+  }
+
+  // Helper function to extract core concept from long documents
+  const extractCoreContent = (text: string): string => {
+    // If text is short enough (< 800 chars), use as is
+    if (text.length < 800) {
+      return text
+    }
+
+    // Try to find Introduction section (handles both single and double newlines)
+    // Match from "Introduction" to next section header (2., Objectives, etc.)
+    const introMatch = text.match(/(?:1\.\s*)?Introduction\s*\n+([\s\S]+?)(?=\n+(?:2\.|Objectives|Methodology|Significance))/i)
+    if (introMatch && introMatch[1]) {
+      const intro = introMatch[1].trim()
+      // Remove any numbering or extra formatting
+      const cleaned = intro.replace(/^\d+\.\s*/gm, '').trim()
+      // Limit to 800 characters for optimal AI processing
+      return cleaned.length > 800 ? cleaned.substring(0, 800) + '...' : cleaned
+    }
+
+    // Try to find Abstract section
+    const abstractMatch = text.match(/Abstract\s*\n+([\s\S]+?)(?=\n+(?:Introduction|1\.|Keywords|$))/i)
+    if (abstractMatch && abstractMatch[1]) {
+      const abstract = abstractMatch[1].trim()
+      return abstract.length > 800 ? abstract.substring(0, 800) + '...' : abstract
+    }
+
+    // Fallback: Skip title lines and take content
+    const lines = text.split('\n').filter(l => l.trim().length > 0)
+    // Find first paragraph with substantial content (not just headers)
+    let startIdx = 0
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      if (lines[i].length > 50 && !lines[i].match(/^(Title:|Abstract|Introduction)/i)) {
+        startIdx = i
+        break
+      }
+    }
+    
+    const content = lines.slice(startIdx).join(' ').trim()
+    // Return first 800 characters
+    return content.length > 800 ? content.substring(0, 800) + '...' : content
   }
 
   const handleCheckSimilarity = () => {
@@ -49,12 +94,12 @@ export default function Home() {
       sessionStorage.removeItem('uploadedFile')
     }
 
-    // Navigate to results page with query parameters
+    // Navigate to results page with query parameters using Next.js router
     const params = new URLSearchParams({
       title: proposedTitle.trim(),
       concept: conceptToAnalyze.trim(),
     })
-    window.location.href = `/similarity-results?${params.toString()}`
+    router.push(`/similarity-results?${params.toString()}`)
   }
 
   return (
