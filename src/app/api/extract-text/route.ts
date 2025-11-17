@@ -48,70 +48,77 @@ export async function POST(request: NextRequest) {
     if (file.type === "application/pdf" || file.name.toLowerCase().endsWith('.pdf')) {
       console.log("Processing PDF...")
       
-      try {
-        // Try Method 1: pdf-parse-fork (fast, works for most PDFs)
+      // Try multiple PDF parsers in order
+      let parseSuccess = false
+      
+      // Method 1: pdf-parse-fork (fastest, works for most PDFs)
+      if (!parseSuccess) {
         try {
           console.log("Trying pdf-parse-fork...")
-          // @ts-ignore - no type definitions available
+          // @ts-ignore
           const pdfParse = (await import("pdf-parse-fork")).default
           const buffer = Buffer.from(arrayBuffer)
-          const result = await pdfParse(buffer, {
-            max: 0,
-            version: 'v2.0.550',
-          })
+          const result = await pdfParse(buffer, { max: 0, version: 'v2.0.550' })
           extractedText = result.text
-          console.log("✓ pdf-parse-fork succeeded, text length:", extractedText.length)
-        } catch (parseError) {
-          console.log("✗ pdf-parse-fork failed:", parseError instanceof Error ? parseError.message : 'Unknown error')
+          parseSuccess = true
+          console.log("✓ pdf-parse-fork succeeded, length:", extractedText.length)
+        } catch (e) {
+          console.log("✗ pdf-parse-fork failed:", e instanceof Error ? e.message : String(e))
+        }
+      }
+      
+      // Method 2: pdf2json (more tolerant of corrupted PDFs)
+      if (!parseSuccess) {
+        try {
+          console.log("Trying pdf2json...")
+          const PDFParser = (await import("pdf2json")).default
+          const pdfParser = new PDFParser(null, true)
           
-          // Try Method 2: pdfjs-dist (more robust, handles difficult PDFs)
-          console.log("Trying pdfjs-dist as fallback...")
-          // @ts-ignore - dynamic import
-          const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-          
-          // Load PDF document
-          const loadingTask = pdfjsLib.getDocument({
-            data: new Uint8Array(arrayBuffer),
-            useSystemFonts: true,
-            verbosity: 0
+          const parsePromise = new Promise<string>((resolve, reject) => {
+            pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData))
+            pdfParser.on("pdfParser_dataReady", () => {
+              try {
+                const rawText = (pdfParser as any).getRawTextContent()
+                resolve(rawText)
+              } catch (err) {
+                reject(err)
+              }
+            })
+            
+            const buffer = Buffer.from(arrayBuffer)
+            pdfParser.parseBuffer(buffer)
           })
           
-          const pdf = await loadingTask.promise
-          console.log(`PDF loaded: ${pdf.numPages} pages`)
-          
-          // Extract text from all pages
-          const textPages: string[] = []
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i)
-            const textContent = await page.getTextContent()
-            const pageText = textContent.items
-              .map((item: any) => item.str)
-              .join(' ')
-            textPages.push(pageText)
-          }
-          
-          extractedText = textPages.join('\n\n')
-          console.log("✓ pdfjs-dist succeeded, text length:", extractedText.length)
+          extractedText = await Promise.race([
+            parsePromise,
+            new Promise<string>((_, reject) => 
+              setTimeout(() => reject(new Error("Timeout")), 10000)
+            )
+          ])
+          parseSuccess = true
+          console.log("✓ pdf2json succeeded, length:", extractedText.length)
+        } catch (e) {
+          console.log("✗ pdf2json failed:", e instanceof Error ? e.message : String(e))
         }
-        
-        // Check if text was extracted
-        if (!extractedText || extractedText.trim().length === 0) {
-          return NextResponse.json(
-            { 
-              success: false, 
-              error: "PDF appears to be empty or contains only images. Please copy and paste your text directly into the concept field instead." 
-            },
-            { status: 400 }
-          )
-        }
-      } catch (pdfError) {
-        console.error("All PDF parsing methods failed:", pdfError)
-        const errorMsg = pdfError instanceof Error ? pdfError.message : "Unknown PDF error"
-        
+      }
+      
+      // If all parsers failed
+      if (!parseSuccess) {
         return NextResponse.json(
           { 
             success: false, 
-            error: `Unable to read PDF file. Please copy and paste your text directly into the concept field instead. (Error: ${errorMsg.substring(0, 100)})` 
+            error: "Unable to read PDF. The file may be corrupted, password-protected, or contain only images. Please try: 1) Re-saving the PDF from the original document, 2) Converting to DOCX, or 3) Copy and paste the text directly into the concept field." 
+          },
+          { status: 400 }
+        )
+      }
+      
+      // Check if text was extracted
+      if (!extractedText || extractedText.trim().length === 0) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: "PDF appears to be empty or contains only images. Please copy and paste your text directly into the concept field instead." 
           },
           { status: 400 }
         )

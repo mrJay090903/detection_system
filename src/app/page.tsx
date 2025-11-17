@@ -34,6 +34,17 @@ export default function Home() {
     // For long documents, try to extract the core concept/abstract
     const processedText = extractCoreContent(extractedText)
     setProposedConcept(processedText)
+    
+    // Auto-fill title from filename (remove extension and clean up)
+    if (!proposedTitle.trim()) {
+      const titleFromFile = file.name
+        .replace(/\.(pdf|docx?|txt)$/i, '') // Remove extension
+        .replace(/[_-]/g, ' ') // Replace underscores and hyphens with spaces
+        .replace(/\s+/g, ' ') // Normalize multiple spaces
+        .trim()
+      setProposedTitle(titleFromFile)
+    }
+    
     toast.success(`File "${file.name}" uploaded and text extracted successfully`)
   }
 
@@ -147,44 +158,78 @@ export default function Home() {
           {/* Input Form */}
           <div className="space-y-6 p-6 bg-card rounded-lg shadow-lg border">
             <div className="space-y-4">
+              {!uploadedFile && (
+                <>
+                  <div>
+                    <Label htmlFor="title" className="mb-2">
+                      Proposed Research Title
+                    </Label>
+                    <Input
+                      id="title"
+                      type="text"
+                      placeholder="Enter your research title"
+                      value={proposedTitle}
+                      onChange={(e) => setProposedTitle(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="concept" className="mb-2">
+                      Research Concept
+                    </Label>
+                    <Textarea
+                      id="concept"
+                      rows={6}
+                      placeholder="Describe your research concept..."
+                      value={proposedConcept}
+                      onChange={(e) => setProposedConcept(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4 my-4">
+                    <Separator className="flex-1" />
+                    <span className="text-sm text-muted-foreground">OR</span>
+                    <Separator className="flex-1" />
+                  </div>
+                </>
+              )}
+
+              {uploadedFile && (
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-medium text-green-900 mb-1">File Uploaded Successfully</h3>
+                      <p className="text-sm text-green-700 mb-2">
+                        {uploadedFile.name}
+                      </p>
+                      <p className="text-xs text-green-600">
+                        Title and concept have been extracted from your file. Click "Check Similarity" to proceed.
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setUploadedFile(null)
+                        setProposedTitle("")
+                        setProposedConcept("")
+                      }}
+                      className="text-green-700 hover:text-green-900 hover:bg-green-100"
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <Label htmlFor="title" className="mb-2">
-                  Proposed Research Title
+                <Label className="mb-2">
+                  {uploadedFile ? "Upload Different File" : "Upload Research Document"}
                 </Label>
-                <Input
-                  id="title"
-                  type="text"
-                  placeholder="Enter your research title"
-                  value={proposedTitle}
-                  onChange={(e) => setProposedTitle(e.target.value)}
-                  disabled={isLoading}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="concept" className="mb-2">
-                  Research Concept
-                </Label>
-                <Textarea
-                  id="concept"
-                  rows={6}
-                  placeholder="Describe your research concept..."
-                  value={proposedConcept}
-                  onChange={(e) => setProposedConcept(e.target.value)}
-                  disabled={isLoading}
-                />
-              </div>
-
-              <div className="flex items-center gap-4 my-4">
-                <Separator className="flex-1" />
-                <span className="text-sm text-muted-foreground">OR</span>
-                <Separator className="flex-1" />
-              </div>
-
-              <div>
-                <Label className="mb-2">Upload Research Document</Label>
                 <p className="text-sm text-muted-foreground mb-2">
-                  Upload a file to extract text for TF-IDF analysis
+                  Upload a PDF, DOCX, or TXT file to automatically extract title and content
                 </p>
                 <FileUpload
                   onFileUpload={handleFileUpload}
