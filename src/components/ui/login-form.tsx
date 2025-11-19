@@ -163,7 +163,7 @@ export function LoginForm() {
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={isLoading}
                     required
-                    className={`w-full pr-10 ${!validation.password && 'border-red-500'}`}
+                    className={`w-full pr-10 ${!validation.password && 'border-red-500'} [&::-ms-reveal]:hidden [&::-ms-clear]:hidden`}
                   />
                   <button
                     type="button"

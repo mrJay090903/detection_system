@@ -7,5 +7,10 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error("Missing Supabase environment variables");
 }
 
-// Browser client
-export const supabase = createBrowserClient(supabaseUrl, supabaseKey);
+// Browser client with proper cookie handling for SSR
+export function createClient() {
+  return createBrowserClient(supabaseUrl!, supabaseKey!);
+}
+
+// Legacy export for backward compatibility
+export const supabase = createClient();

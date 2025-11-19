@@ -22,7 +22,8 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   
   // Profile settings
-  const [name, setName] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
   const [department, setDepartment] = useState("")
   
@@ -40,7 +41,8 @@ export default function SettingsPage() {
           return
         }
         setFaculty(facultyData)
-        setName(facultyData.name)
+        setFirstName(facultyData.first_name)
+        setLastName(facultyData.last_name)
         setEmail(facultyData.email)
         setDepartment(facultyData.department || "")
       } catch (error) {
@@ -62,7 +64,8 @@ export default function SettingsPage() {
       const { error } = await supabase
         .from("faculty")
         .update({
-          name,
+          first_name: firstName,
+          last_name: lastName,
           department,
         })
         .eq("id", faculty.id)
@@ -158,12 +161,22 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Full Name</Label>
+            <Label htmlFor="firstName">First Name</Label>
             <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your full name"
+              id="firstName"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="Enter your first name"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="lastName">Last Name</Label>
+            <Input
+              id="lastName"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="Enter your last name"
             />
           </div>
 
