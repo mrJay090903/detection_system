@@ -56,6 +56,8 @@ export default function DashboardPage() {
     totalResearches: 0,
     researchesByYear: [] as { year: number; count: number }[],
     researchesByCourse: [] as { course: string; count: number }[],
+    recentResearches: 0,
+    thisYearResearches: 0,
   })
 
   useEffect(() => {
@@ -69,11 +71,10 @@ export default function DashboardPage() {
         }
         setFaculty(facultyData)
 
-        // Fetch researches
+        // Fetch ALL researches (not just this faculty's)
         const { data, error } = await supabase
           .from("researches")
           .select("*")
-          .eq("faculty_id", facultyData.id)
           .order("year", { ascending: false })
           .order("created_at", { ascending: false })
 
@@ -84,6 +85,19 @@ export default function DashboardPage() {
 
         // Calculate statistics
         const totalResearches = researchesData.length
+        const currentYear = new Date().getFullYear()
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+        // Recent researches (last 30 days)
+        const recentResearches = researchesData.filter((r) => 
+          new Date(r.created_at) >= thirtyDaysAgo
+        ).length
+
+        // This year's researches
+        const thisYearResearches = researchesData.filter(
+          (r) => r.year === currentYear
+        ).length
 
         // Group by year
         const yearMap = new Map<number, number>()
@@ -109,6 +123,8 @@ export default function DashboardPage() {
           totalResearches,
           researchesByYear,
           researchesByCourse,
+          recentResearches,
+          thisYearResearches,
         })
       } catch (error) {
         console.error("Error loading dashboard data:", error)
@@ -135,275 +151,346 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Welcome Section */}
-      <section className="space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight">
-          Welcome back, {faculty?.first_name}
+      <section className="space-y-1">
+        <h2 className="text-3xl font-bold tracking-tight">
+          Dashboard Overview
         </h2>
         <p className="text-muted-foreground">
-          Here&apos;s a detailed overview of your research submissions and
-          statistics
+          Welcome back, <span className="font-medium text-foreground">{faculty?.first_name} {faculty?.last_name}</span> • {faculty?.department}
         </p>
       </section>
 
-      {/* Stats Cards */}
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card>
+      {/* Key Metrics - Stats Cards */}
+      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
               Total Researches
             </CardTitle>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-muted-foreground"
-            >
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-            </svg>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalResearches}</div>
-            <p className="text-xs text-muted-foreground">
-              All time research submissions
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Years Covered
-            </CardTitle>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-muted-foreground"
-            >
-              <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
-              <line x1="16" x2="16" y1="2" y2="6" />
-              <line x1="8" x2="8" y1="2" y2="6" />
-              <line x1="3" x2="21" y1="10" y2="10" />
-            </svg>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats.researchesByYear.length}
+            <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-blue-600 dark:text-blue-400"
+              >
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+              </svg>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Different years with research
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalResearches}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              All time submissions
             </p>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card className="border-l-4 border-l-green-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
-              Courses Covered
+              This Year
             </CardTitle>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-muted-foreground"
-            >
-              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-            </svg>
+            <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-green-600 dark:text-green-400"
+              >
+                <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
+                <line x1="16" x2="16" y1="2" y2="6" />
+                <line x1="8" x2="8" y1="2" y2="6" />
+                <line x1="3" x2="21" y1="10" y2="10" />
+              </svg>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-3xl font-bold text-green-600 dark:text-green-400">
+              {stats.thisYearResearches}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {new Date().getFullYear()} submissions
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-purple-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Recent Activity
+            </CardTitle>
+            <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-purple-600 dark:text-purple-400"
+              >
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-purple-600 dark:text-purple-400">
+              {stats.recentResearches}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Last 30 days
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-orange-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total Courses
+            </CardTitle>
+            <div className="h-8 w-8 rounded-full bg-orange-100 dark:bg-orange-900 flex items-center justify-center">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-orange-600 dark:text-orange-400"
+              >
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+              </svg>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">
               {stats.researchesByCourse.length}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Different courses covered
+            <p className="text-xs text-muted-foreground mt-1">
+              Courses covered
             </p>
           </CardContent>
         </Card>
       </section>
 
-      {/* Charts Section */}
-      <section className="grid gap-4 md:grid-cols-2">
-        {/* Research per Year Chart */}
-        <Card>
+      {/* Analytics Section */}
+      <section className="grid gap-4 lg:grid-cols-7">
+        {/* Research Trends - Takes more space */}
+        <Card className="lg:col-span-4">
           <CardHeader>
-            <CardTitle>Research per Year</CardTitle>
+            <CardTitle className="text-xl">Research Trends</CardTitle>
             <CardDescription>
-              Total number of researches submitted per year
+              Year-over-year research submission trends
             </CardDescription>
           </CardHeader>
           <CardContent>
             {stats.researchesByYear.length > 0 ? (
-              <>
-                <div className="mb-4 space-y-2">
-                  {stats.researchesByYear.map((item) => (
-                    <div
-                      key={item.year}
-                      className="flex items-center justify-between p-2 bg-muted/50 rounded-md"
-                    >
-                      <span className="font-medium">{item.year}</span>
-                      <span className="text-lg font-bold">{item.count}</span>
-                    </div>
-                  ))}
-                </div>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={stats.researchesByYear}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="year"
-                      tick={{ fontSize: 12 }}
-                      label={{
-                        value: "Year",
-                        position: "insideBottom",
-                        offset: -5,
-                      }}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 12 }}
-                      label={{
-                        value: "Count",
-                        angle: -90,
-                        position: "insideLeft",
-                      }}
-                    />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="count" fill="#0088FE" name="Researches" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={stats.researchesByYear}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis
+                    dataKey="year"
+                    tick={{ fontSize: 12 }}
+                    label={{
+                      value: "Year",
+                      position: "insideBottom",
+                      offset: -5,
+                    }}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 12 }}
+                    label={{
+                      value: "Researches",
+                      angle: -90,
+                      position: "insideLeft",
+                    }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'hsl(var(--background))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '6px'
+                    }}
+                  />
+                  <Bar 
+                    dataKey="count" 
+                    fill="#0088FE" 
+                    name="Researches"
+                    radius={[8, 8, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                No research data available
+              <div className="flex flex-col items-center justify-center h-[350px] text-muted-foreground">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mb-4 opacity-20"
+                >
+                  <line x1="12" x2="12" y1="20" y2="10" />
+                  <line x1="18" x2="18" y1="20" y2="4" />
+                  <line x1="6" x2="6" y1="20" y2="16" />
+                </svg>
+                <p className="text-sm">No research data available</p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Research per Course Chart */}
-        <Card>
+        {/* Course Distribution - Sidebar */}
+        <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>Research per Course</CardTitle>
+            <CardTitle className="text-xl">Course Distribution</CardTitle>
             <CardDescription>
-              Distribution of researches across different courses
+              Top courses by research count
             </CardDescription>
           </CardHeader>
           <CardContent>
             {stats.researchesByCourse.length > 0 ? (
-              <>
-                <div className="mb-4 space-y-2 max-h-[200px] overflow-y-auto">
-                  {stats.researchesByCourse.map((item, index) => (
-                    <div
-                      key={item.course}
-                      className="flex items-center justify-between p-2 bg-muted/50 rounded-md"
-                    >
-                      <span className="text-sm font-medium truncate flex-1 mr-2">
-                        {item.course}
-                      </span>
-                      <span className="text-lg font-bold shrink-0">
-                        {item.count}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={stats.researchesByCourse}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ count }) => `${count}`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="count"
-                      nameKey="course"
-                    >
-                      {stats.researchesByCourse.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={COLORS[index % COLORS.length]}
+              <div className="space-y-3">
+                {stats.researchesByCourse.slice(0, 8).map((item, index) => {
+                  const maxCount = Math.max(...stats.researchesByCourse.map(c => c.count))
+                  const percentage = (item.count / maxCount) * 100
+                  return (
+                    <div key={item.course} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium truncate flex-1 mr-2">
+                          {item.course}
+                        </span>
+                        <span className="font-bold text-lg" style={{ color: COLORS[index % COLORS.length] }}>
+                          {item.count}
+                        </span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${percentage}%`,
+                            backgroundColor: COLORS[index % COLORS.length],
+                          }}
                         />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: number, name: string) => [
-                        `${value} researches`,
-                        name,
-                      ]}
-                    />
-                    <Legend
-                      formatter={(value: string) =>
-                        value.length > 30 ? `${value.substring(0, 30)}...` : value
-                      }
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </>
+                      </div>
+                    </div>
+                  )
+                })}
+                {stats.researchesByCourse.length > 8 && (
+                  <p className="text-xs text-muted-foreground text-center pt-2">
+                    +{stats.researchesByCourse.length - 8} more courses
+                  </p>
+                )}
+              </div>
             ) : (
-              <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                No research data available
+              <div className="flex flex-col items-center justify-center h-[350px] text-muted-foreground">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="mb-4 opacity-20"
+                >
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                </svg>
+                <p className="text-sm">No course data available</p>
               </div>
             )}
           </CardContent>
         </Card>
       </section>
 
-      {/* Recent Submissions */}
-      <section className="space-y-4">
+      {/* Quick Stats Summary */}
+      <section className="grid gap-4 md:grid-cols-3">
         <Card>
-          <CardHeader>
-            <CardTitle>Recent Submissions</CardTitle>
-            <CardDescription>
-              Your latest research concept submissions
-            </CardDescription>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium">Most Active Year</CardTitle>
           </CardHeader>
           <CardContent>
-            {recentSubmissions.length > 0 ? (
-              <div className="space-y-4">
-                {recentSubmissions.map((submission) => (
-                  <div
-                    key={submission.id}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
-                    <div className="flex-1">
-                      <h3 className="font-medium">{submission.title}</h3>
-                      <div className="flex items-center gap-4 mt-1">
-                        <p className="text-sm text-muted-foreground">
-                          Course: {submission.course}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Year: {submission.year}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Submitted:{" "}
-                          {new Date(submission.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {stats.researchesByYear.length > 0 ? (
+              <>
+                <div className="text-2xl font-bold">
+                  {stats.researchesByYear.reduce((max, item) => 
+                    item.count > max.count ? item : max
+                  ).year}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.researchesByYear.reduce((max, item) => 
+                    item.count > max.count ? item : max
+                  ).count} researches submitted
+                </p>
+              </>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                No recent submissions
-              </div>
+              <p className="text-sm text-muted-foreground">No data</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium">Top Course</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {stats.researchesByCourse.length > 0 ? (
+              <>
+                <div className="text-lg font-bold truncate">
+                  {stats.researchesByCourse[0].course}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {stats.researchesByCourse[0].count} researches
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No data</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium">Average per Year</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {stats.researchesByYear.length > 0 ? (
+              <>
+                <div className="text-2xl font-bold">
+                  {(stats.totalResearches / stats.researchesByYear.length).toFixed(1)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Researches per year
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No data</p>
             )}
           </CardContent>
         </Card>

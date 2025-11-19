@@ -105,11 +105,10 @@ export default function ResearchDashboard() {
 
   const fetchResearches = async (id: string) => {
     const { data, error } = await supabase
-      .from('researches')
-      .select('*')
-      .eq('faculty_id', id)
-      .order('year', { ascending: false })
-
+      .from("researches")
+      .select("*")
+      .order("created_at", { ascending: false })
+    
     if (error) throw error
     setResearches(data || [])
   }

@@ -196,6 +196,34 @@ export function SimilarityResults() {
             </p>
           </div>
 
+          {/* Exact/Near-Exact Match Warning */}
+          {result.similarities.length > 0 && result.similarities[0].overallSimilarity >= 0.95 && (
+            <Card className="border-red-500 bg-red-50">
+              <CardHeader>
+                <CardTitle className="text-red-700 flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  Exact or Near-Exact Match Detected
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-red-700">
+                <p className="mb-2">
+                  Your proposed research shows <strong>{(result.similarities[0].overallSimilarity * 100).toFixed(1)}% similarity</strong> with an existing research in the database.
+                </p>
+                <p className="text-sm">
+                  This could mean:
+                </p>
+                <ul className="list-disc list-inside text-sm mt-2 space-y-1">
+                  <li>You're uploading the same file multiple times</li>
+                  <li>This research already exists in the database</li>
+                  <li>There's significant overlap with existing work</li>
+                </ul>
+                <p className="text-sm mt-3 font-semibold">
+                  Please ensure your research is original or verify that you haven't submitted it before.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Two Column Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column - Main Content */}

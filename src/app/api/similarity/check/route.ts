@@ -72,26 +72,39 @@ async function generateSimilarityExplanation(
   genAI: GoogleGenerativeAI
 ): Promise<string> {
   try {
-    // Use Python script to call Gemini API
+    // Use Python script to call Gemini API with temp file
     const { exec } = await import('child_process')
     const { promisify } = await import('util')
+    const fs = await import('fs')
+    const path = await import('path')
+    const os = await import('os')
     const execAsync = promisify(exec)
     
-    const input = JSON.stringify({
+    // Use temp file to avoid shell escaping issues
+    const tempDir = os.tmpdir()
+    const explanationFile = path.join(tempDir, `explanation-${Date.now()}.json`)
+    
+    const input = {
       action: 'explanation',
       proposedTitle,
       proposedConcept,
       existingTitle,
       existingAbstract,
-      lexicalSim: lexicalSim * 100,
-      semanticSim: semanticSim * 100
-    })
+      lexicalSim: lexicalSim,
+      semanticSim: semanticSim
+    }
+    
+    fs.writeFileSync(explanationFile, JSON.stringify(input))
     
     const { stdout, stderr } = await execAsync(
-      `echo '${input.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`
+      `python3 /workspaces/detection_system/scripts/gemini_api.py < "${explanationFile}"`,
+      { timeout: 30000, maxBuffer: 1024 * 1024 }
     )
     
-    if (stderr) {
+    // Cleanup
+    try { fs.unlinkSync(explanationFile) } catch {}
+    
+    if (stderr && !stderr.includes('injecting env')) {
       console.error('Python script stderr:', stderr)
     }
     
@@ -431,32 +444,55 @@ async function calculateCosineSimilarity(
       try {
         const { exec } = await import('child_process')
         const { promisify } = await import('util')
+        const fs = await import('fs')
+        const path = await import('path')
+        const os = await import('os')
         const execAsync = promisify(exec)
         
-        const input = JSON.stringify({
+        // Use temp file to avoid shell escaping issues
+        const tempDir = os.tmpdir()
+        const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${index}`
+        const inputFile = path.join(tempDir, `ai-similarity-${uniqueId}.json`)
+        
+        const input = {
           action: 'calculate',
           proposedTitle,
           proposedConcept,
           existingTitle: research.title,
           existingAbstract: research.abstract
-        })
+        }
         
-        const { stdout } = await execAsync(
-          `echo '${input.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`,
-          { timeout: 30000 } // 30 second timeout
+        fs.writeFileSync(inputFile, JSON.stringify(input))
+        
+        console.log(`Calling AI for research ${index + 1}/${existingResearches.length}: "${research.title.substring(0, 40)}..."`)
+        
+        const { stdout, stderr } = await execAsync(
+          `python3 /workspaces/detection_system/scripts/gemini_api.py < "${inputFile}"`,
+          { timeout: 30000, maxBuffer: 1024 * 1024 } // 30 second timeout
         )
+        
+        // Cleanup temp file
+        try { fs.unlinkSync(inputFile) } catch {}
+        
+        if (stderr && stderr.trim().length > 0 && !stderr.includes('injecting env')) {
+          console.log('AI stderr:', stderr.trim())
+        }
         
         const result = JSON.parse(stdout)
         if (result.success) {
+          console.log(`✓ AI calculated: ${(result.overallSimilarity * 100).toFixed(1)}%`)
           aiSimilarity = {
             titleSimilarity: result.titleSimilarity,
             abstractSimilarity: result.abstractSimilarity,
             overallSimilarity: result.overallSimilarity,
             reasoning: result.reasoning
           }
+        } else {
+          console.log(`✗ AI returned error: ${result.error}`)
         }
       } catch (aiError) {
-        console.warn('AI similarity calculation failed, falling back to traditional method:', aiError)
+        const errorMsg = aiError instanceof Error ? aiError.message : String(aiError)
+        console.warn(`✗ AI similarity calculation failed for research ${index + 1}, falling back to traditional method:`, errorMsg)
       }
       
       // If AI similarity succeeded, use it; otherwise fall back to traditional TF-IDF + embeddings
@@ -482,12 +518,15 @@ async function calculateCosineSimilarity(
         }
       } else {
         // Fallback: Traditional lexical and semantic similarity calculation
+        console.log(`Using fallback TF-IDF for research ${index + 1}`)
       // Lexical similarity
       const existingTitleVec = calculateTfIdf(research.title, allTitles)
       const existingAbstractVec = calculateTfIdf(research.abstract, allAbstracts)
 
       const titleLexicalSim = cosineSimilarity(proposedTitleVec, existingTitleVec)
       const abstractLexicalSim = cosineSimilarity(proposedConceptVec, existingAbstractVec)
+      
+      console.log(`TF-IDF scores: title=${(titleLexicalSim * 100).toFixed(1)}%, abstract=${(abstractLexicalSim * 100).toFixed(1)}%`)
       
       // Word overlap similarity
       const titleWords = new Set(preprocess(proposedTitle))
@@ -564,8 +603,8 @@ async function calculateCosineSimilarity(
       }
       } // End of fallback block
 
-      // Generate explanation
-      const explanation = await generateSimilarityExplanation(
+      // Use AI reasoning as explanation if available (avoid redundant AI call)
+      const explanation = aiSimilarity?.reasoning || await generateSimilarityExplanation(
         proposedTitle,
         proposedConcept,
         research.title,
@@ -575,36 +614,26 @@ async function calculateCosineSimilarity(
         genAI
       )
 
-      // Verify similarity scores using AI
+      // Generate verification only for high similarity matches (>40%) to save AI calls
       let verification = ''
-      try {
-        const { exec } = await import('child_process')
-        const { promisify } = await import('util')
-        const execAsync = promisify(exec)
-        
-        const verifyInput = JSON.stringify({
-          action: 'verify',
-          proposedTitle,
-          proposedConcept,
-          existingTitle: research.title,
-          existingAbstract: research.abstract,
-          titleSimilarity: combinedTitleSim * 100,
-          abstractSimilarity: combinedAbstractSim * 100,
-          overallSimilarity: overallSim * 100
-        })
-        
-        const { stdout } = await execAsync(
-          `echo '${verifyInput.replace(/'/g, "'\\''")}' | python3 /workspaces/detection_system/scripts/gemini_api.py`,
-          { timeout: 30000 }
-        )
-        
-        const verifyResult = JSON.parse(stdout)
-        if (verifyResult.success) {
-          verification = verifyResult.verification
-        }
-      } catch (verifyError) {
-        console.error('Verification error:', verifyError)
-        // Continue without verification if it fails
+      if (overallSim > 0.40 && aiSimilarity) {
+        // Use AI reasoning as verification for high similarity matches
+        verification = `=== SIMILARITY ANALYSIS ===
+
+System Score Received:
+- Title Similarity: ${(combinedTitleSim * 100).toFixed(1)}%
+- Abstract Similarity: ${(combinedAbstractSim * 100).toFixed(1)}%
+- Overall Similarity: ${(overallSim * 100).toFixed(1)}%
+
+AI Accuracy Evaluation:
+${aiSimilarity.reasoning}
+
+Final Verdict:
+The AI-calculated similarity of ${(overallSim * 100).toFixed(1)}% indicates ${
+  overallSim >= 0.70 ? 'HIGH similarity - requires careful review for originality' :
+  overallSim >= 0.40 ? 'MODERATE similarity - some overlap detected' :
+  'LOW similarity - researches are sufficiently different'
+}`
       }
 
       return {
@@ -874,8 +903,13 @@ async function calculateAISimilarity(
   return results
 }
 
+// Request deduplication cache (prevents duplicate processing in development mode)
+const requestCache = new Map<string, { promise: Promise<any>, timestamp: number }>();
+const CACHE_TTL = 10000; // 10 seconds
+
 export async function POST(request: NextRequest) {
-  console.log('=== Similarity Check API Started ===')
+  const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  console.log(`=== Similarity Check API Started [${requestId}] ===`)
   const startTime = Date.now()
   
   try {
@@ -888,6 +922,26 @@ export async function POST(request: NextRequest) {
         { error: 'Proposed title and concept are required' },
         { status: 400 }
       )
+    }
+
+    // Create cache key from request content
+    const cacheKey = `${proposedTitle}:::${proposedConcept.substring(0, 200)}`
+    
+    // Check if identical request is already in progress or recently completed
+    const cached = requestCache.get(cacheKey)
+    const now = Date.now()
+    
+    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+      console.log(`[${requestId}] ♻️ Returning cached/in-progress result (duplicate request detected)`)
+      const result = await cached.promise
+      return NextResponse.json(result)
+    }
+
+    // Clean old cache entries
+    for (const [key, value] of requestCache.entries()) {
+      if ((now - value.timestamp) >= CACHE_TTL) {
+        requestCache.delete(key)
+      }
     }
 
     console.log('Request validated:', {
@@ -984,7 +1038,7 @@ export async function POST(request: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey)
 
     // Calculate similarity using hybrid approach: TF-IDF first, then AI for top matches
-    console.log('Calculating TF-IDF similarity for all researches...')
+    console.log(`[${requestId}] Calculating TF-IDF similarity for all researches...`)
     console.log('Proposed title:', proposedTitle)
     console.log('Proposed concept length:', proposedConcept.length)
     
@@ -996,77 +1050,11 @@ export async function POST(request: NextRequest) {
       genAI
     )
     
-    console.log(`TF-IDF complete. Found ${tfidfSimilarities.length} comparisons.`)
+    console.log(`[${requestId}] TF-IDF complete. Found ${tfidfSimilarities.length} comparisons.`)
     
-    // Second pass: Use AI for ALL matches (simplified approach)
-    console.log('Running AI analysis on all matches (using fast flash-lite model)...')
-    
-    const { exec } = await import('child_process')
-    const { promisify } = await import('util')
-    const fs = await import('fs')
-    const path = await import('path')
-    const os = await import('os')
-    const execAsync = promisify(exec)
-    
-    const aiEnhancedResults = await Promise.all(
-      tfidfSimilarities.map(async (match, index) => {
-        try {
-          // Use temp file to avoid shell escaping issues
-          const tempDir = os.tmpdir()
-          const inputFile = path.join(tempDir, `ai-calc-${Date.now()}-${index}.json`)
-          
-          const input = {
-            action: 'calculate',
-            proposedTitle,
-            proposedConcept: proposedConcept.substring(0, 5000),
-            existingTitle: match.title,
-            existingAbstract: match.abstract
-          }
-          
-          fs.writeFileSync(inputFile, JSON.stringify(input))
-          
-          console.log(`⏳ AI analyzing ${index + 1}/${tfidfSimilarities.length}: "${match.title.substring(0, 40)}..."`)
-          
-          const { stdout, stderr } = await execAsync(
-            `timeout 25 python3 /workspaces/detection_system/scripts/gemini_api.py < "${inputFile}"`,
-            { maxBuffer: 1024 * 1024, timeout: 25000 }
-          )
-          
-          // Cleanup
-          try { fs.unlinkSync(inputFile) } catch {}
-          
-          if (stderr && !stderr.includes('injecting env')) {
-            console.error(`Stderr for ${match.title.substring(0, 30)}:`, stderr)
-          }
-          
-          const result = JSON.parse(stdout)
-          
-          if (result.success && result.overallSimilarity != null) {
-            console.log(`✓ AI: ${(result.overallSimilarity * 100).toFixed(1)}%`)
-            return {
-              ...match,
-              titleSimilarity: result.titleSimilarity || match.titleSimilarity,
-              abstractSimilarity: result.abstractSimilarity || match.abstractSimilarity,
-              overallSimilarity: result.overallSimilarity,
-              explanation: result.reasoning || match.explanation,
-              verification: `AI Analysis: ${(result.overallSimilarity * 100).toFixed(1)}% similarity`
-            }
-          } else {
-            console.log(`⚠ AI returned invalid result, using TF-IDF`)
-            throw new Error('Invalid AI result')
-          }
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error'
-          console.log(`✗ AI failed for match ${index + 1}: ${errorMsg}, using TF-IDF`)
-        }
-        
-        // Return original TF-IDF result if AI fails
-        return match
-      })
-    )
-    
+    // AI analysis already done in calculateCosineSimilarity - no need for second pass!
     // Sort by overall similarity
-    const similarities = aiEnhancedResults.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
+    const similarities = tfidfSimilarities.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
 
     console.log(`Similarity calculation complete. Found ${similarities.length} comparisons.`)
     
@@ -1155,14 +1143,22 @@ export async function POST(request: NextRequest) {
           .join('\n')
     }
 
-    return NextResponse.json({
+    const resultData = {
       success: true,
       proposedTitle,
       proposedConcept,
       similarities: similarities.slice(0, 3), // Return top 3
       report,
       totalComparisons: similarities.length,
+    }
+
+    // Cache the result for deduplication
+    requestCache.set(cacheKey, { 
+      promise: Promise.resolve(resultData), 
+      timestamp: Date.now() 
     })
+
+    return NextResponse.json(resultData)
   } catch (error) {
     const elapsed = Date.now() - startTime
     console.error('=== Similarity Check API Error ===')
@@ -1180,7 +1176,7 @@ export async function POST(request: NextRequest) {
     )
   } finally {
     const elapsed = Date.now() - startTime
-    console.log(`=== Similarity Check API Complete in ${elapsed}ms ===`)
+    console.log(`=== Similarity Check API Complete [${requestId}] in ${elapsed}ms ===`)
   }
 }
 

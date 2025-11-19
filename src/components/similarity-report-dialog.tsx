@@ -155,7 +155,7 @@ export function SimilarityReportDialog({
             </CardHeader>
             <CardContent>
               <div className="prose prose-sm max-w-none whitespace-pre-wrap">
-                {result.report}
+                {result.report || "AI analysis is being generated. This may take a few moments. If no analysis appears, the AI service may be temporarily unavailable, but you can still review the similarity scores above."}
               </div>
             </CardContent>
           </Card>
