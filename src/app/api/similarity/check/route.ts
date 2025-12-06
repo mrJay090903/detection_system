@@ -1,6 +1,257 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import crypto from 'crypto'
+
+// ============================================================================
+// ADVANCED SIMILARITY DETECTION ALGORITHMS
+// ============================================================================
+
+// 1. N-GRAM TEXT MATCHING
+function generateNGrams(text: string, n: number): string[] {
+  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
+  const ngrams: string[] = []
+  
+  for (let i = 0; i <= words.length - n; i++) {
+    ngrams.push(words.slice(i, i + n).join(' '))
+  }
+  
+  return ngrams
+}
+
+function nGramSimilarity(text1: string, text2: string, n: number = 3): number {
+  const ngrams1 = new Set(generateNGrams(text1, n))
+  const ngrams2 = new Set(generateNGrams(text2, n))
+  
+  if (ngrams1.size === 0 || ngrams2.size === 0) return 0
+  
+  const intersection = new Set([...ngrams1].filter(x => ngrams2.has(x)))
+  const union = new Set([...ngrams1, ...ngrams2])
+  
+  return intersection.size / union.size // Jaccard similarity
+}
+
+// 2. FINGERPRINTING / WINNOWING ALGORITHM
+function fingerprint(text: string, windowSize: number = 5): Set<string> {
+  const hashes: string[] = []
+  const ngrams = generateNGrams(text, 3)
+  
+  // Create hash for each n-gram
+  ngrams.forEach(ngram => {
+    const hash = crypto.createHash('md5').update(ngram).digest('hex')
+    hashes.push(hash)
+  })
+  
+  // Winnowing: select minimum hash in each window
+  const fingerprints = new Set<string>()
+  for (let i = 0; i <= hashes.length - windowSize; i++) {
+    const window = hashes.slice(i, i + windowSize)
+    const minHash = window.reduce((min, hash) => hash < min ? hash : min)
+    fingerprints.add(minHash)
+  }
+  
+  return fingerprints
+}
+
+function fingerprintSimilarity(text1: string, text2: string): number {
+  const fp1 = fingerprint(text1)
+  const fp2 = fingerprint(text2)
+  
+  if (fp1.size === 0 || fp2.size === 0) return 0
+  
+  const intersection = new Set([...fp1].filter(x => fp2.has(x)))
+  return intersection.size / Math.max(fp1.size, fp2.size)
+}
+
+// 3. STRING MATCHING ALGORITHMS (Rabin-Karp inspired)
+function rabinKarpSimilarity(text1: string, text2: string, patternLength: number = 20): number {
+  const s1 = text1.toLowerCase().replace(/\s+/g, ' ')
+  const s2 = text2.toLowerCase().replace(/\s+/g, ' ')
+  
+  if (s1.length < patternLength || s2.length < patternLength) return 0
+  
+  const patterns1 = new Set<string>()
+  const patterns2 = new Set<string>()
+  
+  // Extract all substrings of length patternLength
+  for (let i = 0; i <= s1.length - patternLength; i++) {
+    patterns1.add(s1.substring(i, i + patternLength))
+  }
+  
+  for (let i = 0; i <= s2.length - patternLength; i++) {
+    patterns2.add(s2.substring(i, i + patternLength))
+  }
+  
+  const intersection = new Set([...patterns1].filter(x => patterns2.has(x)))
+  return intersection.size / Math.max(patterns1.size, patterns2.size)
+}
+
+// 4. LONGEST COMMON SUBSEQUENCE (LCS)
+function longestCommonSubsequence(text1: string, text2: string): number {
+  const words1 = text1.toLowerCase().split(/\s+/)
+  const words2 = text2.toLowerCase().split(/\s+/)
+  
+  const m = words1.length
+  const n = words2.length
+  
+  // Use space-optimized DP
+  const dp: number[] = new Array(n + 1).fill(0)
+  
+  for (let i = 1; i <= m; i++) {
+    let prev = 0
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j]
+      if (words1[i - 1] === words2[j - 1]) {
+        dp[j] = prev + 1
+      } else {
+        dp[j] = Math.max(dp[j], dp[j - 1])
+      }
+      prev = temp
+    }
+  }
+  
+  return dp[n] / Math.max(m, n)
+}
+
+// 5. SENTENCE SIMILARITY (Semantic approach)
+function sentenceSimilarity(text1: string, text2: string): number {
+  const sentences1 = text1.split(/[.!?]+/).filter(s => s.trim().length > 0)
+  const sentences2 = text2.split(/[.!?]+/).filter(s => s.trim().length > 0)
+  
+  if (sentences1.length === 0 || sentences2.length === 0) return 0
+  
+  let totalSimilarity = 0
+  let comparisons = 0
+  
+  // Compare each sentence from text1 with all sentences from text2
+  sentences1.forEach(s1 => {
+    const words1 = new Set(s1.toLowerCase().split(/\s+/))
+    sentences2.forEach(s2 => {
+      const words2 = new Set(s2.toLowerCase().split(/\s+/))
+      const intersection = new Set([...words1].filter(x => words2.has(x)))
+      const union = new Set([...words1, ...words2])
+      
+      if (union.size > 0) {
+        totalSimilarity += intersection.size / union.size
+        comparisons++
+      }
+    })
+  })
+  
+  return comparisons > 0 ? totalSimilarity / comparisons : 0
+}
+
+// 6. MACHINE LEARNING-INSPIRED FEATURE EXTRACTION
+function extractTextFeatures(text: string): {
+  avgWordLength: number
+  avgSentenceLength: number
+  uniqueWordRatio: number
+  vocabularyRichness: number
+  wordFrequencyVector: Map<string, number>
+} {
+  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0)
+  const uniqueWords = new Set(words)
+  
+  const wordFrequency = new Map<string, number>()
+  words.forEach(word => {
+    wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1)
+  })
+  
+  return {
+    avgWordLength: words.reduce((sum, w) => sum + w.length, 0) / (words.length || 1),
+    avgSentenceLength: words.length / (sentences.length || 1),
+    uniqueWordRatio: uniqueWords.size / (words.length || 1),
+    vocabularyRichness: uniqueWords.size / Math.sqrt(words.length || 1),
+    wordFrequencyVector: wordFrequency
+  }
+}
+
+function featureSimilarity(text1: string, text2: string): number {
+  const features1 = extractTextFeatures(text1)
+  const features2 = extractTextFeatures(text2)
+  
+  // Compare numerical features
+  const avgWordLengthDiff = 1 - Math.abs(features1.avgWordLength - features2.avgWordLength) / Math.max(features1.avgWordLength, features2.avgWordLength)
+  const avgSentenceLengthDiff = 1 - Math.abs(features1.avgSentenceLength - features2.avgSentenceLength) / Math.max(features1.avgSentenceLength, features2.avgSentenceLength)
+  const uniqueWordRatioDiff = 1 - Math.abs(features1.uniqueWordRatio - features2.uniqueWordRatio)
+  
+  // Compare word frequency vectors
+  const allWords = new Set([...features1.wordFrequencyVector.keys(), ...features2.wordFrequencyVector.keys()])
+  let dotProduct = 0
+  let norm1 = 0
+  let norm2 = 0
+  
+  allWords.forEach(word => {
+    const freq1 = features1.wordFrequencyVector.get(word) || 0
+    const freq2 = features2.wordFrequencyVector.get(word) || 0
+    dotProduct += freq1 * freq2
+    norm1 += freq1 * freq1
+    norm2 += freq2 * freq2
+  })
+  
+  const cosineSim = dotProduct / (Math.sqrt(norm1 * norm2) || 1)
+  
+  return (avgWordLengthDiff + avgSentenceLengthDiff + uniqueWordRatioDiff + cosineSim) / 4
+}
+
+// 7. COMPOSITE MULTI-ALGORITHM SIMILARITY SCORE
+function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
+  nGram: number
+  fingerprint: number
+  rabinKarp: number
+  lcs: number
+  sentence: number
+  feature: number
+  composite: number
+  confidence: number
+} {
+  const nGram = nGramSimilarity(text1, text2, 3)
+  const fingerprintScore = fingerprintSimilarity(text1, text2)
+  const rabinKarp = rabinKarpSimilarity(text1, text2, 20)
+  const lcs = longestCommonSubsequence(text1, text2)
+  const sentence = sentenceSimilarity(text1, text2)
+  const feature = featureSimilarity(text1, text2)
+  
+  // Weighted composite score (tuned for academic plagiarism detection)
+  const weights = {
+    nGram: 0.25,
+    fingerprint: 0.20,
+    rabinKarp: 0.15,
+    lcs: 0.15,
+    sentence: 0.15,
+    feature: 0.10
+  }
+  
+  const composite = 
+    nGram * weights.nGram +
+    fingerprintScore * weights.fingerprint +
+    rabinKarp * weights.rabinKarp +
+    lcs * weights.lcs +
+    sentence * weights.sentence +
+    feature * weights.feature
+  
+  // Calculate confidence based on agreement between algorithms
+  const scores = [nGram, fingerprintScore, rabinKarp, lcs, sentence, feature]
+  const avg = scores.reduce((a, b) => a + b, 0) / scores.length
+  const variance = scores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) / scores.length
+  const confidence = 1 - Math.min(variance * 2, 1) // Lower variance = higher confidence
+  
+  return {
+    nGram,
+    fingerprint: fingerprintScore,
+    rabinKarp,
+    lcs,
+    sentence,
+    feature,
+    composite,
+    confidence
+  }
+}
+
+// ============================================================================
+// ORIGINAL EMBEDDING AND SIMILARITY FUNCTIONS
+// ============================================================================
 
 // Get semantic embeddings using Gemini
 async function getEmbedding(text: string, genAI: GoogleGenerativeAI): Promise<number[]> {
@@ -227,6 +478,16 @@ async function calculateCosineSimilarity(
   semanticSimilarity: number
   similarityType: 'Lexical' | 'Conceptual' | 'Both'
   explanation: string
+  algorithmScores: {
+    nGram: number
+    fingerprint: number
+    rabinKarp: number
+    lcs: number
+    sentenceSimilarity: number
+    featureSimilarity: number
+    multiAlgoComposite: number
+    confidence: number
+  }
 }>> {
   // Enhanced TF-IDF cosine similarity with improved preprocessing
   
@@ -511,29 +772,156 @@ async function calculateCosineSimilarity(
 
       semanticSim = titleSemanticSim * 0.4 + abstractSemanticSim * 0.6
 
-      // Enhanced accuracy: Prioritize semantic similarity more (25% lexical, 75% semantic)
-      // This improves accuracy for detecting conceptual similarity even with different wording
-      const combinedTitleSim = enhancedTitleLexical * 0.25 + titleSemanticSim * 0.75
-      const combinedAbstractSim = enhancedAbstractLexical * 0.25 + abstractSemanticSim * 0.75
+      // ============================================================
+      // MULTI-ALGORITHM SIMILARITY DETECTION (Enhanced Security)
+      // ============================================================
       
-      // Boost overall similarity if both lexical and semantic are high (indicates strong match)
-      let overallSim = combinedTitleSim * 0.4 + combinedAbstractSim * 0.6
+      // Run all advanced algorithms on title comparison
+      const titleMultiAlgo = calculateMultiAlgorithmSimilarity(proposedTitle, research.title)
       
-      // Accuracy enhancement: If both similarities are high, boost the score
-      if (lexicalSim > 0.6 && semanticSim > 0.6) {
-        overallSim = Math.min(1, overallSim * 1.05) // 5% boost for strong matches
+      // Run all advanced algorithms on abstract comparison
+      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.abstract)
+      
+      // Combine multi-algorithm scores
+      const multiAlgoTitleScore = titleMultiAlgo.composite
+      const multiAlgoAbstractScore = abstractMultiAlgo.composite
+      const multiAlgoOverallScore = multiAlgoTitleScore * 0.4 + multiAlgoAbstractScore * 0.6
+      
+      // Calculate confidence-weighted score
+      const avgConfidence = (titleMultiAlgo.confidence + abstractMultiAlgo.confidence) / 2
+      
+      // ============================================================
+      // COMPREHENSIVE OVERALL SIMILARITY (6 ALGORITHMS)
+      // ============================================================
+      // Title algorithms (40% weight) - Excluding Semantic and ML Feature
+      const titleAlgorithms = [
+        enhancedTitleLexical,      // TF-IDF Lexical
+        titleMultiAlgo.nGram,      // N-Gram
+        titleMultiAlgo.fingerprint, // Fingerprinting
+        titleMultiAlgo.rabinKarp,  // Rabin-Karp
+        titleMultiAlgo.lcs,        // LCS
+        titleMultiAlgo.sentence,   // Sentence Similarity
+      ]
+      
+      // Abstract algorithms (60% weight) - Excluding Semantic and ML Feature
+      const abstractAlgorithms = [
+        enhancedAbstractLexical,      // TF-IDF Lexical
+        abstractMultiAlgo.nGram,      // N-Gram
+        abstractMultiAlgo.fingerprint, // Fingerprinting
+        abstractMultiAlgo.rabinKarp,  // Rabin-Karp
+        abstractMultiAlgo.lcs,        // LCS
+        abstractMultiAlgo.sentence,   // Sentence Similarity
+      ]
+      
+      // Calculate average of all 6 algorithms for title and abstract
+      const avgTitleScore = titleAlgorithms.reduce((sum, score) => sum + score, 0) / titleAlgorithms.length
+      const avgAbstractScore = abstractAlgorithms.reduce((sum, score) => sum + score, 0) / abstractAlgorithms.length
+      
+      // Overall similarity: weighted average of all 6 algorithms
+      // This represents the TRUE average of all 6 detection algorithms
+      let overallSim = avgTitleScore * 0.4 + avgAbstractScore * 0.6
+      
+      // ============================================================
+      // ADVANCED MULTI-ALGORITHM SECURITY VALIDATIONS
+      // ============================================================
+      
+      // 1. Cross-Algorithm Consensus Detection
+      // Check if multiple algorithms independently detect high similarity
+      const highSimilarityCount = [
+        titleMultiAlgo.nGram > 0.6,
+        titleMultiAlgo.fingerprint > 0.6,
+        titleMultiAlgo.rabinKarp > 0.6,
+        titleMultiAlgo.lcs > 0.6,
+        abstractMultiAlgo.nGram > 0.6,
+        abstractMultiAlgo.fingerprint > 0.6,
+        abstractMultiAlgo.rabinKarp > 0.6,
+        abstractMultiAlgo.lcs > 0.6
+      ].filter(Boolean).length
+      
+      if (highSimilarityCount >= 4) {
+        // 4+ algorithms agree on high similarity - very strong evidence
+        overallSim = Math.min(1, overallSim * 1.15) // 15% boost for strong consensus
+      } else if (highSimilarityCount >= 3) {
+        // 3 algorithms agree - moderate evidence
+        overallSim = Math.min(1, overallSim * 1.10) // 10% boost for moderate consensus
       }
       
-      // Accuracy enhancement: If semantic is much higher than lexical, trust semantic more
-      if (semanticSim > lexicalSim + 0.3) {
-        overallSim = Math.min(1, overallSim * 1.03) // 3% boost for conceptual matches
+      // 2. Structural Similarity Detection (LCS + Fingerprint)
+      // Detect if document structure is copied even with word changes
+      const structuralSimilarity = (abstractMultiAlgo.lcs + abstractMultiAlgo.fingerprint) / 2
+      if (structuralSimilarity > 0.7 && enhancedAbstractLexical < 0.4) {
+        // High structural similarity but low lexical = sophisticated plagiarism
+        overallSim = Math.min(1, overallSim * 1.18) // 18% boost for structural plagiarism
       }
+      
+      // 3. Pattern-Based Plagiarism Detection (N-Gram + Rabin-Karp)
+      // Detect repeated patterns and phrases
+      const patternSimilarity = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp) / 2
+      if (patternSimilarity > 0.65) {
+        // High pattern similarity indicates copied phrases
+        overallSim = Math.min(1, overallSim * 1.12) // 12% boost for pattern copying
+      }
+      
+      // 4. Sentence-Level Plagiarism Detection
+      // Check if individual sentences are copied
+      if (abstractMultiAlgo.sentence > 0.7) {
+        // High sentence similarity even with different words
+        overallSim = Math.min(1, overallSim * 1.14) // 14% boost for sentence plagiarism
+      }
+      
+      // 5. Title Plagiarism with Abstract Similarity
+      // Detect if title is very similar AND abstract has some similarity
+      if (enhancedTitleLexical > 0.8 && avgAbstractScore > 0.3) {
+        // Same/similar title with related content = likely plagiarism
+        overallSim = Math.min(1, overallSim * 1.10) // 10% boost for title+content match
+      }
+      
+      // 6. Fingerprint Hash Collision Detection
+      // Multiple hash matches indicate direct copying
+      if (titleMultiAlgo.fingerprint > 0.75 && abstractMultiAlgo.fingerprint > 0.75) {
+        // Very high fingerprint similarity = direct copy
+        overallSim = Math.min(1, overallSim * 1.20) // 20% boost for hash collision
+      }
+      
+      // 7. Sequential Text Similarity (LCS)
+      // Long common subsequences indicate large copied sections
+      if (abstractMultiAlgo.lcs > 0.75) {
+        // Very long common subsequence = substantial copying
+        overallSim = Math.min(1, overallSim * 1.13) // 13% boost for sequential copying
+      }
+      
+      // 8. Multi-Pattern Agreement (N-Gram + Rabin-Karp + Fingerprint)
+      // Triple agreement on pattern matching
+      const patternAgreement = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp + abstractMultiAlgo.fingerprint) / 3
+      if (patternAgreement > 0.7) {
+        // All pattern algorithms agree = strong evidence
+        overallSim = Math.min(1, overallSim * 1.16) // 16% boost for triple pattern agreement
+      }
+      
+      // 9. Confidence-Weighted Security Enhancement
+      // Higher confidence means more reliable detection
+      if (avgConfidence > 0.85) {
+        overallSim = Math.min(1, overallSim * 1.08) // 8% boost for very high confidence
+      } else if (avgConfidence > 0.75) {
+        overallSim = Math.min(1, overallSim * 1.05) // 5% boost for high confidence
+      }
+      
+      // 10. Synonym Substitution Detection
+      // Detect if words are changed but sentence structure remains
+      if (abstractMultiAlgo.sentence > 0.6 && abstractMultiAlgo.lcs > 0.5 && enhancedAbstractLexical < 0.35) {
+        // High sentence/structure similarity but low word match = synonym substitution
+        overallSim = Math.min(1, overallSim * 1.15) // 15% boost for synonym plagiarism
+      }
+      
+      // Calculate combined title and abstract similarity for display
+      const combinedTitleSim = avgTitleScore
+      const combinedAbstractSim = avgAbstractScore
 
-      // Determine similarity type
+      // Determine similarity type with multi-algorithm context
       let similarityType: 'Lexical' | 'Conceptual' | 'Both'
-      if (lexicalSim > 0.5 && semanticSim > 0.5) {
+      if (lexicalSim > 0.5 && semanticSim > 0.5 && multiAlgoOverallScore > 0.5) {
         similarityType = 'Both'
-      } else if (semanticSim > lexicalSim + 0.2) {
+      } else if ((semanticSim > lexicalSim + 0.2) || (multiAlgoAbstractScore > 0.6 && abstractMultiAlgo.sentence > 0.6)) {
         similarityType = 'Conceptual'
       } else {
         similarityType = 'Lexical'
@@ -563,6 +951,17 @@ async function calculateCosineSimilarity(
         semanticSimilarity: Math.round(semanticSim * 10000) / 10000,
         similarityType,
         explanation,
+        // Multi-algorithm detailed scores for transparency and security
+        algorithmScores: {
+          nGram: Math.round(abstractMultiAlgo.nGram * 10000) / 10000,
+          fingerprint: Math.round(abstractMultiAlgo.fingerprint * 10000) / 10000,
+          rabinKarp: Math.round(abstractMultiAlgo.rabinKarp * 10000) / 10000,
+          lcs: Math.round(abstractMultiAlgo.lcs * 10000) / 10000,
+          sentenceSimilarity: Math.round(abstractMultiAlgo.sentence * 10000) / 10000,
+          featureSimilarity: Math.round(abstractMultiAlgo.feature * 10000) / 10000,
+          multiAlgoComposite: Math.round(multiAlgoOverallScore * 10000) / 10000,
+          confidence: Math.round(avgConfidence * 10000) / 10000
+        }
       }
     })
   )
@@ -635,17 +1034,60 @@ Format the report in a clear, professional manner suitable for academic review.`
     return response.text()
   } catch (error) {
     console.error('Gemini API error:', error)
-    throw new Error('Failed to generate report from Gemini API')
+    // Return fallback report instead of throwing
+    return `SIMILARITY ANALYSIS REPORT
+
+PROPOSED RESEARCH:
+Title: ${proposedTitle}
+Concept: ${proposedConcept.substring(0, 300)}...
+
+TOP SIMILAR RESEARCHES:
+${topSimilar
+  .map(
+    (r, i) => `
+${i + 1}. ${r.title}
+   Overall Similarity: ${(r.overallSimilarity * 100).toFixed(2)}%
+   Title Similarity: ${(r.titleSimilarity * 100).toFixed(2)}%
+   Abstract Similarity: ${(r.abstractSimilarity * 100).toFixed(2)}%
+   Year: ${r.year || 'N/A'}
+   Course: ${r.course || 'N/A'}
+`
+  )
+  .join('\n')}
+
+ANALYSIS:
+The similarity analysis has been completed. ${topSimilar.length > 0 ? `The highest similarity score is ${(topSimilar[0].overallSimilarity * 100).toFixed(2)}%.` : 'No similar researches found.'}
+
+Note: AI-generated detailed analysis is currently unavailable. Please review the similarity scores above.`
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { proposedTitle, proposedConcept } = await request.json()
+    const body = await request.json()
+    console.log('Received request body:', {
+      proposedTitle: body.proposedTitle,
+      proposedConceptLength: body.proposedConcept?.length || 0,
+      proposedConceptPreview: body.proposedConcept?.substring(0, 100) || 'EMPTY'
+    })
+
+    const { proposedTitle, proposedConcept } = body
 
     if (!proposedTitle || !proposedConcept) {
+      const missing = []
+      if (!proposedTitle) missing.push('proposedTitle')
+      if (!proposedConcept) missing.push('proposedConcept')
+      
+      console.error('Missing required parameters:', missing)
       return NextResponse.json(
-        { error: 'Proposed title and concept are required' },
+        { 
+          error: 'Proposed title and concept are required',
+          details: `Missing parameters: ${missing.join(', ')}`,
+          received: {
+            proposedTitle: proposedTitle || 'EMPTY',
+            proposedConcept: proposedConcept ? `${proposedConcept.length} characters` : 'EMPTY'
+          }
+        },
         { status: 400 }
       )
     }
@@ -769,18 +1211,19 @@ export async function POST(request: NextRequest) {
         proposedConcept,
         similarities
       )
+      console.log('Gemini report generated successfully')
     } catch (geminiError) {
-      console.error('Gemini error:', geminiError)
-      // Return results even if Gemini fails
+      console.error('Gemini report generation failed (using fallback):', geminiError)
+      // Return results with fallback report even if Gemini fails
       report = `Similarity Analysis Report\n\n` +
         `Proposed Research Title: ${proposedTitle}\n\n` +
-        `Proposed Research Concept: ${proposedConcept}\n\n` +
+        `Proposed Research Concept: ${proposedConcept.substring(0, 200)}...\n\n` +
         `Similarity Results:\n` +
         similarities
           .slice(0, 5)
           .map(
             (s, i) =>
-              `${i + 1}. ${s.title}\n   Overall Similarity: ${(s.overallSimilarity * 100).toFixed(2)}%\n`
+              `${i + 1}. ${s.title}\n   Overall Similarity: ${(s.overallSimilarity * 100).toFixed(2)}%\n   Type: ${s.similarityType}\n`
           )
           .join('\n')
     }
