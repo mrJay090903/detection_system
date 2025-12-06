@@ -138,13 +138,13 @@ export function SimilarityResults() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50/50 via-white to-purple-50/50">
       {/* Header */}
-      <header className="border-b sticky top-0 bg-background z-10">
+      <header className="border-b sticky top-0 bg-white/80 backdrop-blur-md shadow-sm z-10">
         <div className="container mx-auto px-4 py-4">
           <Link href="/">
-            <Button variant="ghost">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+            <Button variant="ghost" className="gap-2 hover:bg-blue-50 hover:text-blue-700">
+              <ArrowLeft className="h-4 w-4" />
               Back to Home
             </Button>
           </Link>
@@ -177,22 +177,30 @@ export function SimilarityResults() {
             <div className="lg:col-span-2 space-y-6">
 
           {/* Proposed Research Info */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Proposed Research</CardTitle>
+          <Card className="border-2 border-blue-200 shadow-sm">
+            <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 border-b">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                  </svg>
+                </div>
+                <CardTitle className="text-xl">Your Proposed Research</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <h3 className="text-sm font-medium text-muted-foreground mb-1">
-                  Title:
+            <CardContent className="space-y-4 pt-6">
+              <div className="p-4 bg-gradient-to-br from-blue-50/50 to-transparent border border-blue-100 rounded-lg">
+                <h3 className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">
+                  Research Title
                 </h3>
-                <p className="text-base">{result.proposedTitle}</p>
+                <p className="text-base font-medium text-foreground">{result.proposedTitle}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-muted-foreground mb-2">
-                  Concept:
+                <h3 className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-3">
+                  Research Concept
                 </h3>
-                <div className="p-3 bg-muted/50 border rounded-lg">
+                <div className="p-4 bg-gradient-to-br from-purple-50/50 to-transparent border border-purple-100 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Eye className="h-4 w-4 text-muted-foreground" />
@@ -217,11 +225,14 @@ export function SimilarityResults() {
 
               {/* Similarity Graph */}
               {result.similarities.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top 3 Similarity Percentage Graph</CardTitle>
-                    <CardDescription>
-                      Visual representation of similarity scores
+                <Card className="border-2 shadow-sm">
+                  <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 border-b">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-blue-600" />
+                      <CardTitle className="text-xl">Similarity Analysis Chart</CardTitle>
+                    </div>
+                    <CardDescription className="text-base">
+                      Visual comparison of top 3 most similar researches
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

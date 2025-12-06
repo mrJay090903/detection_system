@@ -99,10 +99,5 @@ export async function POST(request: NextRequest) {
 }
 
 // Configure max file size (10MB)
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
-}
+export const maxDuration = 60; // Maximum execution time in seconds
+export const bodyParser = false; // Disable default body parser to handle multipart/form-data
