@@ -606,7 +606,7 @@ async function calculateCosineSimilarity(
     
     ngrams.forEach(ngram => {
       wordCounts.set(ngram, (wordCounts.get(ngram) || 0) + 1)
-    })
+    }) 
 
     const tfIdf = new Map<string, number>()
     const totalDocs = allTexts.length
