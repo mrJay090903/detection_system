@@ -309,6 +309,7 @@ export function SimilarityResults() {
                         {/* Gradient Background Accent */}
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
                         
+                         
                         <div className="p-6">
                           {/* Header with Rank Badge */}
                           <div className="flex items-start gap-4 mb-4">
