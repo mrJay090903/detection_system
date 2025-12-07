@@ -99,10 +99,9 @@ Write naturally like you're talking to a student. Avoid all markdown formatting.
     // MODEL FAILOVER LOGIC
     // -------------------------
     const modelPriority = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-2.9-flash-lite',
-      'gemini-2.5-pro'
+      'gemini-1.5-flash',      // Primary - this is the correct model name
+      'gemini-1.5-pro',        // Fallback
+      'gemini-pro'             // Legacy fallback
     ];
 
     let analysis = null;
@@ -110,11 +109,14 @@ Write naturally like you're talking to a student. Avoid all markdown formatting.
 
     for (const modelName of modelPriority) {
       try {
+        console.log(`Trying model: ${modelName}`);
         const model = genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent(prompt);
         analysis = result.response.text();
+        console.log(`Model ${modelName} succeeded.`);
         break;
       } catch (err) {
+        console.error(`Model ${modelName} failed:`, err);
         lastError = err;
       }
     }
