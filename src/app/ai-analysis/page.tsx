@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { 
@@ -19,7 +19,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
 import { toast } from "sonner"
 
-export default function AIAnalysisPage() {
+function AIAnalysisContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
@@ -430,5 +430,21 @@ export default function AIAnalysisPage() {
         )}
       </main>
     </div>
+  )
+}
+
+export default function AIAnalysisPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Sparkles className="w-16 h-16 text-purple-600 mx-auto mb-4 animate-pulse" />
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Loading Analysis</h2>
+          <p className="text-gray-600">Please wait...</p>
+        </div>
+      </div>
+    }>
+      <AIAnalysisContent />
+    </Suspense>
   )
 }
