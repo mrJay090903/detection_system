@@ -319,7 +319,7 @@ async function generateSimilarityExplanation(
   genAI: GoogleGenerativeAI
 ): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
     
     const prompt = `You are a helpful research assistant. Explain in simple, easy-to-understand language why a proposed research is similar to an existing research. Use plain English, avoid jargon, and make it easy for anyone to understand.
 
@@ -463,6 +463,7 @@ async function calculateCosineSimilarity(
     abstract: string
     year?: number
     course?: string
+    researchers?: string[]
   }>,
   genAI: GoogleGenerativeAI
 ): Promise<Array<{
@@ -471,6 +472,7 @@ async function calculateCosineSimilarity(
   abstract: string
   year?: number
   course?: string
+  researchers?: string[]
   titleSimilarity: number
   abstractSimilarity: number
   overallSimilarity: number
@@ -944,6 +946,7 @@ async function calculateCosineSimilarity(
         abstract: research.abstract,
         year: research.year,
         course: research.course,
+        researchers: research.researchers,
         titleSimilarity: Math.round(combinedTitleSim * 10000) / 10000,
         abstractSimilarity: Math.round(combinedAbstractSim * 10000) / 10000,
         overallSimilarity: Math.round(overallSim * 10000) / 10000,
@@ -992,7 +995,7 @@ async function generateGeminiReport(
   }
 
   const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({ model: 'gemini-pro' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
 
   // Get top 3 most similar researches
   const topSimilar = similarities.slice(0, 3)
@@ -1111,7 +1114,7 @@ export async function POST(request: NextRequest) {
     
     const { data: researches, error: dbError } = await supabase
       .from('researches')
-      .select('id, title, abstract, year, course')
+      .select('id, title, abstract, year, course, researchers')
     
     console.log('Database query result:', { 
       count: researches?.length || 0, 
@@ -1142,6 +1145,7 @@ export async function POST(request: NextRequest) {
       abstract: r.abstract || '',
       year: r.year,
       course: r.course,
+      researchers: r.researchers || [],
     }))
 
     console.log(`Found ${existingResearches.length} researches in database to compare against`)

@@ -141,7 +141,7 @@ const LandingPage = () => {
         className="flex flex-wrap gap-4 pt-4"
       >
         {/* Try Now Button */}
-        <Link href="/check-similarity">
+        <Link href="/research-check">
           <motion.button 
             whileHover={{ scale: 1.05, boxShadow: "0 25px 50px -12px rgba(252, 163, 17, 0.5)" }}
             whileTap={{ scale: 0.95 }}
