@@ -99,9 +99,10 @@ Write naturally like you're talking to a student. Avoid all markdown formatting.
     // MODEL FAILOVER LOGIC
     // -------------------------
     const modelPriority = [
-      'gemini-1.5-flash',      // Primary - this is the correct model name
-      'gemini-1.5-pro',        // Fallback
-      'gemini-pro'             // Legacy fallback
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.9-flash-lite',
+      'gemini-2.5-pro'
     ];
 
     let analysis = null;
