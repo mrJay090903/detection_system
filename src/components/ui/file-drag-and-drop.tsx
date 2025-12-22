@@ -84,21 +84,36 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    setIsDragging(true)
+    const items = e.dataTransfer.items
+    if (items && items.length > 0 && items[0].kind === 'file') {
+      setIsDragging(true)
+    }
   }
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
     
-    if (e.currentTarget === dropZoneRef.current) {
-      setIsDragging(false)
+    // Only set dragging to false when leaving the entire drop zone
+    const rect = dropZoneRef.current?.getBoundingClientRect()
+    if (rect) {
+      const isOutside = 
+        e.clientX <= rect.left ||
+        e.clientX >= rect.right ||
+        e.clientY <= rect.top ||
+        e.clientY >= rect.bottom
+      
+      if (isOutside) {
+        setIsDragging(false)
+      }
     }
   }
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    // Set the dropEffect to show the correct cursor
+    e.dataTransfer.dropEffect = 'copy'
   }
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
@@ -139,7 +154,11 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           }
           ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-primary/50 hover:bg-muted/50'}
         `}
-        onClick={() => !isExtracting && fileInputRef.current?.click()}
+        onClick={(e) => {
+          if (!isExtracting && !isDragging) {
+            fileInputRef.current?.click()
+          }
+        }}
       >
         <input
           ref={fileInputRef}
@@ -150,7 +169,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           disabled={isExtracting}
         />
         
-        <div className="flex flex-col items-center justify-center space-y-3">
+        <div className="flex flex-col items-center justify-center space-y-3 pointer-events-none">
           {isExtracting ? (
             <>
               <Loader2 className="h-10 w-10 animate-spin text-primary" />

@@ -47,52 +47,62 @@ export async function POST(request: Request) {
     }
 
     // -----------------------------
-    // GENERATE DIFFERENT AI SCORES
+    // AI PROMPT - AI will calculate its own percentages
     // -----------------------------
-    function adjustRandom(value: number) {
-      const diff = (Math.random() * 0.20) - 0.10; // -10% to +10%
-      return Math.min(1, Math.max(0, value + diff)); // clamp 0–1
-    }
+    const prompt = `You are an expert academic plagiarism detector with deep understanding of research similarity analysis. Use critical thinking and careful evaluation.
 
-    const aiLexical = adjustRandom(lexicalSimilarity);
-    const aiSemantic = adjustRandom(semanticSimilarity);
-    const aiOverall = adjustRandom(overallSimilarity);
+Analyze and compare these two research works. Be CONSERVATIVE and STRICT in your similarity assessment.
 
-    // -----------------------------
-    // AI PROMPT WITH NEW PERCENTAGES
-    // -----------------------------
-    const prompt = `You are an academic research advisor helping students understand research similarities in simple, clear language.
-
-Analyze and compare these two research works:
-
-YOUR RESEARCH:
+YOUR RESEARCH
 Title: "${userTitle}"
 Concept: "${userConcept}"
 
-EXISTING RESEARCH:
+EXISTING RESEARCH
 Title: "${existingTitle}"
 Abstract: "${existingAbstract}"
 
-SIMILARITY SCORES:
-- Lexical Similarity: ${(aiLexical * 100).toFixed(2)}%
-- Semantic Similarity: ${(aiSemantic * 100).toFixed(2)}%
-- Overall Similarity: ${(aiOverall * 100).toFixed(2)}%
+ALGORITHMIC ANALYSIS RESULTS (for reference only - DO NOT use these as your answer)
+Lexical Similarity: ${(lexicalSimilarity * 100).toFixed(2)}%
+Semantic Similarity: ${(semanticSimilarity * 100).toFixed(2)}%
+Overall Similarity: ${(overallSimilarity * 100).toFixed(2)}%
 
-Provide a clear, conversational analysis with these sections. Write in natural language without using markdown symbols like asterisks, hashtags, or bold formatting. Use plain text only:
+CRITICAL INSTRUCTIONS FOR SIMILARITY ASSESSMENT:
+1. Read and understand BOTH texts completely before calculating
+2. Calculate YOUR OWN percentages based on actual content analysis
+3. Be CONSERVATIVE - only mark as similar if there's genuine overlap
+4. Consider these factors:
+   - Lexical: Exact word matches, shared terminology (be strict - only count actual matching words)
+   - Semantic: Conceptual similarity, same ideas in different words (distinguish between broad topic vs specific approach)
+   - Overall: Holistic similarity considering both aspects
+5. Common research terms (AI, machine learning, detection, system) should NOT inflate scores
+6. Different applications of the same technology = LOW similarity
+7. Only HIGH percentages (>30%) if concepts are genuinely the same
+
+Think deeply and provide accurate, justified percentages.
+
+Write in plain text only. Do not use any markdown symbols such as asterisks or hashtags.
+Write naturally and conversationally as if explaining to a student.
+
+SECTION 0: AI Similarity Assessment
+After carefully analyzing both texts, provide your independent evaluation:
+AI Lexical Similarity: [your percentage based on actual word overlap]
+AI Semantic Similarity: [your percentage based on conceptual similarity]
+AI Overall Similarity: [your percentage considering both factors]
+Explain your reasoning: Why did you assign these specific percentages? What specific similarities or differences did you identify?
 
 SECTION 1: Core Idea Match
-Explain in simple terms whether these two research projects are fundamentally about the same thing or different topics. Are they trying to solve the same problem? What makes them similar or different at their core?
+Explain in simple terms whether the two research works are about the same problem or different problems. Describe their main purpose and whether their goals align or differ.
 
 SECTION 2: Key Overlaps
-List where these research works overlap such as similar concepts, terms, methods, approaches, or theoretical foundations.
+List any overlapping parts such as similar concepts, related terms, methods, or general technological ideas.
 
 SECTION 3: Similarity Reason
-Explain the reasons behind the similarity percentage in simple, understandable language.
+Explain the reasons behind the similarity percentage in a way that is easy for a student to understand.
 
 SECTION 4: Improvement Suggestions
-Give practical advice on how to make the research more original and unique. Suggest expansions, alternate methods, new angles, or better citations.
+Give practical suggestions on how the new research can become more unique. Suggest new angles, additional features, expanded scope, alternative algorithms, or improved focus.
 
-Write naturally like you're talking to a student. Avoid all markdown formatting.`;
+Write your full analysis based on the two research works provided.`;
 
 
     // -------------------------

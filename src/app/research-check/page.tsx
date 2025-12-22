@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,12 +26,14 @@ import { toast } from "sonner"
 import Link from "next/link"
 import Image from "next/image"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { FileDragAndDrop } from "@/components/ui/file-drag-and-drop"
 
 interface StepData {
   course: string
   title: string
   concept: string
   file: File | null
+  fileContent: string
   analysisResult?: any
 }
 
@@ -51,7 +53,24 @@ export default function ResearchCheckPage() {
     title: "",
     concept: "",
     file: null,
+    fileContent: "",
   })
+
+  // Restore state from sessionStorage on mount
+  useEffect(() => {
+    const savedState = sessionStorage.getItem('researchCheckState')
+    if (savedState) {
+      try {
+        const { currentStep: savedStep, stepData: savedData } = JSON.parse(savedState)
+        setCurrentStep(savedStep)
+        setStepData(savedData)
+        // Clear the saved state after restoring
+        sessionStorage.removeItem('researchCheckState')
+      } catch (error) {
+        console.error('Error restoring state:', error)
+      }
+    }
+  }, [])
 
   const handleNext = async () => {
     // Validation for each step
@@ -61,13 +80,17 @@ export default function ResearchCheckPage() {
     }
     
     if (currentStep === 2) {
-      if (!stepData.title) {
-        toast.error("Please enter a research title")
-        return
-      }
-      if (!stepData.concept && !stepData.file) {
-        toast.error("Please enter a research concept or upload a file")
-        return
+      // If file is uploaded, only file is required
+      // If no file, then title and concept are required
+      if (!stepData.fileContent) {
+        if (!stepData.title) {
+          toast.error("Please enter a research title")
+          return
+        }
+        if (!stepData.concept) {
+          toast.error("Please enter a research concept")
+          return
+        }
       }
       
       // Perform similarity check
@@ -84,25 +107,15 @@ export default function ResearchCheckPage() {
   const handleSimilarityCheck = async () => {
     setIsLoading(true)
     try {
-      let textToCheck = stepData.concept
+      // Use file content if available, otherwise use textarea content
+      const textToCheck = stepData.fileContent.trim() || stepData.concept.trim()
+      const titleToUse = stepData.title.trim() || 'Untitled Research'
 
-      // If file is uploaded, extract text first
-      if (stepData.file) {
-        const formData = new FormData()
-        formData.append('file', stepData.file)
-
-        const extractResponse = await fetch('/api/extract-text', {
-          method: 'POST',
-          body: formData,
-        })
-
-        if (!extractResponse.ok) {
-          throw new Error('Failed to extract text from file')
-        }
-
-        const extractData = await extractResponse.json()
-        textToCheck = extractData.text
-      }
+      console.log('Submitting to API:', {
+        title: titleToUse,
+        conceptLength: textToCheck.length,
+        conceptPreview: textToCheck.substring(0, 100)
+      })
 
       // Perform similarity check
       const response = await fetch('/api/similarity/check', {
@@ -111,18 +124,30 @@ export default function ResearchCheckPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          proposedTitle: stepData.title,
+          proposedTitle: titleToUse,
           proposedConcept: textToCheck,
         }),
       })
 
+      console.log('API Response status:', response.status, response.statusText)
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        console.error('Similarity check failed:', errorData)
-        throw new Error(errorData.error || 'Failed to check similarity')
+        console.error('Similarity check failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        })
+        throw new Error(errorData.error || `Failed to check similarity (${response.status})`)
       }
 
       const result = await response.json()
+      
+      console.log('Similarity check successful:', {
+        hasResult: !!result,
+        hasSimilarities: !!(result.similarities),
+        similaritiesCount: result.similarities?.length
+      })
       
       setStepData(prev => ({
         ...prev,
@@ -132,10 +157,14 @@ export default function ResearchCheckPage() {
       setCurrentStep(3)
     } catch (error) {
       console.error('Error checking similarity:', error)
-      toast.error('Failed to analyze research. Please try again.')
+      toast.error(error instanceof Error ? error.message : 'Failed to analyze research. Please try again.')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleFileContentRead = (content: string) => {
+    setStepData({ ...stepData, fileContent: content })
   }
 
   const handleReset = () => {
@@ -145,6 +174,7 @@ export default function ResearchCheckPage() {
       title: "",
       concept: "",
       file: null,
+      fileContent: "",
     })
   }
 
@@ -317,7 +347,9 @@ export default function ResearchCheckPage() {
                       
                       <div className="space-y-6">
                         <div>
-                          <Label htmlFor="title" className="text-base mb-2 block">Research Title</Label>
+                          <Label htmlFor="title" className="text-base mb-2 block">
+                            Research Title {stepData.fileContent && <span className="text-xs text-muted-foreground font-normal">(Optional when file uploaded)</span>}
+                          </Label>
                           <Input
                             id="title"
                             placeholder="Enter your research title"
@@ -328,15 +360,21 @@ export default function ResearchCheckPage() {
                         </div>
 
                         <div>
-                          <Label htmlFor="concept" className="text-base mb-2 block">Research Concept/Abstract</Label>
+                          <Label htmlFor="concept" className="text-base mb-2 block">
+                            Research Concept/Abstract {stepData.fileContent && <span className="text-xs text-muted-foreground font-normal">(Optional when file uploaded)</span>}
+                          </Label>
                           <Textarea
                             id="concept"
-                            placeholder="Enter your research concept or abstract (optional if uploading file)"
+                            placeholder={stepData.fileContent ? "File content loaded. You can edit or add more text here..." : "Enter your research concept or abstract"}
                             value={stepData.concept}
                             onChange={(e) => setStepData({ ...stepData, concept: e.target.value })}
                             className="min-h-[200px] text-base"
-                            disabled={!!stepData.file}
                           />
+                          {stepData.fileContent && (
+                            <p className="text-sm text-muted-foreground mt-2">
+                              {stepData.fileContent.length.toLocaleString()} characters from file
+                            </p>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-4">
@@ -347,40 +385,10 @@ export default function ResearchCheckPage() {
 
                         <div>
                           <Label className="text-base mb-2 block">Upload Research File</Label>
-                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                            <input
-                              type="file"
-                              accept=".pdf,.doc,.docx,.txt"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0]
-                                if (file) {
-                                  setStepData({ ...stepData, file })
-                                }
-                              }}
-                              className="hidden"
-                              id="file-upload"
-                            />
-                            <label htmlFor="file-upload" className="cursor-pointer">
-                              <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                              <p className="text-sm text-gray-600 mb-1">Click to upload or drag and drop</p>
-                              <p className="text-xs text-gray-500">PDF, DOC, DOCX, TXT (max 10MB)</p>
-                            </label>
-                          </div>
-                          {stepData.file && (
-                            <div className="mt-3 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <FileText className="w-6 h-6 text-green-600" />
-                                <span className="text-sm text-green-700 font-medium">{stepData.file.name}</span>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setStepData({ ...stepData, file: null })}
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          )}
+                          <FileDragAndDrop onFileContentRead={handleFileContentRead} />
+                          <p className="text-xs text-muted-foreground mt-2">
+                            💡 Upload a file to skip manual title and concept entry
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -552,6 +560,12 @@ export default function ResearchCheckPage() {
                                         variant="outline"
                                         size="sm"
                                         onClick={() => {
+                                          // Store the current state in sessionStorage
+                                          sessionStorage.setItem('researchCheckState', JSON.stringify({
+                                            currentStep: 3,
+                                            stepData: stepData
+                                          }))
+                                          
                                           const params = new URLSearchParams({
                                             userTitle: stepData.title,
                                             userConcept: stepData.concept,
@@ -561,7 +575,7 @@ export default function ResearchCheckPage() {
                                             semanticSimilarity: match.semanticSimilarity.toString(),
                                             overallSimilarity: match.overallSimilarity.toString(),
                                           })
-                                          window.location.href = `/ai-analysis?${params.toString()}`
+                                          window.location.href = `/analysis-reports?${params.toString()}`
                                         }}
                                         className="gap-2 border-purple-600 text-purple-600 hover:bg-purple-50"
                                       >
