@@ -92,14 +92,14 @@ export function ResearchViewDialog({ research, trigger, onEdit }: ResearchViewDi
               </div>
             </div>
 
-            {/* Abstract Section */}
+            {/* Thesis Brief Section */}
             <div className="flex items-start gap-2">
               <div className="mt-1">
                 <ScrollTextIcon className="h-5 w-5 text-muted-foreground" />
               </div>
               <div className="flex-1">
                 <h4 className="text-sm font-semibold flex items-center justify-between">
-                  Abstract
+                  Thesis Brief
                   <span className="text-xs text-muted-foreground font-normal">
                     (Scroll to read more)
                   </span>
@@ -114,7 +114,7 @@ export function ResearchViewDialog({ research, trigger, onEdit }: ResearchViewDi
                       WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 10px, black 90%, transparent)'
                     }}
                   >
-                    {research.abstract}
+                    {research.thesis_brief}
                   </div>
                 </div>
               </div>

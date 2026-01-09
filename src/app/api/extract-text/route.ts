@@ -3,7 +3,8 @@ import mammoth from 'mammoth'
 
 // pdf-parse doesn't have ESM support, need to use dynamic import
 async function parsePDF(buffer: Buffer) {
-  const pdf = (await import('pdf-parse')).default
+  const pdfParse = await import('pdf-parse') as any
+  const pdf = pdfParse.default || pdfParse
   return pdf(buffer)
 }
 
