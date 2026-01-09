@@ -126,15 +126,13 @@ export function LoginForm() {
     <DialogTitle className="text-2xl font-semibold text-gray-900">
       Faculty Login
     </DialogTitle>
-    <p className="text-sm text-gray-500">
+    <DialogDescription className="text-sm text-gray-500">
       Access your faculty dashboard using your credentials
-    </p>
+    </DialogDescription>
+  </DialogHeader>
 
-
-
-        <Card className="border-0">
-          
-          <CardContent>
+  <Card className="border-0">
+    <CardContent className="pt-6">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
@@ -249,8 +247,6 @@ export function LoginForm() {
             </div>
           </CardFooter>
         </Card>
-      
-      </DialogHeader>
     </DialogContent>
     </Dialog>
   )

@@ -257,7 +257,7 @@ function generateFallbackExplanation(
   proposedTitle: string,
   proposedConcept: string,
   existingTitle: string,
-  existingAbstract: string,
+  existingThesisBrief: string,
   lexicalSim: number,
   multiAlgoSim: number
 ): string {
@@ -376,7 +376,7 @@ async function calculateCosineSimilarity(
   existingResearches: Array<{ 
     id?: string
     title: string
-    abstract: string
+    thesis_brief: string
     year?: number
     course?: string
     researchers?: string[]
@@ -384,7 +384,7 @@ async function calculateCosineSimilarity(
 ): Promise<Array<{
   id?: string
   title: string
-  abstract: string
+  thesis_brief: string
   year?: number
   course?: string
   researchers?: string[]
@@ -629,7 +629,7 @@ async function calculateCosineSimilarity(
   ]
   const allAbstracts = [
     proposedConcept,
-    ...existingResearches.map(r => r.abstract)
+    ...existingResearches.map(r => r.thesis_brief)
   ]
 
   // Calculate lexical similarity (TF-IDF)
@@ -641,7 +641,7 @@ async function calculateCosineSimilarity(
     existingResearches.map(async (research, index) => {
       // Lexical similarity
       const existingTitleVec = calculateTfIdf(research.title, allTitles)
-      const existingAbstractVec = calculateTfIdf(research.abstract, allAbstracts)
+      const existingAbstractVec = calculateTfIdf(research.thesis_brief, allAbstracts)
 
       const titleLexicalSim = cosineSimilarity(proposedTitleVec, existingTitleVec)
       const abstractLexicalSim = cosineSimilarity(proposedConceptVec, existingAbstractVec)
@@ -650,7 +650,7 @@ async function calculateCosineSimilarity(
       const titleWords = new Set(preprocess(proposedTitle))
       const abstractWords = new Set(preprocess(proposedConcept))
       const existingTitleWords = new Set(preprocess(research.title))
-      const existingAbstractWords = new Set(preprocess(research.abstract))
+      const existingAbstractWords = new Set(preprocess(research.thesis_brief))
       
       const titleOverlap = titleWords.size > 0 
         ? [...titleWords].filter(w => existingTitleWords.has(w)).length / titleWords.size
@@ -671,7 +671,7 @@ async function calculateCosineSimilarity(
       const titleMultiAlgo = calculateMultiAlgorithmSimilarity(proposedTitle, research.title)
       
       // Run all advanced algorithms on abstract comparison
-      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.abstract)
+      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.thesis_brief)
       
       // Combine multi-algorithm scores
       const multiAlgoTitleScore = titleMultiAlgo.composite
@@ -823,7 +823,7 @@ async function calculateCosineSimilarity(
         proposedTitle,
         proposedConcept,
         research.title,
-        research.abstract,
+        research.thesis_brief,
         lexicalSim,
         multiAlgoOverallScore
       )
@@ -831,7 +831,7 @@ async function calculateCosineSimilarity(
       return {
         id: research.id,
         title: research.title,
-        abstract: research.abstract,
+        thesis_brief: research.thesis_brief,
         year: research.year,
         course: research.course,
         researchers: research.researchers,
@@ -910,7 +910,7 @@ export async function POST(request: NextRequest) {
     
     const { data: researches, error: dbError } = await supabase
       .from('researches')
-      .select('id, title, abstract, year, course, researchers')
+      .select('id, title, thesis_brief, year, course, researchers')
     
     console.log('Database query result:', { 
       count: researches?.length || 0, 
@@ -938,7 +938,7 @@ export async function POST(request: NextRequest) {
     const existingResearches = (researches || []).map(r => ({
       id: r.id,
       title: r.title || '',
-      abstract: r.abstract || '',
+      thesis_brief: r.thesis_brief || '',
       year: r.year,
       course: r.course,
       researchers: r.researchers || [],
@@ -951,7 +951,7 @@ export async function POST(request: NextRequest) {
       console.log('Sample researches:', existingResearches.slice(0, 3).map(r => ({
         id: r.id,
         title: r.title.substring(0, 50),
-        abstractLength: r.abstract.length
+        thesisBriefLength: r.thesis_brief.length
       })))
     }
 

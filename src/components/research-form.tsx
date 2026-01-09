@@ -39,7 +39,7 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
   const [formData, setFormData] = useState<ResearchFormData>(
     initialData || {
       title: "",
-      abstract: "",
+      thesis_brief: "",
       year: new Date().getFullYear(),
       course: COURSES[0],
       researchers: [],
@@ -57,7 +57,7 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
           .insert([
             {
               title: formData.title,
-              abstract: formData.abstract,
+              thesis_brief: formData.thesis_brief,
               year: formData.year,
               course: formData.course,
               researchers: formData.researchers,
@@ -72,7 +72,7 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
         // Reset form data for create mode only
         setFormData({
           title: "",
-          abstract: "",
+          thesis_brief: "",
           year: new Date().getFullYear(),
           course: COURSES[0],
           researchers: [],
@@ -84,7 +84,7 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
           .from('researches')
           .update({
             title: formData.title,
-            abstract: formData.abstract,
+            thesis_brief: formData.thesis_brief,
             year: formData.year,
             course: formData.course,
             researchers: formData.researchers
@@ -203,15 +203,15 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="abstract">Abstract</Label>
+            <Label htmlFor="thesis_brief">Thesis Brief</Label>
             <Textarea
-              id="abstract"
-              value={formData.abstract}
-              onChange={(e) => setFormData(prev => ({ ...prev, abstract: e.target.value }))}
+              id="thesis_brief"
+              value={formData.thesis_brief}
+              onChange={(e) => setFormData(prev => ({ ...prev, thesis_brief: e.target.value }))}
               required
               disabled={isLoading}
               className="h-[150px] resize-none overflow-auto whitespace-pre-wrap wrap-break-word leading-relaxed"
-              placeholder="Enter your research abstract..."
+              placeholder="Enter your thesis brief..."
               wrap="soft"
             />
           </div>

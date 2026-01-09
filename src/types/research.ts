@@ -4,7 +4,7 @@ export type Research = {
   id: string
   faculty_id: string
   title: string
-  abstract: string
+  thesis_brief: string
   year: number
   course: Course
   researchers: string[]

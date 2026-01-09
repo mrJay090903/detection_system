@@ -21,7 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { COURSES } from "@/lib/constants"
-import { Check, ChevronRight, ChevronLeft, Upload, FileText, BarChart3, Home, Eye, Sparkles } from "lucide-react"
+import { Check, ChevronRight, ChevronLeft, Upload, FileText, BarChart3, Home, Eye, Sparkles, AlertTriangle, CheckCircle, BookOpen, Calendar, Users } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 import Image from "next/image"
@@ -361,11 +361,11 @@ export default function ResearchCheckPage() {
 
                         <div>
                           <Label htmlFor="concept" className="text-base mb-2 block">
-                            Research Concept/Abstract {stepData.fileContent && <span className="text-xs text-muted-foreground font-normal">(Optional when file uploaded)</span>}
+                            Research Concept/Thesis Brief {stepData.fileContent && <span className="text-xs text-muted-foreground font-normal">(Optional when file uploaded)</span>}
                           </Label>
                           <Textarea
                             id="concept"
-                            placeholder={stepData.fileContent ? "File content loaded. You can edit or add more text here..." : "Enter your research concept or abstract"}
+                            placeholder={stepData.fileContent ? "File content loaded. You can edit or add more text here..." : "Enter your research concept or thesis brief"}
                             value={stepData.concept}
                             onChange={(e) => setStepData({ ...stepData, concept: e.target.value })}
                             className="min-h-[200px] text-base"
@@ -520,7 +520,7 @@ export default function ResearchCheckPage() {
                               </div>
 
                               <div className="space-y-4">
-                                <h4 className="text-lg font-semibold text-gray-800">Similar Research Found ({stepData.analysisResult.totalComparisons || 0} total comparisons):</h4>
+                                <h4 className="text-lg font-semibold text-gray-800">Similar Research Found </h4>
                                 {stepData.analysisResult.similarities.map((match: any, index: number) => (
                                   <motion.div
                                     key={index}
@@ -545,16 +545,6 @@ export default function ResearchCheckPage() {
                                         </span>
                                       </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-gray-200">
-                                      <div className="text-sm">
-                                        <span className="text-gray-500">Lexical:</span>
-                                        <span className="ml-2 font-semibold text-gray-700">{(match.lexicalSimilarity * 100).toFixed(1)}%</span>
-                                      </div>
-                                      <div className="text-sm">
-                                        <span className="text-gray-500">Semantic:</span>
-                                        <span className="ml-2 font-semibold text-gray-700">{(match.semanticSimilarity * 100).toFixed(1)}%</span>
-                                      </div>
-                                    </div>
                                     <div className="mt-4 flex justify-end gap-2">
                                       <Button
                                         variant="outline"
@@ -566,16 +556,18 @@ export default function ResearchCheckPage() {
                                             stepData: stepData
                                           }))
                                           
-                                          const params = new URLSearchParams({
+                                          // Store AI analysis data in sessionStorage to handle long text
+                                          sessionStorage.setItem('aiAnalysisData', JSON.stringify({
                                             userTitle: stepData.title,
-                                            userConcept: stepData.concept,
+                                            userConcept: stepData.fileContent.trim() || stepData.concept.trim(),
                                             existingTitle: match.title,
-                                            existingAbstract: match.abstract,
+                                            existingThesisBrief: match.thesis_brief,
                                             lexicalSimilarity: match.lexicalSimilarity.toString(),
                                             semanticSimilarity: match.semanticSimilarity.toString(),
                                             overallSimilarity: match.overallSimilarity.toString(),
-                                          })
-                                          window.location.href = `/analysis-reports?${params.toString()}`
+                                          }))
+                                          
+                                          window.location.href = '/analysis-reports'
                                         }}
                                         className="gap-2 border-purple-600 text-purple-600 hover:bg-purple-50"
                                       >
@@ -673,94 +665,108 @@ export default function ResearchCheckPage() {
 
       {/* Research Details Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Research Details</DialogTitle>
-            <DialogDescription>
-              Full information about the similar research
+        <DialogContent className="!max-w-7xl !max-h-[92vh] overflow-hidden !w-[95vw]">
+          <DialogHeader className="pb-4 border-b">
+            <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <FileText className="w-6 h-6 text-indigo-600" />
+              Research Details
+            </DialogTitle>
+            <DialogDescription className="text-base text-gray-600">
+              Comprehensive information about the similar research
             </DialogDescription>
           </DialogHeader>
           
           {selectedResearch && (
-            <ScrollArea className="max-h-[60vh] pr-4">
-              <div className="space-y-6">
-                {/* Similarity Score */}
-                <div className="p-4 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg border border-blue-200">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-800">Overall Similarity</h3>
-                    <span className={`px-4 py-2 rounded-full text-lg font-bold ${
-                      (selectedResearch.overallSimilarity * 100) > 30 ? 'bg-red-100 text-red-700' :
-                      (selectedResearch.overallSimilarity * 100) > 20 ? 'bg-orange-100 text-orange-700' :
-                      (selectedResearch.overallSimilarity * 100) > 15 ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-green-100 text-green-700'
-                    }`}>
-                      {(selectedResearch.overallSimilarity * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 mt-4">
+            <ScrollArea className="max-h-[calc(92vh-170px)] pr-4">
+              <div className="space-y-6 py-4">
+                {/* Similarity Score - Enhanced */}
+                <div className="relative overflow-hidden p-6 bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 rounded-xl border-2 border-indigo-200 shadow-sm">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-200/20 to-purple-200/20 rounded-full blur-2xl"></div>
+                  <div className="relative flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600">Lexical Similarity</p>
-                      <p className="text-lg font-semibold text-gray-800">{(selectedResearch.lexicalSimilarity * 100).toFixed(1)}%</p>
+                      <h3 className="text-lg font-bold text-gray-800 mb-1">Overall Similarity Score</h3>
+                      <p className="text-sm text-gray-600">Based on Cosine algorithm analysis</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-600">Semantic Similarity</p>
-                      <p className="text-lg font-semibold text-gray-800">{(selectedResearch.semanticSimilarity * 100).toFixed(1)}%</p>
+                    <div className="flex items-center gap-3">
+                      <div className={`px-6 py-3 rounded-2xl text-2xl font-bold shadow-lg border-2 ${
+                        (selectedResearch.overallSimilarity * 100) > 30 ? 'bg-red-100 text-red-700 border-red-300' :
+                        (selectedResearch.overallSimilarity * 100) > 20 ? 'bg-orange-100 text-orange-700 border-orange-300' :
+                        (selectedResearch.overallSimilarity * 100) > 15 ? 'bg-yellow-100 text-yellow-700 border-yellow-300' :
+                        'bg-green-100 text-green-700 border-green-300'
+                      }`}>
+                        {(selectedResearch.overallSimilarity * 100).toFixed(1)}%
+                      </div>
+                      {(selectedResearch.overallSimilarity * 100) < 15 ? 
+                        <CheckCircle className="w-8 h-8 text-green-600" /> :
+                        <AlertTriangle className="w-8 h-8 text-orange-600" />
+                      }
                     </div>
                   </div>
                 </div>
 
-                {/* Research Information */}
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm text-gray-600">Title</Label>
-                    <p className="text-base font-medium text-gray-800 mt-1">{selectedResearch.title}</p>
+                {/* Research Information - Enhanced */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3">
+                    <h3 className="text-lg font-bold text-white">Research Information</h3>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-sm text-gray-600">Course</Label>
-                      <p className="text-base font-medium text-gray-800 mt-1">{selectedResearch.course}</p>
+                  <div className="p-6 space-y-5">
+                    <div className="bg-gradient-to-br from-gray-50 to-slate-50 p-4 rounded-lg border border-gray-200">
+                      <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">Title</Label>
+                      <p className="text-lg font-semibold text-gray-900 leading-relaxed">{selectedResearch.title}</p>
                     </div>
-                    <div>
-                      <Label className="text-sm text-gray-600">Year</Label>
-                      <p className="text-base font-medium text-gray-800 mt-1">{selectedResearch.year}</p>
-                    </div>
-                  </div>
 
-                  {selectedResearch.researchers && selectedResearch.researchers.length > 0 && (
-                    <div>
-                      <Label className="text-sm text-gray-600 mb-2 block">Researcher(s)</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedResearch.researchers.map((researcher: string, index: number) => (
-                          <span 
-                            key={index}
-                            className="px-3 py-1 bg-blue-50 border border-blue-200 rounded-full text-sm text-blue-700"
-                          >
-                            {researcher}
-                          </span>
-                        ))}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <Label className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2 flex items-center gap-1">
+                          <BookOpen className="w-3 h-3" />
+                          Course
+                        </Label>
+                        <p className="text-base font-medium text-gray-800">{selectedResearch.course}</p>
+                      </div>
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <Label className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          Year
+                        </Label>
+                        <p className="text-base font-medium text-gray-800">{selectedResearch.year}</p>
                       </div>
                     </div>
-                  )}
 
-                  <div>
-                    <Label className="text-sm text-gray-600 mb-2 block">Abstract</Label>
-                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
-                        {selectedResearch.abstract}
-                      </p>
+                    {selectedResearch.researchers && selectedResearch.researchers.length > 0 && (
+                      <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                        <Label className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-3 flex items-center gap-1">
+                          <Users className="w-3 h-3" />
+                          Researcher{selectedResearch.researchers.length > 1 ? 's' : ''}
+                        </Label>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedResearch.researchers.map((researcher: string, index: number) => (
+                            <span 
+                              key={index}
+                              className="px-4 py-2 bg-white border-2 border-indigo-300 rounded-full text-sm font-medium text-indigo-900 shadow-sm hover:shadow-md transition-shadow"
+                            >
+                              {researcher}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-5 rounded-lg border-2 border-amber-200">
+                      <Label className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-3 flex items-center gap-1">
+                        <FileText className="w-4 h-4" />
+                        Thesis Brief
+                      </Label>
+                      <div className="bg-white p-4 rounded-lg border border-amber-200 max-h-64 overflow-y-auto">
+                        <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">
+                          {selectedResearch.thesis_brief}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </ScrollArea>
           )}
-
-          <div className="flex justify-end pt-4 border-t">
-            <Button onClick={() => setShowDetailsDialog(false)}>
-              Close
-            </Button>
-          </div>
         </DialogContent>
       </Dialog>
     </div>

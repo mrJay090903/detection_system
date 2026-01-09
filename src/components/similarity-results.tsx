@@ -33,7 +33,7 @@ import Link from "next/link"
 interface SimilarityResult {
   id?: string
   title: string
-  abstract: string
+  thesis_brief: string
   year?: number
   course?: string
   titleSimilarity: number
@@ -669,12 +669,12 @@ export function SimilarityResults() {
               <DialogDescription>
                 {result.similarities[viewAbstractIndex].year && `Year: ${result.similarities[viewAbstractIndex].year}`}
                 {result.similarities[viewAbstractIndex].course && ` • Course: ${result.similarities[viewAbstractIndex].course}`}
-                {` • ${result.similarities[viewAbstractIndex].abstract.length.toLocaleString()} characters`}
+                {` • ${result.similarities[viewAbstractIndex].thesis_brief.length.toLocaleString()} characters`}
               </DialogDescription>
             </DialogHeader>
             <ScrollArea className="h-[60vh] w-full rounded-md border p-4">
               <div className="whitespace-pre-wrap text-sm">
-                {result.similarities[viewAbstractIndex].abstract}
+                {result.similarities[viewAbstractIndex].thesis_brief}
               </div>
             </ScrollArea>
           </DialogContent>

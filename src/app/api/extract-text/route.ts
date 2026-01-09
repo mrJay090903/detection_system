@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PDFParse } from 'pdf-parse'
 import mammoth from 'mammoth'
+
+// pdf-parse doesn't have ESM support, need to use dynamic import
+async function parsePDF(buffer: Buffer) {
+  const pdf = (await import('pdf-parse')).default
+  return pdf(buffer)
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,8 +34,7 @@ export async function POST(request: NextRequest) {
     if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
       // Extract text from PDF
       try {
-        const pdfParser = new PDFParse({ data: buffer })
-        const pdfData = await pdfParser.getText()
+        const pdfData = await parsePDF(buffer)
         extractedText = pdfData.text
       } catch (error) {
         console.error('PDF parsing error:', error)

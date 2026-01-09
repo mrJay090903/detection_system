@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       userTitle,
       userConcept,
       existingTitle,
-      existingAbstract,
+      existingThesisBrief,
       lexicalSimilarity,
       semanticSimilarity,
       overallSimilarity
@@ -21,17 +21,17 @@ export async function POST(request: Request) {
       userTitle,
       existingTitle,
       hasUserConcept: !!userConcept,
-      hasExistingAbstract: !!existingAbstract,
+      hasExistingThesisBrief: !!existingThesisBrief,
       similarities: { lexicalSimilarity, semanticSimilarity, overallSimilarity }
     });
 
     // Validate required fields
-    if (!userTitle || !userConcept || !existingTitle || !existingAbstract) {
+    if (!userTitle || !userConcept || !existingTitle || !existingThesisBrief) {
       const missing = [];
       if (!userTitle) missing.push('userTitle');
       if (!userConcept) missing.push('userConcept');
       if (!existingTitle) missing.push('existingTitle');
-      if (!existingAbstract) missing.push('existingAbstract');
+      if (!existingThesisBrief) missing.push('existingThesisBrief');
 
       return NextResponse.json(
         { error: `Missing required fields: ${missing.join(', ')}` },
@@ -59,7 +59,7 @@ Concept: "${userConcept}"
 
 EXISTING RESEARCH
 Title: "${existingTitle}"
-Abstract: "${existingAbstract}"
+Thesis Brief: "${existingThesisBrief}"
 
 ALGORITHMIC ANALYSIS RESULTS (for reference only - DO NOT use these as your answer)
 Lexical Similarity: ${(lexicalSimilarity * 100).toFixed(2)}%
@@ -142,9 +142,23 @@ Write your full analysis based on the two research works provided.`;
       );
     }
 
+    // Parse AI-calculated similarity percentages from Section 0
+    const aiLexicalMatch = analysis.match(/AI Lexical Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
+    const aiSemanticMatch = analysis.match(/AI Semantic Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
+    const aiOverallMatch = analysis.match(/AI Overall Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
+
+    const aiSimilarities = {
+      lexical: aiLexicalMatch ? parseFloat(aiLexicalMatch[1]) / 100 : null,
+      semantic: aiSemanticMatch ? parseFloat(aiSemanticMatch[1]) / 100 : null,
+      overall: aiOverallMatch ? parseFloat(aiOverallMatch[1]) / 100 : null
+    };
+
+    console.log('Extracted AI similarities:', aiSimilarities);
+
     return NextResponse.json({
       success: true,
       analysis,
+      aiSimilarities,
       timestamp: new Date().toISOString()
     });
 

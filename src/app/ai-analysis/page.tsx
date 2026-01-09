@@ -25,29 +25,39 @@ function AIAnalysisContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [analysis, setAnalysis] = useState<string>("")
   const [activeTab, setActiveTab] = useState('ai-assessment')
+  const [userTitle, setUserTitle] = useState('')
+  const [existingTitle, setExistingTitle] = useState('')
+  const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
+  const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
+  const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
   const overallSimilarity = parseFloat(searchParams.get('overallSimilarity') || '0')
 
+  // Use AI similarities if available, otherwise fall back to algorithmic ones
+  const displayLexical = aiLexicalSimilarity !== null ? aiLexicalSimilarity : lexicalSimilarity
+  const displaySemantic = aiSemanticSimilarity !== null ? aiSemanticSimilarity : semanticSimilarity
+  const displayOverall = aiOverallSimilarity !== null ? aiOverallSimilarity : overallSimilarity
+
   const metrics = {
     lexical: { 
-      score: lexicalSimilarity * 100, 
-      label: 'Lexical Similarity', 
-      status: (lexicalSimilarity * 100) < 15 ? 'low' : (lexicalSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (lexicalSimilarity * 100) < 15 ? 'bg-green-500' : (lexicalSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      score: displayLexical * 100, 
+      label: 'AI Lexical Similarity', 
+      status: (displayLexical * 100) < 15 ? 'low' : (displayLexical * 100) < 30 ? 'medium' : 'high',
+      color: (displayLexical * 100) < 15 ? 'bg-green-500' : (displayLexical * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     semantic: { 
-      score: semanticSimilarity * 100, 
-      label: 'Semantic Similarity', 
-      status: (semanticSimilarity * 100) < 15 ? 'low' : (semanticSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (semanticSimilarity * 100) < 15 ? 'bg-green-500' : (semanticSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      score: displaySemantic * 100, 
+      label: 'AI Semantic Similarity', 
+      status: (displaySemantic * 100) < 15 ? 'low' : (displaySemantic * 100) < 30 ? 'medium' : 'high',
+      color: (displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     overall: { 
-      score: overallSimilarity * 100, 
-      label: 'Overall Similarity', 
-      status: (overallSimilarity * 100) < 15 ? 'low' : (overallSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (overallSimilarity * 100) < 15 ? 'bg-blue-600' : (overallSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
+      score: displayOverall * 100, 
+      label: 'AI Overall Similarity', 
+      status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
+      color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
     }
   }
 
@@ -96,20 +106,41 @@ function AIAnalysisContent() {
   useEffect(() => {
     const loadAnalysis = async () => {
       try {
-        // Get data from URL params
-        const userTitle = searchParams.get('userTitle')
-        const userConcept = searchParams.get('userConcept')
-        const existingTitle = searchParams.get('existingTitle')
-        const existingAbstract = searchParams.get('existingAbstract')
-        const lexicalSimilarity = searchParams.get('lexicalSimilarity')
-        const semanticSimilarity = searchParams.get('semanticSimilarity')
-        const overallSimilarity = searchParams.get('overallSimilarity')
+        // Try to get data from sessionStorage first (for long text support)
+        const aiAnalysisDataStr = sessionStorage.getItem('aiAnalysisData')
+        let userTitleData, userConcept, existingTitleData, existingThesisBrief, lexicalSimilarity, semanticSimilarity, overallSimilarity
 
-        if (!userTitle || !userConcept || !existingTitle || !existingAbstract) {
+        if (aiAnalysisDataStr) {
+          // Get data from sessionStorage and clear it
+          const aiAnalysisData = JSON.parse(aiAnalysisDataStr)
+          userTitleData = aiAnalysisData.userTitle
+          userConcept = aiAnalysisData.userConcept
+          existingTitleData = aiAnalysisData.existingTitle
+          existingThesisBrief = aiAnalysisData.existingThesisBrief
+          lexicalSimilarity = aiAnalysisData.lexicalSimilarity
+          semanticSimilarity = aiAnalysisData.semanticSimilarity
+          overallSimilarity = aiAnalysisData.overallSimilarity
+          sessionStorage.removeItem('aiAnalysisData')
+        } else {
+          // Fallback to URL params (for backward compatibility)
+          userTitleData = searchParams.get('userTitle')
+          userConcept = searchParams.get('userConcept')
+          existingTitleData = searchParams.get('existingTitle')
+          existingThesisBrief = searchParams.get('existingThesisBrief')
+          lexicalSimilarity = searchParams.get('lexicalSimilarity')
+          semanticSimilarity = searchParams.get('semanticSimilarity')
+          overallSimilarity = searchParams.get('overallSimilarity')
+        }
+
+        if (!userTitleData || !userConcept || !existingTitleData || !existingThesisBrief) {
           toast.error('Missing required data')
           router.push('/research-check')
           return
         }
+
+        // Set titles for display
+        setUserTitle(userTitleData)
+        setExistingTitle(existingTitleData)
 
         const response = await fetch('/api/ai-analysis', {
           method: 'POST',
@@ -117,10 +148,10 @@ function AIAnalysisContent() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            userTitle,
+            userTitle: userTitleData,
             userConcept,
-            existingTitle,
-            existingAbstract,
+            existingTitle: existingTitleData,
+            existingThesisBrief,
             lexicalSimilarity: parseFloat(lexicalSimilarity || '0'),
             semanticSimilarity: parseFloat(semanticSimilarity || '0'),
             overallSimilarity: parseFloat(overallSimilarity || '0'),
@@ -135,6 +166,14 @@ function AIAnalysisContent() {
 
         const data = await response.json()
         setAnalysis(data.analysis)
+        
+        // Set AI-calculated similarities if available
+        if (data.aiSimilarities) {
+          if (data.aiSimilarities.lexical !== null) setAiLexicalSimilarity(data.aiSimilarities.lexical)
+          if (data.aiSimilarities.semantic !== null) setAiSemanticSimilarity(data.aiSimilarities.semantic)
+          if (data.aiSimilarities.overall !== null) setAiOverallSimilarity(data.aiSimilarities.overall)
+        }
+        
         setIsLoading(false)
       } catch (error) {
         console.error('Error generating AI analysis:', error)
@@ -147,18 +186,18 @@ function AIAnalysisContent() {
   }, [searchParams, router])
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-slate-50 to-blue-50">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="container mx-auto px-6 py-4">
+      <header className="bg-white/90 backdrop-blur-md border-b border-gray-200 shadow-sm sticky top-0 z-10">
+        <div className="container mx-auto px-6 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden bg-white border border-gray-200 shadow">
                 <Image src="/assets/bu-logo.png" width={40} height={40} alt="BU Logo" className="object-cover" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-900">Research Comparative Analysis</h1>
-                <p className="text-sm text-slate-500">Powered by Gemini AI</p>
+                <h1 className="text-xl font-bold text-slate-900">AI Research Analysis</h1>
+                <p className="text-xs text-slate-600">Powered by Gemini AI</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -176,137 +215,129 @@ function AIAnalysisContent() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
+      <main className="container mx-auto px-6 py-6 max-w-6xl">
         {isLoading ? (
-          <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-            <Sparkles className="w-16 h-16 text-purple-600 mx-auto mb-4 animate-pulse" />
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Generating AI Analysis</h2>
+          <div className="bg-white rounded-2xl shadow-lg p-10 text-center border border-gray-100">
+            <div className="relative inline-block">
+              <Sparkles className="w-16 h-16 text-purple-600 mx-auto mb-5 animate-pulse" />
+              <div className="absolute inset-0 animate-ping opacity-20">
+                <Sparkles className="w-16 h-16 text-purple-600" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Generating AI Analysis</h2>
             <p className="text-gray-600">Our AI is analyzing the similarities between your research and the existing work...</p>
+            <div className="mt-4 flex justify-center">
+              <div className="w-56 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 animate-pulse"></div>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="space-y-6">
             {/* Quick Summary Card */}
-            <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4">
-                <h2 className="text-xl font-bold text-white">Analysis Summary</h2>
-                <p className="text-indigo-100 text-sm mt-1">AI-powered comparison of your research with existing work</p>
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-6 py-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5" />
+                  Analysis Summary
+                </h2>
+                <p className="text-indigo-100 text-xs mt-1">AI-powered comparison of your research with existing work</p>
               </div>
               <div className="p-6">
                 <div className="grid md:grid-cols-2 gap-6">
                   {/* Your Research */}
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-slate-500 text-sm font-semibold">
+                    <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wide">
                       <FileText className="w-4 h-4" />
-                      YOUR RESEARCH
+                      Your Research
                     </div>
-                    <p className="text-slate-800 font-medium leading-relaxed">
-                      {searchParams.get('userTitle')}
+                    <p className="text-slate-800 font-medium leading-relaxed text-base">
+                      {userTitle}
                     </p>
                   </div>
                   {/* Compared Research */}
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-slate-500 text-sm font-semibold">
+                    <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold uppercase tracking-wide">
                       <FileText className="w-4 h-4" />
-                      COMPARED WITH
+                      Compared With
                     </div>
-                    <p className="text-slate-800 font-medium leading-relaxed">
-                      {searchParams.get('existingTitle')}
+                    <p className="text-slate-800 font-medium leading-relaxed text-base">
+                      {existingTitle}
                     </p>
                   </div>
                 </div>
                 
-                {/* Overall Assessment */}
-                <div className="mt-6 pt-6 border-t border-slate-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-slate-900 mb-1">Overall Assessment</h3>
+                {/* AI Overall Similarity Percentage */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex-1 min-w-[200px]">
+                      <h3 className="font-semibold text-slate-900 mb-1 text-lg flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-indigo-600" />
+                        AI Overall Similarity Percentage
+                      </h3>
                       <p className="text-sm text-slate-600">
-                        {(overallSimilarity * 100) < 15 
+                        {(displayOverall * 100) < 15 
                           ? "Your research shows good originality with minimal overlap."
-                          : (overallSimilarity * 100) < 30
+                          : (displayOverall * 100) < 30
                           ? "Some similarities detected. Review the recommendations below."
                           : "Significant similarities found. Revision strongly recommended."}
                       </p>
                     </div>
-                    <div className={`px-4 py-2 rounded-lg font-bold text-lg ${
-                      (overallSimilarity * 100) < 15 ? 'bg-green-100 text-green-700' :
-                      (overallSimilarity * 100) < 30 ? 'bg-amber-100 text-amber-700' :
-                      'bg-red-100 text-red-700'
+                    <div className={`px-5 py-2.5 rounded-xl font-bold text-xl shadow-md border-2 ${
+                      (displayOverall * 100) < 15 ? 'bg-green-100 text-green-700 border-green-300' :
+                      (displayOverall * 100) < 30 ? 'bg-amber-100 text-amber-700 border-amber-300' :
+                      'bg-red-100 text-red-700 border-red-300'
                     }`}>
-                      {(overallSimilarity * 100).toFixed(1)}%
+                      {(displayOverall * 100).toFixed(1)}%
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {Object.entries(metrics).map(([key, data]) => (
-                <div key={key} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-sm font-medium text-slate-500">{data.label}</span>
-                    {data.status === 'low' ? 
-                      <CheckCircle className="w-5 h-5 text-green-500" /> : 
-                      data.status === 'medium' ?
-                      <AlertTriangle className="w-5 h-5 text-amber-500" /> :
-                      <AlertTriangle className="w-5 h-5 text-red-500" />
-                    }
-                  </div>
-                  <div className="flex items-end gap-2 mb-2">
-                    <span className="text-3xl font-bold text-slate-900">{data.score.toFixed(1)}%</span>
-                    <span className="text-sm text-slate-400 mb-1">match found</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2">
-                    <div 
-                      className={`h-2 rounded-full ${data.color}`} 
-                      style={{ width: `${Math.min(data.score, 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
             {/* Main Content Area with Tabs */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               {/* Left Column: Navigation */}
-              <div className="lg:col-span-1 space-y-6">
-                <nav className="flex flex-col gap-2">
+              <div className="lg:col-span-1">
+                <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-4 sticky top-20">
+                  <h3 className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-3 px-2">Analysis Sections</h3>
+                  <nav className="flex flex-col gap-2">
                   <button 
                     onClick={() => setActiveTab('ai-assessment')}
-                    className={`text-left px-4 py-3 rounded-lg font-medium transition flex items-center gap-3 ${activeTab === 'ai-assessment' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`text-left px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 text-sm ${activeTab === 'ai-assessment' ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}
                   >
                     <Sparkles className="w-4 h-4" /> AI Similarity Assessment
                   </button>
                   <button 
                     onClick={() => setActiveTab('core-idea')}
-                    className={`text-left px-4 py-3 rounded-lg font-medium transition flex items-center gap-3 ${activeTab === 'core-idea' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`text-left px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 text-sm ${activeTab === 'core-idea' ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}
                   >
                     <BookOpen className="w-4 h-4" /> Core Idea Match
                   </button>
                   <button 
                     onClick={() => setActiveTab('overlaps')}
-                    className={`text-left px-4 py-3 rounded-lg font-medium transition flex items-center gap-3 ${activeTab === 'overlaps' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`text-left px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 text-sm ${activeTab === 'overlaps' ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}
                   >
                     <Layers className="w-4 h-4" /> Key Overlaps
                   </button>
                   <button 
                     onClick={() => setActiveTab('reason')}
-                    className={`text-left px-4 py-3 rounded-lg font-medium transition flex items-center gap-3 ${activeTab === 'reason' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`text-left px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 text-sm ${activeTab === 'reason' ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}
                   >
                     <BarChart3 className="w-4 h-4" /> Similarity Reason
                   </button>
                   <button 
                     onClick={() => setActiveTab('suggestions')}
-                    className={`text-left px-4 py-3 rounded-lg font-medium transition flex items-center gap-3 ${activeTab === 'suggestions' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`text-left px-4 py-2.5 rounded-lg font-medium transition-all flex items-center gap-2 text-sm ${activeTab === 'suggestions' ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50 border border-transparent hover:border-slate-200'}`}
                   >
                     <Lightbulb className="w-4 h-4" /> Improvements
                   </button>
                 </nav>
+                </div>
               </div>
 
               {/* Right Column: Dynamic Content */}
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-3">
                 {/* TAB: AI ASSESSMENT */}
                 {activeTab === 'ai-assessment' && sections?.aiAssessment && (
                   <motion.div 
@@ -314,14 +345,14 @@ function AIAnalysisContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl shadow-sm border border-purple-100 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-purple-600 rounded-lg">
-                          <Sparkles className="w-5 h-5 text-white" />
+                    <div className="bg-white rounded-2xl shadow-lg border border-purple-100 overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-4">
+                        <div className="flex items-center gap-3 text-white">
+                          <Sparkles className="w-5 h-5" />
+                          <h3 className="text-lg font-bold">AI Similarity Assessment</h3>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-900">AI Similarity Assessment</h3>
                       </div>
-                      <div className="bg-white rounded-lg p-6 text-slate-700 leading-7 text-base shadow-sm">
+                      <div className="p-6 text-slate-700 leading-7 text-sm">
                         {cleanText(sections.aiAssessment).split('\n').map((paragraph, idx) => (
                           paragraph.trim() && (
                             <p key={idx} className="mb-4 last:mb-0">
@@ -341,14 +372,14 @@ function AIAnalysisContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl shadow-sm border border-indigo-100 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-indigo-600 rounded-lg">
-                          <BookOpen className="w-5 h-5 text-white" />
+                    <div className="bg-white rounded-2xl shadow-lg border border-indigo-100 overflow-hidden">
+                      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4">
+                        <div className="flex items-center gap-3 text-white">
+                          <BookOpen className="w-5 h-5" />
+                          <h3 className="text-lg font-bold">Core Idea Analysis</h3>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-900">Core Idea Analysis</h3>
                       </div>
-                      <div className="bg-white rounded-lg p-6 text-slate-700 leading-7 text-base shadow-sm">
+                      <div className="p-6 text-slate-700 leading-7 text-sm">
                         {cleanText(sections.coreIdea).split('\n').map((paragraph, idx) => (
                           paragraph.trim() && (
                             <p key={idx} className="mb-4 last:mb-0">
@@ -368,14 +399,14 @@ function AIAnalysisContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl shadow-sm border border-purple-100 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-purple-600 rounded-lg">
-                          <Layers className="w-5 h-5 text-white" />
+                    <div className="bg-white rounded-2xl shadow-lg border border-purple-100 overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-4">
+                        <div className="flex items-center gap-3 text-white">
+                          <Layers className="w-5 h-5" />
+                          <h3 className="text-lg font-bold">Key Overlap Areas</h3>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-900">Key Overlap Areas</h3>
                       </div>
-                      <div className="bg-white rounded-lg p-6 shadow-sm">
+                      <div className="p-6">
                         <div className="space-y-4">
                           {cleanText(sections.keyOverlaps).split('\n').map((paragraph, idx) => (
                             paragraph.trim() && (
@@ -383,7 +414,7 @@ function AIAnalysisContent() {
                                 <div className="flex-shrink-0 mt-1.5">
                                   <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
                                 </div>
-                                <p className="text-slate-700 leading-7 text-base flex-1">
+                                <p className="text-slate-700 leading-6 text-sm flex-1">
                                   {paragraph}
                                 </p>
                               </div>
@@ -402,14 +433,14 @@ function AIAnalysisContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl shadow-sm border border-amber-100 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-amber-600 rounded-lg">
-                          <BarChart3 className="w-5 h-5 text-white" />
+                    <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden">
+                      <div className="bg-gradient-to-r from-amber-600 to-orange-600 px-6 py-4">
+                        <div className="flex items-center gap-3 text-white">
+                          <BarChart3 className="w-5 h-5" />
+                          <h3 className="text-lg font-bold">Why These Similarities Exist</h3>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-900">Why These Similarities Exist</h3>
                       </div>
-                      <div className="bg-white rounded-lg p-6 text-slate-700 leading-7 text-base shadow-sm">
+                      <div className="p-6 text-slate-700 leading-7 text-sm">
                         {cleanText(sections.similarityReason).split('\n').map((paragraph, idx) => (
                           paragraph.trim() && (
                             <p key={idx} className="mb-4 last:mb-0">
@@ -429,28 +460,28 @@ function AIAnalysisContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl shadow-lg p-6 text-white">
-                      <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl shadow-lg p-5 text-white">
+                      <div className="flex items-center gap-3 mb-1">
                         <Lightbulb className="w-6 h-6" />
-                        <h3 className="font-bold text-xl">Differentiation Strategy</h3>
+                        <h3 className="font-bold text-lg">Differentiation Strategy</h3>
                       </div>
-                      <p className="text-indigo-100 text-sm">
+                      <p className="text-green-50 text-xs">
                         Follow these recommendations to improve the originality and distinctiveness of your research.
                       </p>
                     </div>
 
-                    <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl shadow-sm border border-green-100 p-8">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-green-600 rounded-lg">
-                          <Lightbulb className="w-5 h-5 text-white" />
+                    <div className="bg-white rounded-2xl shadow-lg border border-green-100 overflow-hidden">
+                      <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-4">
+                        <div className="flex items-center gap-3 text-white">
+                          <Lightbulb className="w-5 h-5" />
+                          <h3 className="text-lg font-bold">Recommended Actions</h3>
                         </div>
-                        <h3 className="text-xl font-bold text-slate-900">Recommended Actions</h3>
                       </div>
-                      <div className="space-y-4">
+                      <div className="p-6 space-y-3">
                         {cleanText(sections.improvements).split('\n').map((paragraph, idx) => (
                           paragraph.trim() && (
-                            <div key={idx} className="bg-white rounded-lg p-4 shadow-sm border-l-4 border-green-500">
-                              <p className="text-slate-700 leading-7 text-base">
+                            <div key={idx} className="bg-green-50 rounded-lg p-4 border-l-4 border-green-500 hover:shadow-sm transition-shadow">
+                              <p className="text-slate-700 leading-6 text-sm">
                                 {paragraph}
                               </p>
                             </div>

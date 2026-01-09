@@ -26,29 +26,39 @@ function AnalysisReportsContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [analysis, setAnalysis] = useState<string>("")
   const [activeTab, setActiveTab] = useState('ai-assessment')
+  const [userTitle, setUserTitle] = useState('')
+  const [existingTitle, setExistingTitle] = useState('')
+  const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
+  const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
+  const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
   const overallSimilarity = parseFloat(searchParams.get('overallSimilarity') || '0')
 
+  // Use AI similarities if available, otherwise fall back to algorithmic ones
+  const displayLexical = aiLexicalSimilarity !== null ? aiLexicalSimilarity : lexicalSimilarity
+  const displaySemantic = aiSemanticSimilarity !== null ? aiSemanticSimilarity : semanticSimilarity
+  const displayOverall = aiOverallSimilarity !== null ? aiOverallSimilarity : overallSimilarity
+
   const metrics = {
     lexical: { 
-      score: lexicalSimilarity * 100, 
-      label: 'Lexical Similarity', 
-      status: (lexicalSimilarity * 100) < 15 ? 'low' : (lexicalSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (lexicalSimilarity * 100) < 15 ? 'bg-green-500' : (lexicalSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      score: displayLexical * 100, 
+      label: 'AI Lexical Similarity', 
+      status: (displayLexical * 100) < 15 ? 'low' : (displayLexical * 100) < 30 ? 'medium' : 'high',
+      color: (displayLexical * 100) < 15 ? 'bg-green-500' : (displayLexical * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     semantic: { 
-      score: semanticSimilarity * 100, 
-      label: 'Semantic Similarity', 
-      status: (semanticSimilarity * 100) < 15 ? 'low' : (semanticSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (semanticSimilarity * 100) < 15 ? 'bg-green-500' : (semanticSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      score: displaySemantic * 100, 
+      label: 'AI Semantic Similarity', 
+      status: (displaySemantic * 100) < 15 ? 'low' : (displaySemantic * 100) < 30 ? 'medium' : 'high',
+      color: (displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     overall: { 
-      score: overallSimilarity * 100, 
-      label: 'Overall Similarity', 
-      status: (overallSimilarity * 100) < 15 ? 'low' : (overallSimilarity * 100) < 30 ? 'medium' : 'high',
-      color: (overallSimilarity * 100) < 15 ? 'bg-blue-600' : (overallSimilarity * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
+      score: displayOverall * 100, 
+      label: 'AI Overall Similarity', 
+      status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
+      color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
     }
   }
 
@@ -97,20 +107,41 @@ function AnalysisReportsContent() {
   useEffect(() => {
     const loadAnalysis = async () => {
       try {
-        // Get data from URL params
-        const userTitle = searchParams.get('userTitle')
-        const userConcept = searchParams.get('userConcept')
-        const existingTitle = searchParams.get('existingTitle')
-        const existingAbstract = searchParams.get('existingAbstract')
-        const lexicalSimilarity = searchParams.get('lexicalSimilarity')
-        const semanticSimilarity = searchParams.get('semanticSimilarity')
-        const overallSimilarity = searchParams.get('overallSimilarity')
+        // Try to get data from sessionStorage first (for long text support)
+        const aiAnalysisDataStr = sessionStorage.getItem('aiAnalysisData')
+        let userTitleData, userConcept, existingTitleData, existingThesisBrief, lexicalSimilarityStr, semanticSimilarityStr, overallSimilarityStr
 
-        if (!userTitle || !userConcept || !existingTitle || !existingAbstract) {
+        if (aiAnalysisDataStr) {
+          // Get data from sessionStorage and clear it
+          const aiAnalysisData = JSON.parse(aiAnalysisDataStr)
+          userTitleData = aiAnalysisData.userTitle
+          userConcept = aiAnalysisData.userConcept
+          existingTitleData = aiAnalysisData.existingTitle
+          existingThesisBrief = aiAnalysisData.existingThesisBrief
+          lexicalSimilarityStr = aiAnalysisData.lexicalSimilarity
+          semanticSimilarityStr = aiAnalysisData.semanticSimilarity
+          overallSimilarityStr = aiAnalysisData.overallSimilarity
+          sessionStorage.removeItem('aiAnalysisData')
+        } else {
+          // Fallback to URL params (for backward compatibility)
+          userTitleData = searchParams.get('userTitle')
+          userConcept = searchParams.get('userConcept')
+          existingTitleData = searchParams.get('existingTitle')
+          existingThesisBrief = searchParams.get('existingThesisBrief')
+          lexicalSimilarityStr = searchParams.get('lexicalSimilarity')
+          semanticSimilarityStr = searchParams.get('semanticSimilarity')
+          overallSimilarityStr = searchParams.get('overallSimilarity')
+        }
+
+        if (!userTitleData || !userConcept || !existingTitleData || !existingThesisBrief) {
           toast.error('Missing required data')
           router.push('/research-check')
           return
         }
+
+        // Set titles for display
+        setUserTitle(userTitleData)
+        setExistingTitle(existingTitleData)
 
         const response = await fetch('/api/ai-analysis', {
           method: 'POST',
@@ -118,13 +149,13 @@ function AnalysisReportsContent() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            userTitle,
+            userTitle: userTitleData,
             userConcept,
-            existingTitle,
-            existingAbstract,
-            lexicalSimilarity: parseFloat(lexicalSimilarity || '0'),
-            semanticSimilarity: parseFloat(semanticSimilarity || '0'),
-            overallSimilarity: parseFloat(overallSimilarity || '0'),
+            existingTitle: existingTitleData,
+            existingThesisBrief,
+            lexicalSimilarity: parseFloat(lexicalSimilarityStr || '0'),
+            semanticSimilarity: parseFloat(semanticSimilarityStr || '0'),
+            overallSimilarity: parseFloat(overallSimilarityStr || '0'),
           }),
         })
 
@@ -136,6 +167,14 @@ function AnalysisReportsContent() {
 
         const data = await response.json()
         setAnalysis(data.analysis)
+        
+        // Set AI-calculated similarities if available
+        if (data.aiSimilarities) {
+          if (data.aiSimilarities.lexical !== null) setAiLexicalSimilarity(data.aiSimilarities.lexical)
+          if (data.aiSimilarities.semantic !== null) setAiSemanticSimilarity(data.aiSimilarities.semantic)
+          if (data.aiSimilarities.overall !== null) setAiOverallSimilarity(data.aiSimilarities.overall)
+        }
+        
         setIsLoading(false)
       } catch (error) {
         console.error('Error generating AI analysis:', error)
@@ -156,8 +195,8 @@ function AnalysisReportsContent() {
 RESEARCH COMPARATIVE ANALYSIS REPORT
 Generated: ${new Date().toLocaleDateString()}
 
-Your Research: ${searchParams.get('userTitle')}
-Compared With: ${searchParams.get('existingTitle')}
+Your Research: ${userTitle}
+Compared With: ${existingTitle}
 
 OVERALL SIMILARITY: ${(overallSimilarity * 100).toFixed(1)}%
 Lexical Similarity: ${(lexicalSimilarity * 100).toFixed(1)}%
@@ -253,7 +292,7 @@ ${analysis}
                       Your Research
                     </div>
                     <p className="text-slate-800 font-medium leading-relaxed text-lg">
-                      {searchParams.get('userTitle')}
+                      {userTitle}
                     </p>
                   </div>
                   {/* Compared Research */}
@@ -263,30 +302,30 @@ ${analysis}
                       Compared With
                     </div>
                     <p className="text-slate-800 font-medium leading-relaxed text-lg">
-                      {searchParams.get('existingTitle')}
+                      {existingTitle}
                     </p>
                   </div>
                 </div>
                 
-                {/* Overall Assessment */}
-                <div className="mt-6 pt-6 border-t border-slate-200">
+                {/* AI Overall Similarity Percentage */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
                   <div className="flex items-center justify-between flex-wrap gap-4">
                     <div className="flex-1 min-w-[200px]">
-                      <h3 className="font-semibold text-slate-900 mb-1 text-lg">Overall Assessment</h3>
+                      <h3 className="font-semibold text-slate-900 mb-1 text-lg">AI Overall Similarity Percentage</h3>
                       <p className="text-sm text-slate-600">
-                        {(overallSimilarity * 100) < 15 
+                        {(displayOverall * 100) < 15 
                           ? "✓ Your research shows good originality with minimal overlap."
-                          : (overallSimilarity * 100) < 30
+                          : (displayOverall * 100) < 30
                           ? "⚠ Some similarities detected. Review the recommendations below."
                           : "⚠ Significant similarities found. Revision strongly recommended."}
                       </p>
                     </div>
                     <div className={`px-6 py-3 rounded-xl font-bold text-2xl shadow-lg ${
-                      (overallSimilarity * 100) < 15 ? 'bg-green-100 text-green-700 border-2 border-green-300' :
-                      (overallSimilarity * 100) < 30 ? 'bg-amber-100 text-amber-700 border-2 border-amber-300' :
+                      (displayOverall * 100) < 15 ? 'bg-green-100 text-green-700 border-2 border-green-300' :
+                      (displayOverall * 100) < 30 ? 'bg-amber-100 text-amber-700 border-2 border-amber-300' :
                       'bg-red-100 text-red-700 border-2 border-red-300'
                     }`}>
-                      {(overallSimilarity * 100).toFixed(1)}%
+                      {(displayOverall * 100).toFixed(1)}%
                     </div>
                   </div>
                 </div>

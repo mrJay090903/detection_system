@@ -4,6 +4,7 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+import { LoginForm } from '@/components/ui/login-form';
 import { 
   Cpu, 
   Search, 
@@ -81,13 +82,7 @@ const LandingPage = () => {
     </motion.div>
 
     {/* Login Button */}
-    <motion.button 
-      whileHover={{ scale: 1.05, boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" }}
-      whileTap={{ scale: 0.95 }}
-      className="bg-white hover:bg-[#fca311] text-[#1e3a5f] hover:text-white px-8 py-3 rounded-lg shadow-lg text-sm font-bold transition-all duration-300"
-    >
-      LOGIN
-    </motion.button>
+    <LoginForm />
   </motion.nav>
 
   {/* Main Content */}
