@@ -1,17 +1,9 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { Upload, FileText, X, Eye, Loader2 } from "lucide-react"
+import { Upload, FileText, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface FileDragAndDropProps {
   onFileContentRead: (content: string, title?: string) => void
@@ -22,7 +14,6 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractedContent, setExtractedContent] = useState("")
-  const [showContentDialog, setShowContentDialog] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
@@ -143,8 +134,8 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   }
 
   return (
-    <div className="space-y-3">
-      {/* Drag and Drop Zone */}
+    <div className="space-y-2">
+      {/* Compact Drag and Drop Zone */}
       <div
         ref={dropZoneRef}
         onDragEnter={handleDragEnter}
@@ -152,12 +143,12 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`
-          relative border-2 border-dashed rounded-lg p-6 transition-all duration-200
+          relative border border-dashed rounded-lg py-3 px-4 transition-all duration-200
           ${isDragging 
-            ? 'border-primary bg-primary/5 scale-[1.02]' 
-            : 'border-muted-foreground/25 bg-muted/30'
+            ? 'border-blue-400 bg-blue-50' 
+            : 'border-gray-300 bg-gray-50'
           }
-          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-primary/50 hover:bg-muted/50'}
+          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}
         `}
         onClick={(e) => {
           if (!isExtracting && !isDragging) {
@@ -174,101 +165,55 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           disabled={isExtracting}
         />
         
-        <div className="flex flex-col items-center justify-center space-y-3 pointer-events-none">
+        <div className="flex items-center gap-3 pointer-events-none">
           {isExtracting ? (
             <>
-              <Loader2 className="h-10 w-10 animate-spin text-primary" />
-              <p className="text-sm font-medium text-primary">Extracting text from document...</p>
-              <p className="text-xs text-muted-foreground">Reading content from your file</p>
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-blue-600">Extracting text...</p>
+              </div>
             </>
-          ) : isDragging ? (
+          ) : uploadedFile ? (
             <>
-              <Upload className="h-10 w-10 text-primary" />
-              <p className="text-sm font-medium text-primary">Drop your file here</p>
-              <p className="text-xs text-muted-foreground">PDF or DOCX only</p>
+              <div className="p-1.5 rounded bg-green-100 flex-shrink-0">
+                <FileText className="h-4 w-4 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium truncate text-gray-700">{uploadedFile.name}</p>
+                <p className="text-xs text-gray-500">
+                  {(uploadedFile.size / 1024).toFixed(0)} KB • {extractedContent.length.toLocaleString()} chars
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  handleRemoveFile()
+                }}
+                disabled={isExtracting}
+                className="shrink-0 h-7 w-7 p-0 pointer-events-auto hover:bg-red-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </>
           ) : (
             <>
-              <div className="p-3 rounded-full bg-primary/10">
-                <Upload className="h-6 w-6 text-primary" />
+              <div className="p-1.5 rounded-md bg-blue-100 flex-shrink-0">
+                <Upload className="h-4 w-4 text-blue-600" />
               </div>
-              <div className="text-center">
-                <p className="text-sm font-medium">
-                  Drag & drop your file here
+              <div className="flex-1">
+                <p className="text-xs font-medium text-gray-700">
+                  Drop file or click to upload
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  or click to browse • PDF or DOCX • Max 10MB
-                </p>
+                <p className="text-xs text-gray-500">PDF or DOCX • Max 10MB</p>
               </div>
             </>
           )}
         </div>
       </div>
-      
-      {/* Uploaded File Info */}
-      {uploadedFile && (
-        <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
-          <div className="p-2 rounded-md bg-primary/10">
-            <FileText className="h-5 w-5 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{uploadedFile.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {(uploadedFile.size / 1024).toFixed(1)} KB • {extractedContent.length.toLocaleString()} characters extracted
-            </p>
-          </div>
-          {extractedContent && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowContentDialog(true)
-              }}
-              className="shrink-0"
-            >
-              <Eye className="h-4 w-4 mr-1" />
-              View
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleRemoveFile()
-            }}
-            disabled={isExtracting}
-            className="shrink-0"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-      
-      <p className="text-xs text-muted-foreground flex items-start gap-1">
-        <span className="text-primary mt-0.5">ℹ️</span>
-        <span>Files are only scanned to extract text - they are not saved to the server</span>
-      </p>
-
-      {/* Content View Dialog */}
-      <Dialog open={showContentDialog} onOpenChange={setShowContentDialog}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle>Extracted Content</DialogTitle>
-            <DialogDescription>
-              {uploadedFile?.name} ({extractedContent.length.toLocaleString()} characters)
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="h-[60vh] w-full rounded-md border p-4">
-            <div className="whitespace-pre-wrap text-sm">
-              {extractedContent}
-            </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
