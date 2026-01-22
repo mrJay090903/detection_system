@@ -220,10 +220,6 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
             </div>
           </div>
         )}
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </div>
   )
