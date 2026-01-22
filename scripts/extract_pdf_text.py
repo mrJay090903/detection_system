@@ -1,17 +1,20 @@
 """
-PDF Text Extraction using PyMuPDF (fitz)
-This script extracts text from PDF files with better accuracy and performance.
+PDF Text Extraction using pdfminer.six (pure Python)
+Optimized for Vercel serverless execution - fast and memory-efficient.
 """
 
-import fitz  # PyMuPDF
 import sys
 import json
 from typing import Dict, Optional
+from pdfminer.high_level import extract_text
+from pdfminer.layout import LAParams
+from io import BytesIO
 
 
 def extract_text_from_pdf(pdf_path: str) -> Dict[str, any]:
     """
-    Extract text from a PDF file using PyMuPDF.
+    Extract text from a PDF file using pdfminer.six.
+    Optimized for speed - minimal page-by-page processing.
     
     Args:
         pdf_path: Path to the PDF file
@@ -20,51 +23,31 @@ def extract_text_from_pdf(pdf_path: str) -> Dict[str, any]:
         Dictionary containing extracted text and metadata
     """
     try:
-        # Open the PDF
-        doc = fitz.open(pdf_path)
+        # Extract text with optimized layout parameters (faster)
+        laparams = LAParams(
+            line_margin=0.5,
+            word_margin=0.1,
+            char_margin=2.0,
+            boxes_flow=0.5,
+            detect_vertical=False,  # Disable for speed
+            all_texts=False  # Only main text for speed
+        )
         
-        # Extract text from all pages
-        full_text = ""
-        page_texts = []
+        # Extract all text at once (faster than page-by-page)
+        full_text = extract_text(pdf_path, laparams=laparams)
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            # Use get_text() with default layout preservation
-            page_text = page.get_text("text")
-            page_texts.append({
-                "page": page_num + 1,
-                "text": page_text,
-                "length": len(page_text)
-            })
-            full_text += page_text + "\n"
-        
-        # Get document metadata
-        metadata = doc.metadata
-        page_count = len(doc)
-        
-        # Minimal cleaning - only normalize excessive newlines
-        # Keep the text as close to original as possible
+        # Quick word and character count
         cleaned_text = full_text.strip()
-        
-        doc.close()
+        word_count = len(cleaned_text.split())
         
         return {
             "success": True,
             "text": cleaned_text,
-            "full_text": full_text,
-            "page_count": page_count,
-            "pages": page_texts,
-            "metadata": {
-                "title": metadata.get("title", ""),
-                "author": metadata.get("author", ""),
-                "subject": metadata.get("subject", ""),
-                "creator": metadata.get("creator", ""),
-                "producer": metadata.get("producer", ""),
-                "creation_date": metadata.get("creationDate", ""),
-                "mod_date": metadata.get("modDate", "")
-            },
             "character_count": len(cleaned_text),
-            "word_count": len(cleaned_text.split())
+            "word_count": word_count,
+            "metadata": {
+                "extractor": "pdfminer.six"
+            }
         }
     
     except Exception as e:
@@ -77,7 +60,8 @@ def extract_text_from_pdf(pdf_path: str) -> Dict[str, any]:
 
 def extract_text_from_bytes(pdf_bytes: bytes) -> Dict[str, any]:
     """
-    Extract text from PDF bytes using PyMuPDF.
+    Extract text from PDF bytes using pdfminer.six (pure Python).
+    Optimized for speed and memory efficiency.
     
     Args:
         pdf_bytes: PDF file as bytes
@@ -86,51 +70,33 @@ def extract_text_from_bytes(pdf_bytes: bytes) -> Dict[str, any]:
         Dictionary containing extracted text and metadata
     """
     try:
-        # Open the PDF from bytes
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        # Create a BytesIO object from bytes
+        pdf_file = BytesIO(pdf_bytes)
         
-        # Extract text from all pages
-        full_text = ""
-        page_texts = []
+        # Extract text with optimized layout parameters
+        laparams = LAParams(
+            line_margin=0.5,
+            word_margin=0.1,
+            char_margin=2.0,
+            boxes_flow=0.5,
+            detect_vertical=False,
+            all_texts=False
+        )
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            # Use get_text() with default layout preservation
-            page_text = page.get_text("text")
-            page_texts.append({
-                "page": page_num + 1,
-                "text": page_text,
-                "length": len(page_text)
-            })
-            full_text += page_text + "\n"
+        # Extract all text at once
+        full_text = extract_text(pdf_file, laparams=laparams)
         
-        # Get document metadata
-        metadata = doc.metadata
-        page_count = len(doc)
-        
-        # Minimal cleaning - only normalize excessive newlines
-        # Keep the text as close to original as possible
+        # Clean up text
         cleaned_text = full_text.strip()
-        
-        doc.close()
         
         return {
             "success": True,
             "text": cleaned_text,
-            "full_text": full_text,
-            "page_count": page_count,
-            "pages": page_texts,
-            "metadata": {
-                "title": metadata.get("title", ""),
-                "author": metadata.get("author", ""),
-                "subject": metadata.get("subject", ""),
-                "creator": metadata.get("creator", ""),
-                "producer": metadata.get("producer", ""),
-                "creation_date": metadata.get("creationDate", ""),
-                "mod_date": metadata.get("modDate", "")
-            },
             "character_count": len(cleaned_text),
-            "word_count": len(cleaned_text.split())
+            "word_count": len(cleaned_text.split()),
+            "metadata": {
+                "extractor": "pdfminer.six"
+            }
         }
     
     except Exception as e:

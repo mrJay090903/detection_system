@@ -17,23 +17,24 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
-  // Prevent default drag/drop behavior on the entire component
+  // Prevent browser from opening dropped files outside the drop zone
   useEffect(() => {
     const preventDefaults = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
+      // Only prevent if NOT over our drop zone
+      const target = e.target as HTMLElement
+      if (dropZoneRef.current && !dropZoneRef.current.contains(target)) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
     }
 
-    // Add listeners to prevent browser from opening files
-    const events = ['dragenter', 'dragover', 'dragleave', 'drop']
-    events.forEach(eventName => {
-      document.body.addEventListener(eventName, preventDefaults as any)
-    })
+    // Prevent browser default behavior for drag/drop on body
+    document.body.addEventListener('dragover', preventDefaults)
+    document.body.addEventListener('drop', preventDefaults)
 
     return () => {
-      events.forEach(eventName => {
-        document.body.removeEventListener(eventName, preventDefaults as any)
-      })
+      document.body.removeEventListener('dragover', preventDefaults)
+      document.body.removeEventListener('drop', preventDefaults)
     }
   }, [])
 
@@ -162,7 +163,11 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     e.stopPropagation()
     
     // Check if we have files being dragged
-    if (e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+    const hasFiles = e.dataTransfer.types && 
+                     (e.dataTransfer.types.includes('Files') || 
+                      e.dataTransfer.types.includes('application/x-moz-file'))
+    
+    if (hasFiles) {
       setIsDragging(true)
       console.log('Drag enter - Files detected')
     }
@@ -172,25 +177,27 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     e.preventDefault()
     e.stopPropagation()
     
-    // Only set dragging to false when leaving the entire drop zone
-    const rect = dropZoneRef.current?.getBoundingClientRect()
-    if (rect) {
-      const isOutside = 
-        e.clientX <= rect.left ||
-        e.clientX >= rect.right ||
-        e.clientY <= rect.top ||
-        e.clientY >= rect.bottom
-      
-      if (isOutside) {
-        setIsDragging(false)
-        console.log('Drag leave - Outside drop zone')
-      }
+    // Only clear dragging state if we're truly leaving the drop zone
+    if (e.currentTarget === e.target) {
+      setIsDragging(false)
+      console.log('Drag leave - Exited drop zone')
     }
   }
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    
+    // Ensure dragging state is set
+    if (!isDragging) {
+      const hasFiles = e.dataTransfer.types && 
+                       (e.dataTransfer.types.includes('Files') || 
+                        e.dataTransfer.types.includes('application/x-moz-file'))
+      if (hasFiles) {
+        setIsDragging(true)
+      }
+    }
+    
     // Set the dropEffect to show the correct cursor
     e.dataTransfer.dropEffect = 'copy'
   }
