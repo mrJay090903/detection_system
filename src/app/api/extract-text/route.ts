@@ -147,7 +147,8 @@ async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, meta
 async function parsePDFLegacy(buffer: Buffer) {
   try {
     const pdfParse = await import('pdf-parse')
-    const parseFunction = pdfParse.default || pdfParse
+    // Handle both ESM and CommonJS exports
+    const parseFunction = (pdfParse as any).default || pdfParse
     
     if (typeof parseFunction !== 'function') {
       throw new Error('pdf-parse import failed - not a function')
