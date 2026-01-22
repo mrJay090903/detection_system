@@ -456,25 +456,25 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      // Extract text from PDF - Try multiple methods for reliability
+      // Extract text from PDF - Optimized for Vercel (prioritize JavaScript methods)
       console.log('[Extract-Text] Attempting PDF extraction')
       let pdfExtractionMethod = 'unknown'
-      let pythonError: any = null
+      let pdfJsError: any = null
       
       try {
-        // First try Python with pdfminer.six (pure Python, no native deps)
-        console.log('[Extract-Text] Trying Python/pdfminer.six extraction')
-        const pdfData = await parsePDFWithPython(buffer)
+        // First try PDF.js (pure JavaScript - works perfectly on Vercel)
+        console.log('[Extract-Text] Trying PDF.js extraction (Vercel-optimized)')
+        const pdfData = await parsePDFWithPDFJS(buffer)
         extractedText = pdfData.text
-        pdfExtractionMethod = 'Python/pdfminer.six'
-        console.log('[Extract-Text] PDF extracted using Python/pdfminer.six:', {
+        pdfExtractionMethod = 'PDF.js'
+        console.log('[Extract-Text] PDF extracted using PDF.js:', {
           textLength: extractedText.length,
-          metadata: pdfData.metadata
+          pages: pdfData.numpages
         })
-      } catch (pythonErr) {
-        pythonError = pythonErr
-        console.warn('[Extract-Text] Python/pdfminer.six failed, trying PDF.js')
-        console.log('[Extract-Text] Python error:', pythonErr instanceof Error ? pythonErr.message : String(pythonErr))
+      } catch (pdfjsErr) {
+        pdfJsError = pdfjsErr
+        console.warn('[Extract-Text] PDF.js failed, trying pdf-parse fallback')
+        console.log('[Extract-Text] PDF.js error:', pdfjsErr instanceof Error ? pdfjsErr.message : String(pdfjsErr))
         
         // Try PDF.js (Mozilla's library - works great on Vercel)
         try {
@@ -502,11 +502,8 @@ export async function POST(request: NextRequest) {
             })
           } catch (fallbackError) {
             console.error('[Extract-Text] All PDF parsing methods failed')
-            console.error('[Extract-Text] Python/pdfminer error:', {
-              message: pythonError instanceof Error ? pythonError.message : String(pythonError)
-            })
             console.error('[Extract-Text] PDF.js error:', {
-              message: pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)
+              message: pdfJsError instanceof Error ? pdfJsError.message : String(pdfJsError)
             })
             console.error('[Extract-Text] pdf-parse error:', {
               message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
@@ -555,7 +552,7 @@ export async function POST(request: NextRequest) {
                 error: userMessage,
                 suggestions: suggestions,
                 details: process.env.NODE_ENV === 'development' 
-                  ? `All methods failed | PDF.js: ${pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)}`
+                  ? `All methods failed | PDF.js: ${pdfJsError instanceof Error ? pdfJsError.message : String(pdfJsError)} | pdf-parse: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
                   : undefined,
                 canManualEntry: true // Signal to frontend that manual entry is available
               },
@@ -570,53 +567,37 @@ export async function POST(request: NextRequest) {
       fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       fileName.endsWith('.docx')
     ) {
-      // Extract text from DOCX - Try Python first, then fallback to mammoth
+      // Extract text from DOCX - Prioritize JavaScript for Vercel
       console.log('[Extract-Text] Attempting DOCX extraction')
       let docxExtractionMethod = 'unknown'
       
       try {
-        // First try Python with python-docx (pure Python, no native deps)
-        console.log('[Extract-Text] Trying Python/python-docx extraction')
-        const docxData = await parseDOCXWithPython(buffer)
-        extractedText = docxData.text
-        docxExtractionMethod = 'Python/python-docx'
-        console.log('[Extract-Text] DOCX extracted using Python/python-docx:', {
-          textLength: extractedText.length,
-          metadata: docxData.metadata
+        // Use mammoth (JavaScript) - works perfectly on Vercel
+        console.log('[Extract-Text] Trying mammoth extraction (Vercel-optimized)')
+        const result = await mammoth.extractRawText({ buffer })
+        extractedText = result.value
+        docxExtractionMethod = 'mammoth'
+        console.log('[Extract-Text] DOCX extracted using mammoth:', {
+          textLength: extractedText.length
         })
-      } catch (pythonError) {
-        console.warn('[Extract-Text] Python/python-docx failed, trying mammoth fallback')
-        console.log('[Extract-Text] Python error:', pythonError instanceof Error ? pythonError.message : String(pythonError))
+      } catch (mammothError) {
+        console.error('[Extract-Text] DOCX parsing failed')
+        console.error('[Extract-Text] Mammoth error:', mammothError instanceof Error ? mammothError.message : String(mammothError))
         
-        // Fallback to mammoth (JavaScript library)
-        try {
-          console.log('[Extract-Text] Attempting mammoth extraction')
-          const result = await mammoth.extractRawText({ buffer })
-          extractedText = result.value
-          docxExtractionMethod = 'mammoth'
-          console.log('[Extract-Text] DOCX extracted using mammoth:', {
-            textLength: extractedText.length
-          })
-        } catch (mammothError) {
-          console.error('[Extract-Text] Both DOCX parsing methods failed')
-          console.error('[Extract-Text] Python error:', pythonError instanceof Error ? pythonError.message : String(pythonError))
-          console.error('[Extract-Text] Mammoth error:', mammothError instanceof Error ? mammothError.message : String(mammothError))
-          
-          return NextResponse.json(
-            { 
-              error: 'Failed to parse DOCX file',
-              suggestions: [
-                'Ensure the file is a valid DOCX document',
-                'Try opening and saving the file in Microsoft Word or Google Docs',
-                'Convert the document to PDF format and try again'
-              ],
-              details: process.env.NODE_ENV === 'development' 
-                ? `Mammoth: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`
-                : undefined
-            },
-            { status: 400 }
-          )
-        }
+        return NextResponse.json(
+          { 
+            error: 'Failed to parse DOCX file',
+            suggestions: [
+              'Ensure the file is a valid DOCX document',
+              'Try opening and saving the file in Microsoft Word or Google Docs',
+              'Convert the document to PDF format and try again'
+            ],
+            details: process.env.NODE_ENV === 'development' 
+              ? `Mammoth: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`
+              : undefined
+          },
+          { status: 400 }
+        )
       }
       
       console.log(`[Extract-Text] DOCX extraction successful using ${docxExtractionMethod}`)
