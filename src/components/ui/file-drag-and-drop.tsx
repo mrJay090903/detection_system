@@ -50,7 +50,15 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract text')
+        // Show detailed error message
+        const errorMessage = data.error || 'Failed to extract text from file'
+        const detailedMessage = data.details ? `${errorMessage} (${data.details})` : errorMessage
+        throw new Error(errorMessage)
+      }
+
+      // Validate that we got text
+      if (!data.text || data.text.length < 10) {
+        throw new Error('No meaningful text could be extracted from the file. The file may be empty or contain only images.')
       }
 
       // Set the extracted text
@@ -60,11 +68,12 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
       if (data.title && data.title !== 'Untitled Research') {
         toast.success(`Extracted: "${data.title}" (${data.extractedLength} chars)`)
       } else {
-        toast.success(`Text extracted successfully from ${data.fileName}`)
+        toast.success(`Text extracted successfully (${data.extractedLength || data.text.length} chars)`)
       }
     } catch (error) {
       console.error('File extraction error:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to extract text from file')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to extract text from file'
+      toast.error(errorMessage, { duration: 5000 })
       setUploadedFile(null)
     } finally {
       setIsExtracting(false)

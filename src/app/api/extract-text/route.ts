@@ -143,11 +143,31 @@ async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, meta
   }
 }
 
-// Fallback: pdf-parse doesn't have ESM support, need to use dynamic import
+// Fallback: pdf-parse for pure JavaScript PDF parsing (works on Vercel)
 async function parsePDFLegacy(buffer: Buffer) {
-  const pdfParse = await import('pdf-parse') as any
-  const pdf = pdfParse.default || pdfParse
-  return pdf(buffer)
+  try {
+    const pdfParse = await import('pdf-parse')
+    const parseFunction = pdfParse.default || pdfParse
+    
+    if (typeof parseFunction !== 'function') {
+      throw new Error('pdf-parse import failed - not a function')
+    }
+    
+    const result = await parseFunction(buffer)
+    
+    if (!result || !result.text) {
+      throw new Error('pdf-parse returned no text')
+    }
+    
+    return result
+  } catch (error) {
+    console.error('[pdf-parse] Detailed error:', {
+      error,
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      message: error instanceof Error ? error.message : String(error)
+    })
+    throw error
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -234,36 +254,51 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      // Extract text from PDF using PyMuPDF
-      console.log('[Extract-Text] Attempting PDF extraction with PyMuPDF')
+      // Extract text from PDF - Try PyMuPDF first, fallback to pdf-parse
+      console.log('[Extract-Text] Attempting PDF extraction')
+      let pdfExtractionMethod = 'unknown'
+      
       try {
+        // First try PyMuPDF (better quality but requires Python)
+        console.log('[Extract-Text] Trying PyMuPDF extraction')
         const pdfData = await parsePDFWithPyMuPDF(buffer)
         extractedText = pdfData.text
+        pdfExtractionMethod = 'PyMuPDF'
         console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
           textLength: extractedText.length,
           metadata: pdfData.metadata
         })
-      } catch (error) {
-        console.error('[Extract-Text] PyMuPDF parsing error, trying fallback:', error)
-        // Fallback to pdf-parse if PyMuPDF fails
+      } catch (pymupdfError) {
+        console.warn('[Extract-Text] PyMuPDF failed (likely Python not available), using pdf-parse fallback')
+        console.log('[Extract-Text] PyMuPDF error details:', pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError))
+        
+        // Fallback to pdf-parse (pure JavaScript, works everywhere)
         try {
-          console.log('[Extract-Text] Attempting fallback to pdf-parse')
+          console.log('[Extract-Text] Attempting pdf-parse fallback')
           const pdfData = await parsePDFLegacy(buffer)
           extractedText = pdfData.text
-          console.log('[Extract-Text] PDF extracted using legacy pdf-parse fallback')
+          pdfExtractionMethod = 'pdf-parse'
+          console.log('[Extract-Text] PDF extracted using pdf-parse fallback:', {
+            textLength: extractedText.length,
+            pages: pdfData.numpages
+          })
         } catch (fallbackError) {
           console.error('[Extract-Text] Both PDF parsing methods failed')
-          console.error('[Extract-Text] PyMuPDF error:', error)
+          console.error('[Extract-Text] PyMuPDF error:', pymupdfError)
           console.error('[Extract-Text] pdf-parse error:', fallbackError)
           return NextResponse.json(
             { 
-              error: 'Failed to parse PDF file',
-              details: `PyMuPDF: ${error instanceof Error ? error.message : String(error)}, pdf-parse: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+              error: 'Failed to parse PDF file. The file may be corrupted, password-protected, or in an unsupported format.',
+              details: process.env.NODE_ENV === 'development' 
+                ? `PyMuPDF: ${pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError)}, pdf-parse: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                : undefined
             },
             { status: 400 }
           )
         }
       }
+      
+      console.log(`[Extract-Text] PDF extraction successful using ${pdfExtractionMethod}`)
     } else if (
       fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       fileName.endsWith('.docx')
