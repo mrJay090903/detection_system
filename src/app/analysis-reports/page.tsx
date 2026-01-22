@@ -12,9 +12,7 @@ import {
   CheckCircle, 
   Layers, 
   Lightbulb,
-  BookOpen,
-  Download,
-  Printer
+  BookOpen
 } from "lucide-react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
@@ -24,10 +22,13 @@ function AnalysisReportsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
+  const [progress, setProgress] = useState(0)
+  const [loadingMessage, setLoadingMessage] = useState('Initializing...')
   const [analysis, setAnalysis] = useState<string>("")
   const [activeTab, setActiveTab] = useState('ai-assessment')
   const [userTitle, setUserTitle] = useState('')
   const [existingTitle, setExistingTitle] = useState('')
+  const [userConcept, setUserConcept] = useState('')
   const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
   const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
   const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
@@ -102,11 +103,71 @@ function AnalysisReportsContent() {
       .replace(/^\s*-\s*/gm, '• ') // Convert dashes to bullets
   }
 
+  // Extract proposed title from document content
+  const extractProposedTitle = (text: string): string | null => {
+    const patterns = [
+      /Proposed Title:\s*([^\n\r]+)/i,
+      /Title:\s*([^\n\r]+)/i,
+      /Research Title:\s*([^\n\r]+)/i,
+    ]
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern)
+      if (match && match[1]) {
+        // Extract and clean the title, limit to 500 chars
+        let title = match[1].trim()
+          .split(/[\n\r]/)[0]  // Take only first line
+        
+        // Stop capturing at BU Thematic Area
+        const buThematicIndex = title.toLowerCase().indexOf('bu thematic area')
+        if (buThematicIndex !== -1) {
+          title = title.substring(0, buThematicIndex).trim()
+        }
+        
+        title = title
+          .substring(0, 500)   // Limit to 500 chars
+          .trim()
+        // Remove any trailing punctuation except periods at the end of sentences
+        title = title.replace(/[,;:]\s*$/, '')
+        // Remove any extra whitespace
+        title = title.replace(/\s+/g, ' ')
+        // Remove any markdown or special formatting
+        title = title.replace(/[*_~`]/g, '')
+        return title || null
+      }
+    }
+    
+    return null
+  }
+
   const sections = analysis ? parseAnalysis(analysis) : null
+  const extractedTitle = userConcept ? extractProposedTitle(userConcept) : null
+  const displayTitle = extractedTitle || userTitle || 'Research Document'
 
   useEffect(() => {
+    // Progress simulation
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval)
+          return 90
+        }
+        const increment = Math.random() * 15 + 5
+        return Math.min(prev + increment, 90)
+      })
+    }, 800)
+
+    // Update loading messages
+    const messageTimeout1 = setTimeout(() => setLoadingMessage('Analyzing research content...'), 2000)
+    const messageTimeout2 = setTimeout(() => setLoadingMessage('Comparing with existing research...'), 5000)
+    const messageTimeout3 = setTimeout(() => setLoadingMessage('Generating AI insights...'), 8000)
+    const messageTimeout4 = setTimeout(() => setLoadingMessage('Finalizing analysis...'), 12000)
+
     const loadAnalysis = async () => {
       try {
+        setProgress(10)
+        setLoadingMessage('Loading your research data...')
+        
         // Try to get data from sessionStorage first (for long text support)
         const aiAnalysisDataStr = sessionStorage.getItem('aiAnalysisData')
         let userTitleData, userConcept, existingTitleData, existingThesisBrief, lexicalSimilarityStr, semanticSimilarityStr, overallSimilarityStr
@@ -134,7 +195,16 @@ function AnalysisReportsContent() {
         }
 
         if (!userTitleData || !userConcept || !existingTitleData || !existingThesisBrief) {
-          toast.error('Missing required data')
+          console.error('Missing required data for analysis report:', {
+            hasUserTitle: !!userTitleData,
+            hasUserConcept: !!userConcept,
+            hasExistingTitle: !!existingTitleData,
+            hasExistingThesisBrief: !!existingThesisBrief,
+            userConceptLength: userConcept?.length || 0,
+            existingThesisBriefLength: existingThesisBrief?.length || 0,
+            fromSessionStorage: !!aiAnalysisDataStr
+          })
+          toast.error('Missing required data. Please go back and ensure you uploaded a file or entered all required information.')
           router.push('/research-check')
           return
         }
@@ -142,6 +212,7 @@ function AnalysisReportsContent() {
         // Set titles for display
         setUserTitle(userTitleData)
         setExistingTitle(existingTitleData)
+        setUserConcept(userConcept)
 
         const response = await fetch('/api/ai-analysis', {
           method: 'POST',
@@ -160,9 +231,61 @@ function AnalysisReportsContent() {
         })
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          console.error('AI Analysis API Error:', errorData)
-          throw new Error(errorData.error || 'Failed to generate AI analysis')
+          let errorData: any = {}
+          let rawResponseText = ''
+          
+          try {
+            // First, get the raw text
+            rawResponseText = await response.text()
+            // Try to parse it as JSON
+            if (rawResponseText) {
+              errorData = JSON.parse(rawResponseText)
+            }
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError)
+            console.error('Raw response text:', rawResponseText)
+          }
+          
+          console.error('AI Analysis API Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            errorData,
+            rawResponse: rawResponseText.substring(0, 500) // Log first 500 chars
+          })
+          
+          // Handle quota errors specifically
+          if (response.status === 429 || errorData.isQuotaError) {
+            const retryAfter = errorData.retryAfter || 60;
+            const friendlyMessage = errorData.message || 
+              'The AI analysis service has reached its daily usage limit. Please try again later (typically resets every 24 hours).';
+            
+            // Clear progress indicators
+            clearInterval(progressInterval)
+            clearTimeout(messageTimeout1)
+            clearTimeout(messageTimeout2)
+            clearTimeout(messageTimeout3)
+            clearTimeout(messageTimeout4)
+            
+            toast.error(friendlyMessage, { 
+              duration: 8000,
+            })
+            
+            throw new Error(friendlyMessage)
+          }
+          
+          const errorMessage = errorData.message || errorData.error || errorData.details || 
+                             rawResponseText.substring(0, 200) ||
+                             `Server error (${response.status}): ${response.statusText}`
+          
+          // Clear progress indicators
+          clearInterval(progressInterval)
+          clearTimeout(messageTimeout1)
+          clearTimeout(messageTimeout2)
+          clearTimeout(messageTimeout3)
+          clearTimeout(messageTimeout4)
+          
+          toast.error(errorMessage, { duration: 5000 })
+          throw new Error(errorMessage)
         }
 
         const data = await response.json()
@@ -175,47 +298,43 @@ function AnalysisReportsContent() {
           if (data.aiSimilarities.overall !== null) setAiOverallSimilarity(data.aiSimilarities.overall)
         }
         
-        setIsLoading(false)
+        // Complete progress
+        setProgress(100)
+        setLoadingMessage('Analysis complete!')
+        
+        // Clear intervals and timeouts
+        clearInterval(progressInterval)
+        clearTimeout(messageTimeout1)
+        clearTimeout(messageTimeout2)
+        clearTimeout(messageTimeout3)
+        clearTimeout(messageTimeout4)
+        
+        setTimeout(() => setIsLoading(false), 500)
       } catch (error) {
-        console.error('Error generating AI analysis:', error)
-        toast.error('Failed to generate AI analysis')
-        router.push('/research-check')
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred'
+        console.error('Error generating AI analysis:', {
+          error,
+          message: errorMessage,
+          type: error instanceof Error ? error.constructor.name : typeof error
+        })
+        
+        // Clear progress indicators
+        clearInterval(progressInterval)
+        clearTimeout(messageTimeout1)
+        clearTimeout(messageTimeout2)
+        clearTimeout(messageTimeout3)
+        clearTimeout(messageTimeout4)
+        
+        setIsLoading(false)
+        toast.error(`Failed to generate AI analysis: ${errorMessage}`, { duration: 6000 })
+        
+        // Delay redirect to allow user to see the error
+        setTimeout(() => router.push('/research-check'), 2000)
       }
     }
 
     loadAnalysis()
   }, [searchParams, router])
-
-  const handleExport = () => {
-    window.print()
-  }
-
-  const handleDownload = () => {
-    const content = `
-RESEARCH COMPARATIVE ANALYSIS REPORT
-Generated: ${new Date().toLocaleDateString()}
-
-Your Research: ${userTitle}
-Compared With: ${existingTitle}
-
-OVERALL SIMILARITY: ${(overallSimilarity * 100).toFixed(1)}%
-Lexical Similarity: ${(lexicalSimilarity * 100).toFixed(1)}%
-Semantic Similarity: ${(semanticSimilarity * 100).toFixed(1)}%
-
-${analysis}
-    `.trim()
-
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `analysis-report-${Date.now()}.txt`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    toast.success('Report downloaded successfully')
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -232,20 +351,10 @@ ${analysis}
                 <p className="text-sm text-slate-500">Powered by Gemini AI</p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleDownload} className="gap-2 hover:bg-slate-100">
-                <Download className="w-4 h-4" />
-                Download
-              </Button>
-              <Button variant="outline" onClick={handleExport} className="gap-2 hover:bg-slate-100">
-                <Printer className="w-4 h-4" />
-                Print PDF
-              </Button>
-              <Button variant="outline" onClick={() => router.push('/research-check')} className="gap-2 hover:bg-slate-100">
-                <ArrowLeft className="w-4 h-4" />
-                Back to Results
-              </Button>
-            </div>
+            <Button variant="outline" onClick={() => router.push('/research-check')} className="gap-2 hover:bg-slate-100">
+              <ArrowLeft className="w-4 h-4" />
+              Back to Results
+            </Button>
           </div>
         </div>
       </header>
@@ -253,19 +362,28 @@ ${analysis}
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
         {isLoading ? (
-          <div className="bg-white rounded-2xl shadow-lg p-12 text-center">
-            <div className="relative inline-block">
-              <Sparkles className="w-16 h-16 text-purple-600 mx-auto mb-4 animate-pulse" />
-              <div className="absolute inset-0 animate-ping opacity-20">
-                <Sparkles className="w-16 h-16 text-purple-600" />
-              </div>
+          <div className="bg-white rounded-2xl shadow-xl p-12 text-center border border-slate-200">
+            <div className="mb-6">
+             
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Generating AI Analysis</h2>
-            <p className="text-gray-600">Our AI is analyzing the similarities between your research and the existing work...</p>
-            <div className="mt-4 flex justify-center">
-              <div className="w-48 h-1 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-purple-600 to-indigo-600 animate-pulse"></div>
+            <h2 className="text-3xl font-bold text-slate-900 mb-3">Generating Advanced AI Analysis</h2>
+            <p className="text-slate-600 text-lg mb-6">{loadingMessage}</p>
+            
+            {/* Progress Bar */}
+            <div className="max-w-lg mx-auto">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-700">Analysis Progress</span>
+                <span className="text-lg font-bold text-purple-600">{Math.round(progress)}%</span>
               </div>
+              <div className="w-full h-4 bg-slate-200 rounded-full overflow-hidden shadow-inner">
+                <div 
+                  className="h-full bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 transition-all duration-500 ease-out rounded-full relative"
+                  style={{ width: `${progress}%` }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30 animate-pulse"></div>
+                </div>
+              </div>
+              <p className="text-sm text-slate-500 mt-4">This process may take 30-60 seconds depending on content length</p>
             </div>
           </div>
         ) : (
@@ -285,26 +403,8 @@ ${analysis}
               </div>
               <div className="p-6">
                 <div className="grid md:grid-cols-2 gap-6">
-                  {/* Your Research */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-slate-500 text-sm font-semibold uppercase tracking-wide">
-                      <FileText className="w-4 h-4" />
-                      Your Research
-                    </div>
-                    <p className="text-slate-800 font-medium leading-relaxed text-lg">
-                      {userTitle}
-                    </p>
-                  </div>
-                  {/* Compared Research */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-slate-500 text-sm font-semibold uppercase tracking-wide">
-                      <FileText className="w-4 h-4" />
-                      Compared With
-                    </div>
-                    <p className="text-slate-800 font-medium leading-relaxed text-lg">
-                      {existingTitle}
-                    </p>
-                  </div>
+                
+              
                 </div>
                 
                 {/* AI Overall Similarity Percentage */}
@@ -331,6 +431,101 @@ ${analysis}
                 </div>
               </div>
             </motion.div>
+
+            {/* Your Research Document Preview - Document Viewer Style */}
+            {userConcept && userConcept.length > 100 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="bg-gradient-to-br from-slate-100 to-slate-50 rounded-2xl shadow-2xl border border-slate-300 overflow-hidden"
+              >
+                {/* Document Header - File Manager Style */}
+                <div className="bg-gradient-to-r from-slate-700 via-slate-800 to-slate-900 px-6 py-4 border-b border-slate-600">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
+                        <FileText className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-xl font-bold text-white">Your Research Document</h2>
+                          <span className="px-2 py-0.5 bg-green-500 text-white text-xs font-semibold rounded">ANALYZED</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-sm text-slate-300">
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3.5 h-3.5" />
+                            {userConcept.length.toLocaleString()} chars
+                          </span>
+                          <span>•</span>
+                          <span>{Math.ceil(userConcept.split(/\s+/).length).toLocaleString()} words</span>
+                          <span>•</span>
+                          <span>{Math.ceil(userConcept.split(/\s+/).length / 200)} min read</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      <span className="text-sm text-green-400 font-medium">AI Verified</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Document Content - Paper Style */}
+                <div className="p-8">
+                  {/* Paper Container */}
+                  <div className="bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden">
+                    {/* Paper Header with Lines */}
+                    <div className="h-3 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
+                    
+                    {/* Document Content Area */}
+                    <div className="p-10 max-h-[600px] overflow-y-auto" style={{ 
+                      backgroundImage: 'linear-gradient(to bottom, transparent 95%, rgba(148, 163, 184, 0.1) 95%)',
+                      backgroundSize: '100% 24px'
+                    }}>
+                      {/* Document Title */}
+                      <div className="mb-6 pb-4 border-b-2 border-slate-200">
+                        <h3 className="text-2xl font-bold text-slate-900 mb-2">{displayTitle}</h3>
+                        {extractedTitle && (
+                          <p className="text-xs text-indigo-600 font-medium mb-2">✓ Title extracted from document</p>
+                        )}
+                        <div className="flex items-center gap-3 text-sm text-slate-500">
+                          <span>Submitted for analysis</span>
+                          <span>•</span>
+                          <span>{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Document Text */}
+                      <div className="prose prose-slate max-w-none">
+                        <p className="text-slate-800 text-base leading-loose whitespace-pre-wrap font-serif" style={{ textAlign: 'justify', textIndent: '2em' }}>
+                          {userConcept.substring(0, 3000)}
+                          {userConcept.length > 3000 && (
+                            <span className="text-slate-400 italic not-italic font-sans text-sm">
+                              {' '}... (showing first 3000 characters of document)
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Paper Footer */}
+                    <div className="h-2 bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200"></div>
+                  </div>
+                  
+                  {/* Document Info Footer */}
+                  <div className="mt-6 flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2 text-indigo-700 font-medium">
+                      <CheckCircle className="w-4 h-4" />
+                      <span>This content was successfully analyzed by AI</span>
+                    </div>
+                    {userConcept.length > 3000 && (
+                      <span className="text-slate-500">Full document: {userConcept.length.toLocaleString()} characters</span>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
             {/* Metrics Grid */}
             <motion.div

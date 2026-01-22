@@ -96,9 +96,14 @@ export default function CheckSimilarityPage() {
     }
   }
 
-  const handleFileContentRead = (content: string) => {
+  const handleFileContentRead = (content: string, title?: string) => {
     // Store file content but don't display it in textarea
     setFileContent(content)
+    
+    // If title was extracted from the PDF, auto-fill the title field
+    if (title && title !== 'Untitled Research' && !proposedTitle.trim()) {
+      setProposedTitle(title)
+    }
   }
 
   return (

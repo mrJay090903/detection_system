@@ -3,12 +3,35 @@ import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 
 // ============================================================================
+// STOP WORDS AND TEXT PREPROCESSING
+// ============================================================================
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+  'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'be',
+  'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+  'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this',
+  'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+  'what', 'which', 'who', 'when', 'where', 'why', 'how', 'all', 'each',
+  'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no',
+  'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'using'
+])
+
+function preprocessText(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ') // Remove special chars
+    .split(/\s+/)
+    .filter(word => word.length > 2) // Remove very short words
+    .filter(word => !STOP_WORDS.has(word)) // Remove stop words
+}
+
+// ============================================================================
 // ADVANCED SIMILARITY DETECTION ALGORITHMS
 // ============================================================================
 
 // 1. N-GRAM TEXT MATCHING
 function generateNGrams(text: string, n: number): string[] {
-  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
+  const words = preprocessText(text) // Use improved preprocessing
   const ngrams: string[] = []
   
   for (let i = 0; i <= words.length - n; i++) {
@@ -18,22 +41,29 @@ function generateNGrams(text: string, n: number): string[] {
   return ngrams
 }
 
-function nGramSimilarity(text1: string, text2: string, n: number = 3): number {
-  const ngrams1 = new Set(generateNGrams(text1, n))
-  const ngrams2 = new Set(generateNGrams(text2, n))
+function nGramSimilarity(text1: string, text2: string, n: number = 4): number {
+  // Test multiple n-gram sizes for better accuracy
+  const sizes = [3, 4, 5]
+  const similarities = sizes.map(size => {
+    const ngrams1 = new Set(generateNGrams(text1, size))
+    const ngrams2 = new Set(generateNGrams(text2, size))
+    
+    if (ngrams1.size === 0 || ngrams2.size === 0) return 0
+    
+    const intersection = new Set([...ngrams1].filter(x => ngrams2.has(x)))
+    const union = new Set([...ngrams1, ...ngrams2])
+    
+    return intersection.size / union.size
+  })
   
-  if (ngrams1.size === 0 || ngrams2.size === 0) return 0
-  
-  const intersection = new Set([...ngrams1].filter(x => ngrams2.has(x)))
-  const union = new Set([...ngrams1, ...ngrams2])
-  
-  return intersection.size / union.size // Jaccard similarity
+  // Return weighted average favoring larger n-grams
+  return (similarities[0] * 0.3 + similarities[1] * 0.4 + similarities[2] * 0.3)
 }
 
 // 2. FINGERPRINTING / WINNOWING ALGORITHM
 function fingerprint(text: string, windowSize: number = 5): Set<string> {
   const hashes: string[] = []
-  const ngrams = generateNGrams(text, 3)
+  const ngrams = generateNGrams(text, 4)
   
   // Create hash for each n-gram
   ngrams.forEach(ngram => {
@@ -140,7 +170,115 @@ function sentenceSimilarity(text1: string, text2: string): number {
   return comparisons > 0 ? totalSimilarity / comparisons : 0
 }
 
-// 6. MACHINE LEARNING-INSPIRED FEATURE EXTRACTION
+// 6. CONCEPT EXTRACTION - Extract key concepts from research text
+function extractKeyConcepts(text: string): {
+  problemDomain: string[]
+  methodology: string[]
+  technologies: string[]
+  applicationArea: string[]
+  outcomes: string[]
+} {
+  const lowerText = text.toLowerCase()
+  
+  // Problem domain keywords
+  const problemKeywords = [
+    'detect', 'detection', 'identify', 'recognition', 'classify', 'classification',
+    'analyze', 'analysis', 'predict', 'prediction', 'monitor', 'monitoring',
+    'track', 'tracking', 'measure', 'measurement', 'assess', 'assessment',
+    'diagnose', 'diagnosis', 'prevent', 'prevention', 'optimize', 'optimization',
+    'improve', 'improvement', 'enhance', 'enhancement', 'solve', 'solution'
+  ]
+  
+  // Methodology keywords
+  const methodologyKeywords = [
+    'algorithm', 'model', 'method', 'approach', 'technique', 'framework',
+    'system', 'architecture', 'design', 'implementation', 'development',
+    'machine learning', 'deep learning', 'neural network', 'cnn', 'rnn', 'lstm',
+    'supervised', 'unsupervised', 'reinforcement', 'transfer learning',
+    'feature extraction', 'data processing', 'training', 'testing', 'validation'
+  ]
+  
+  // Technology keywords
+  const technologyKeywords = [
+    'ai', 'artificial intelligence', 'ml', 'machine learning', 'computer vision',
+    'nlp', 'natural language processing', 'image processing', 'video processing',
+    'sensor', 'iot', 'cloud', 'mobile', 'web', 'android', 'ios',
+    'tensorflow', 'pytorch', 'opencv', 'python', 'java', 'javascript'
+  ]
+  
+  // Application area keywords
+  const applicationKeywords = [
+    'healthcare', 'medical', 'education', 'agriculture', 'security',
+    'transportation', 'finance', 'retail', 'manufacturing', 'entertainment',
+    'social media', 'e-commerce', 'smart city', 'home automation',
+    'environmental', 'energy', 'disaster', 'emergency'
+  ]
+  
+  // Outcome keywords
+  const outcomeKeywords = [
+    'accuracy', 'efficiency', 'performance', 'quality', 'effectiveness',
+    'productivity', 'reliability', 'usability', 'accessibility', 'scalability',
+    'cost reduction', 'time saving', 'automation', 'real-time', 'fast'
+  ]
+  
+  const findMatches = (keywords: string[]) => {
+    return keywords.filter(keyword => lowerText.includes(keyword))
+  }
+  
+  return {
+    problemDomain: findMatches(problemKeywords),
+    methodology: findMatches(methodologyKeywords),
+    technologies: findMatches(technologyKeywords),
+    applicationArea: findMatches(applicationKeywords),
+    outcomes: findMatches(outcomeKeywords)
+  }
+}
+
+// 7. CONCEPT SIMILARITY - Compare extracted concepts
+function conceptSimilarity(text1: string, text2: string): number {
+  const concepts1 = extractKeyConcepts(text1)
+  const concepts2 = extractKeyConcepts(text2)
+  
+  // Calculate similarity for each concept category
+  const calculateCategoryMatch = (arr1: string[], arr2: string[]) => {
+    if (arr1.length === 0 && arr2.length === 0) return 0
+    if (arr1.length === 0 || arr2.length === 0) return 0
+    
+    const set1 = new Set(arr1)
+    const set2 = new Set(arr2)
+    const intersection = new Set([...set1].filter(x => set2.has(x)))
+    const union = new Set([...set1, ...set2])
+    
+    return intersection.size / union.size
+  }
+  
+  // Weight different concept categories
+  const problemMatch = calculateCategoryMatch(concepts1.problemDomain, concepts2.problemDomain)
+  const methodMatch = calculateCategoryMatch(concepts1.methodology, concepts2.methodology)
+  const techMatch = calculateCategoryMatch(concepts1.technologies, concepts2.technologies)
+  const appMatch = calculateCategoryMatch(concepts1.applicationArea, concepts2.applicationArea)
+  const outcomeMatch = calculateCategoryMatch(concepts1.outcomes, concepts2.outcomes)
+  
+  // Problem domain and application area are most important for concept similarity
+  // Technology and methodology are less important (can be different but solve same problem)
+  const weights = {
+    problem: 0.35,     // What problem are they solving?
+    application: 0.30, // Where is it applied?
+    methodology: 0.20, // How do they solve it?
+    technology: 0.10,  // What tech do they use?
+    outcome: 0.05      // What results do they achieve?
+  }
+  
+  return (
+    problemMatch * weights.problem +
+    appMatch * weights.application +
+    methodMatch * weights.methodology +
+    techMatch * weights.technology +
+    outcomeMatch * weights.outcome
+  )
+}
+
+// 8. MACHINE LEARNING-INSPIRED FEATURE EXTRACTION
 function extractTextFeatures(text: string): {
   avgWordLength: number
   avgSentenceLength: number
@@ -202,6 +340,7 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
   lcs: number
   sentence: number
   feature: number
+  concept: number
   composite: number
   confidence: number
 } {
@@ -211,15 +350,18 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
   const lcs = longestCommonSubsequence(text1, text2)
   const sentence = sentenceSimilarity(text1, text2)
   const feature = featureSimilarity(text1, text2)
+  const concept = conceptSimilarity(text1, text2)
   
   // Weighted composite score (tuned for academic plagiarism detection)
+  // Increased weights for semantic and concept algorithms
   const weights = {
-    nGram: 0.25,
-    fingerprint: 0.20,
-    rabinKarp: 0.15,
-    lcs: 0.15,
-    sentence: 0.15,
-    feature: 0.10
+    nGram: 0.18,
+    fingerprint: 0.15,
+    rabinKarp: 0.10,
+    lcs: 0.12,
+    sentence: 0.18,
+    feature: 0.10,
+    concept: 0.17  // NEW: Concept similarity is highly weighted
   }
   
   const composite = 
@@ -228,10 +370,11 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
     rabinKarp * weights.rabinKarp +
     lcs * weights.lcs +
     sentence * weights.sentence +
-    feature * weights.feature
+    feature * weights.feature +
+    concept * weights.concept
   
   // Calculate confidence based on agreement between algorithms
-  const scores = [nGram, fingerprintScore, rabinKarp, lcs, sentence, feature]
+  const scores = [nGram, fingerprintScore, rabinKarp, lcs, sentence, feature, concept]
   const avg = scores.reduce((a, b) => a + b, 0) / scores.length
   const variance = scores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) / scores.length
   const confidence = 1 - Math.min(variance * 2, 1) // Lower variance = higher confidence
@@ -243,6 +386,7 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
     lcs,
     sentence,
     feature,
+    concept,
     composite,
     confidence
   }
@@ -259,72 +403,89 @@ function generateFallbackExplanation(
   existingTitle: string,
   existingThesisBrief: string,
   lexicalSim: number,
-  multiAlgoSim: number
+  multiAlgoSim: number,
+  conceptSim: number
 ): string {
-  const avgSim = ((lexicalSim + multiAlgoSim) / 2) * 100
+  const avgSim = ((lexicalSim + multiAlgoSim + conceptSim) / 3) * 100
   const lexicalPercent = (lexicalSim * 100).toFixed(1)
   const multiAlgoPercent = (multiAlgoSim * 100).toFixed(1)
+  const conceptPercent = (conceptSim * 100).toFixed(1)
+  
+  // Extract concepts for comparison
+  const concepts1 = extractKeyConcepts(proposedConcept)
+  const concepts2 = extractKeyConcepts(existingThesisBrief)
   
   if (avgSim >= 70) {
     return `**Are the titles similar?** 
 Yes, the titles "${proposedTitle}" and "${existingTitle}" share similar words and talk about the same topic.
 
-**What problem are they solving?**
-Both researches are trying to solve the same problem. The similarity analysis (${multiAlgoPercent}%) shows they have similar content and structure.
+**Are they solving the same problem?**
+Yes, the researches appear to be solving the same or very similar problems. The concept similarity analysis (${conceptPercent}%) shows they address similar problem domains and applications.
 
-**What methods do they use?**
-Both researches use similar technologies, tools, or methods to solve the problem.
+**What concepts do they share?**
+- Problem Domain: ${concepts1.problemDomain.length > 0 && concepts2.problemDomain.length > 0 ? 'Both researches focus on similar problems (' + [...new Set([...concepts1.problemDomain, ...concepts2.problemDomain])].slice(0, 3).join(', ') + ')' : 'Similar problem areas'}
+- Application: ${concepts1.applicationArea.length > 0 && concepts2.applicationArea.length > 0 ? 'Same application domain (' + [...new Set([...concepts1.applicationArea, ...concepts2.applicationArea])].slice(0, 2).join(', ') + ')' : 'Related applications'}
+- Methods: ${concepts1.methodology.length > 0 && concepts2.methodology.length > 0 ? 'Similar approaches (' + [...new Set([...concepts1.methodology, ...concepts2.methodology])].slice(0, 3).join(', ') + ')' : 'Related methodologies'}
 
 **What makes them similar?**
-- They share many of the same words and phrases
+- They share many of the same words and phrases (Lexical: ${lexicalPercent}%)
 - They use similar technologies or tools
-- They have the same goals or objectives
-- They solve the same problem in similar ways
+- They have the same goals or objectives  
+- The core concepts and ideas are very similar (Concept: ${conceptPercent}%)
+- They solve the same problem in similar ways (Overall: ${multiAlgoPercent}%)
 
 **Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which means these two researches are very similar.
+The similarity score is ${avgSim.toFixed(0)}%, which means these two researches are very similar both in wording AND in their core concepts.
 
 **Bottom line**
-These researches are too similar - they might be copies or lack originality. You should review them carefully.`
+These researches are too similar - they might be addressing the same problem with the same approach. You should significantly differentiate your research concept or choose a different problem to solve.`
   } else if (avgSim >= 40) {
     return `**Are the titles similar?**
 The titles "${proposedTitle}" and "${existingTitle}" share some similar words, but they might focus on slightly different things.
 
-**What problem are they solving?**
-They might be solving related problems, but not exactly the same. The similarity analysis shows ${multiAlgoPercent}% overlap in content.
+**Are they solving the same problem?**
+They might be solving related problems, but not exactly the same. The concept analysis shows ${conceptPercent}% similarity - they're in the same general area but with different focus.
 
-**What methods do they use?**
-They might use some similar tools or methods, but also have differences in their approach.
+**What concepts do they share?**
+- Problem Domain: ${concepts1.problemDomain.length > 0 && concepts2.problemDomain.length > 0 ? 'Some overlap in problem areas' : 'Different problem focus'}
+- Application: ${concepts1.applicationArea.length > 0 && concepts2.applicationArea.length > 0 ? 'Related but distinct application domains' : 'Different applications'}  
+- Approach: The methodologies and approaches have some similarities but also notable differences
 
 **What makes them similar?**
-- They share some words or phrases
+- They share some words or phrases (Lexical: ${lexicalPercent}%)
 - They might use some of the same technologies
 - They're in the same research area
-- But they have enough differences to be considered separate
+- Some conceptual overlap (Concept: ${conceptPercent}%)
+- But they have enough differences to be considered separate (Overall: ${multiAlgoPercent}%)
 
 **Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which means they're somewhat similar but not too much.
+The similarity score is ${avgSim.toFixed(0)}%, which means they're somewhat similar but different enough in their core concepts and approaches.
 
 **Bottom line**
-These researches are somewhat similar but different enough. They're probably okay, but you should still review them to make sure they're original enough.`
+These researches are somewhat similar but different enough. Consider emphasizing what makes your research unique - different methodology, different application, or different problem focus.`
   } else {
     return `**Are the titles similar?**
 The titles "${proposedTitle}" and "${existingTitle}" are different and talk about different topics.
 
-**What problem are they solving?**
-They are solving different problems with only ${multiAlgoPercent}% similarity detected.
+**Are they solving the same problem?**
+No, they are solving different problems. The concept analysis shows only ${conceptPercent}% similarity - they're addressing different research questions or applications.
 
-**What methods do they use?**
-They use different methods, tools, or technologies to solve their problems.
+**What concepts do they share?**
+- Limited overlap detected across problem domains, methodologies, and applications
+- May use some common technologies but for different purposes
+- Different research goals and outcomes
 
 **What makes them similar?**
-Not much - they are different researches with different goals and methods.
+Not much - they are different researches with different goals and methods:
+- Low word similarity (Lexical: ${lexicalPercent}%)
+- Different core concepts (Concept: ${conceptPercent}%)
+- Different overall approach (Overall: ${multiAlgoPercent}%)
 
 **Why are they similar?**
-The similarity score is ${avgSim.toFixed(0)}%, which is low. This means they are different researches.
+The similarity score is ${avgSim.toFixed(0)}%, which is low. This means they are different researches addressing different problems or using different approaches.
 
 **Bottom line**
-These researches are different enough - they are original and don't overlap much.`
+These researches are sufficiently different - they address different problems, use different approaches, or target different applications. Your research appears to be original and distinct from the existing work.`
   }
 }
 
@@ -661,7 +822,7 @@ async function calculateCosineSimilarity(
       
       const enhancedTitleLexical = titleLexicalSim * 0.7 + titleOverlap * 0.3
       const enhancedAbstractLexical = abstractLexicalSim * 0.7 + abstractOverlap * 0.3
-      const lexicalSim = enhancedTitleLexical * 0.4 + enhancedAbstractLexical * 0.6
+      const lexicalSim = enhancedTitleLexical * 0.35 + enhancedAbstractLexical * 0.65
 
       // ============================================================
       // MULTI-ALGORITHM SIMILARITY DETECTION (Enhanced Security)
@@ -682,9 +843,29 @@ async function calculateCosineSimilarity(
       const avgConfidence = (titleMultiAlgo.confidence + abstractMultiAlgo.confidence) / 2
       
       // ============================================================
-      // COMPREHENSIVE OVERALL SIMILARITY (6 ALGORITHMS)
+      // CONCEPT-BASED SIMILARITY ENHANCEMENT
       // ============================================================
-      // Title algorithms (40% weight) - Excluding Semantic and ML Feature
+      // Check if the researches are addressing the same core concept
+      const conceptualMatch = abstractMultiAlgo.concept
+      
+      // If concept similarity is high, boost overall similarity
+      // This catches cases where different words are used but same idea
+      let conceptBoost = 1.0
+      if (conceptualMatch > 0.7) {
+        // Very high concept match - likely same core idea
+        conceptBoost = 1.25
+      } else if (conceptualMatch > 0.5) {
+        // Moderate concept match - related ideas
+        conceptBoost = 1.15
+      } else if (conceptualMatch > 0.3) {
+        // Some concept overlap
+        conceptBoost = 1.08
+      }
+      
+      // ============================================================
+      // COMPREHENSIVE OVERALL SIMILARITY (7 ALGORITHMS + CONCEPT)
+      // ============================================================
+      // Title algorithms (40% weight)
       const titleAlgorithms = [
         enhancedTitleLexical,      // TF-IDF Lexical
         titleMultiAlgo.nGram,      // N-Gram
@@ -692,9 +873,10 @@ async function calculateCosineSimilarity(
         titleMultiAlgo.rabinKarp,  // Rabin-Karp
         titleMultiAlgo.lcs,        // LCS
         titleMultiAlgo.sentence,   // Sentence Similarity
+        titleMultiAlgo.concept     // Concept Similarity
       ]
       
-      // Abstract algorithms (60% weight) - Excluding Semantic and ML Feature
+      // Abstract algorithms (60% weight)
       const abstractAlgorithms = [
         enhancedAbstractLexical,      // TF-IDF Lexical
         abstractMultiAlgo.nGram,      // N-Gram
@@ -702,15 +884,36 @@ async function calculateCosineSimilarity(
         abstractMultiAlgo.rabinKarp,  // Rabin-Karp
         abstractMultiAlgo.lcs,        // LCS
         abstractMultiAlgo.sentence,   // Sentence Similarity
+        abstractMultiAlgo.concept     // Concept Similarity
       ]
       
-      // Calculate average of all 6 algorithms for title and abstract
+      // Calculate average of all 7 algorithms for title and abstract
       const avgTitleScore = titleAlgorithms.reduce((sum, score) => sum + score, 0) / titleAlgorithms.length
       const avgAbstractScore = abstractAlgorithms.reduce((sum, score) => sum + score, 0) / abstractAlgorithms.length
       
-      // Overall similarity: weighted average of all 6 algorithms
-      // This represents the TRUE average of all 6 detection algorithms
-      let overallSim = avgTitleScore * 0.4 + avgAbstractScore * 0.6
+      // ============================================================
+      // IDENTICAL/NEAR-IDENTICAL TEXT DETECTION
+      // ============================================================
+      // Check if texts are identical or near-identical
+      const titleIdentical = proposedTitle.trim().toLowerCase() === research.title.trim().toLowerCase()
+      const abstractIdentical = proposedConcept.trim().toLowerCase() === research.thesis_brief.trim().toLowerCase()
+      
+      // Check if very high similarity across multiple algorithms (likely identical)
+      const veryHighScores = titleAlgorithms.filter(s => s > 0.9).length + 
+                             abstractAlgorithms.filter(s => s > 0.9).length
+      
+      // If text is identical or nearly identical, set to very high score
+      let overallSim: number
+      if ((titleIdentical && abstractIdentical) || veryHighScores >= 10) {
+        // Texts are identical or virtually identical
+        overallSim = 0.98 // 98% to account for minor preprocessing differences
+      } else if (titleIdentical || abstractIdentical || veryHighScores >= 7) {
+        // One is identical or most algorithms show very high similarity
+        overallSim = Math.max(0.95, (avgTitleScore * 0.4 + avgAbstractScore * 0.6) * conceptBoost)
+      } else {
+        // Normal calculation with concept boost
+        overallSim = (avgTitleScore * 0.4 + avgAbstractScore * 0.6) * conceptBoost
+      }
       
       // ============================================================
       // ADVANCED MULTI-ALGORITHM SECURITY VALIDATIONS
@@ -719,100 +922,121 @@ async function calculateCosineSimilarity(
       // 1. Cross-Algorithm Consensus Detection
       // Check if multiple algorithms independently detect high similarity
       const highSimilarityCount = [
-        titleMultiAlgo.nGram > 0.6,
-        titleMultiAlgo.fingerprint > 0.6,
-        titleMultiAlgo.rabinKarp > 0.6,
-        titleMultiAlgo.lcs > 0.6,
-        abstractMultiAlgo.nGram > 0.6,
-        abstractMultiAlgo.fingerprint > 0.6,
-        abstractMultiAlgo.rabinKarp > 0.6,
-        abstractMultiAlgo.lcs > 0.6
+        titleMultiAlgo.nGram > 0.5,        // Lowered threshold from 0.6
+        titleMultiAlgo.fingerprint > 0.5,   // Lowered threshold from 0.6
+        titleMultiAlgo.rabinKarp > 0.5,     // Lowered threshold from 0.6
+        titleMultiAlgo.lcs > 0.5,           // Lowered threshold from 0.6
+        abstractMultiAlgo.nGram > 0.5,      // Lowered threshold from 0.6
+        abstractMultiAlgo.fingerprint > 0.5, // Lowered threshold from 0.6
+        abstractMultiAlgo.rabinKarp > 0.5,   // Lowered threshold from 0.6
+        abstractMultiAlgo.lcs > 0.5,         // Lowered threshold from 0.6
+        abstractMultiAlgo.concept > 0.5      // NEW: Concept similarity check
       ].filter(Boolean).length
       
-      if (highSimilarityCount >= 4) {
-        // 4+ algorithms agree on high similarity - very strong evidence
-        overallSim = Math.min(1, overallSim * 1.15) // 15% boost for strong consensus
-      } else if (highSimilarityCount >= 3) {
-        // 3 algorithms agree - moderate evidence
-        overallSim = Math.min(1, overallSim * 1.10) // 10% boost for moderate consensus
+      if (highSimilarityCount >= 6) {
+        // 6+ algorithms agree on high similarity - very strong evidence
+        overallSim = Math.min(1, overallSim * 1.25) // 25% boost for strong consensus
+      } else if (highSimilarityCount >= 5) {
+        // 5 algorithms agree - strong evidence
+        overallSim = Math.min(1, overallSim * 1.18) // 18% boost for strong consensus
+      } else if (highSimilarityCount >= 4) {
+        // 4 algorithms agree - moderate evidence
+        overallSim = Math.min(1, overallSim * 1.12) // 12% boost for moderate consensus
       }
       
-      // 2. Structural Similarity Detection (LCS + Fingerprint)
+      // 2. Concept-Based Plagiarism Detection (NEW)
+      // Detect if the core concept is the same even with different wording
+      // Skip if already detected as identical
+      if (overallSim < 0.95) {
+        if (abstractMultiAlgo.concept > 0.7) {
+          // Very high concept similarity = same core idea
+          overallSim = Math.min(1, overallSim * 1.22) // 22% boost for conceptual match
+        } else if (abstractMultiAlgo.concept > 0.5 && enhancedAbstractLexical < 0.4) {
+          // High concept similarity but low word match = paraphrased plagiarism
+          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for paraphrased concepts
+        }
+      }
+      
+      // 3. Structural Similarity Detection (LCS + Fingerprint)
       // Detect if document structure is copied even with word changes
-      const structuralSimilarity = (abstractMultiAlgo.lcs + abstractMultiAlgo.fingerprint) / 2
-      if (structuralSimilarity > 0.7 && enhancedAbstractLexical < 0.4) {
-        // High structural similarity but low lexical = sophisticated plagiarism
-        overallSim = Math.min(1, overallSim * 1.18) // 18% boost for structural plagiarism
-      }
-      
-      // 3. Pattern-Based Plagiarism Detection (N-Gram + Rabin-Karp)
-      // Detect repeated patterns and phrases
-      const patternSimilarity = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp) / 2
-      if (patternSimilarity > 0.65) {
-        // High pattern similarity indicates copied phrases
-        overallSim = Math.min(1, overallSim * 1.12) // 12% boost for pattern copying
-      }
-      
-      // 4. Sentence-Level Plagiarism Detection
-      // Check if individual sentences are copied
-      if (abstractMultiAlgo.sentence > 0.7) {
-        // High sentence similarity even with different words
-        overallSim = Math.min(1, overallSim * 1.14) // 14% boost for sentence plagiarism
-      }
-      
-      // 5. Title Plagiarism with Abstract Similarity
-      // Detect if title is very similar AND abstract has some similarity
-      if (enhancedTitleLexical > 0.8 && avgAbstractScore > 0.3) {
-        // Same/similar title with related content = likely plagiarism
-        overallSim = Math.min(1, overallSim * 1.10) // 10% boost for title+content match
-      }
-      
-      // 6. Fingerprint Hash Collision Detection
-      // Multiple hash matches indicate direct copying
-      if (titleMultiAlgo.fingerprint > 0.75 && abstractMultiAlgo.fingerprint > 0.75) {
-        // Very high fingerprint similarity = direct copy
-        overallSim = Math.min(1, overallSim * 1.20) // 20% boost for hash collision
-      }
-      
-      // 7. Sequential Text Similarity (LCS)
-      // Long common subsequences indicate large copied sections
-      if (abstractMultiAlgo.lcs > 0.75) {
-        // Very long common subsequence = substantial copying
-        overallSim = Math.min(1, overallSim * 1.13) // 13% boost for sequential copying
-      }
-      
-      // 8. Multi-Pattern Agreement (N-Gram + Rabin-Karp + Fingerprint)
-      // Triple agreement on pattern matching
-      const patternAgreement = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp + abstractMultiAlgo.fingerprint) / 3
-      if (patternAgreement > 0.7) {
-        // All pattern algorithms agree = strong evidence
-        overallSim = Math.min(1, overallSim * 1.16) // 16% boost for triple pattern agreement
-      }
-      
-      // 9. Confidence-Weighted Security Enhancement
-      // Higher confidence means more reliable detection
-      if (avgConfidence > 0.85) {
-        overallSim = Math.min(1, overallSim * 1.08) // 8% boost for very high confidence
-      } else if (avgConfidence > 0.75) {
-        overallSim = Math.min(1, overallSim * 1.05) // 5% boost for high confidence
-      }
-      
-      // 10. Synonym Substitution Detection
-      // Detect if words are changed but sentence structure remains
-      if (abstractMultiAlgo.sentence > 0.6 && abstractMultiAlgo.lcs > 0.5 && enhancedAbstractLexical < 0.35) {
-        // High sentence/structure similarity but low word match = synonym substitution
-        overallSim = Math.min(1, overallSim * 1.15) // 15% boost for synonym plagiarism
+      // Skip additional boosts if already at very high similarity
+      if (overallSim < 0.95) {
+        const structuralSimilarity = (abstractMultiAlgo.lcs + abstractMultiAlgo.fingerprint) / 2
+        if (structuralSimilarity > 0.7 && enhancedAbstractLexical < 0.4) {
+          // High structural similarity but low lexical = sophisticated plagiarism
+          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for structural plagiarism
+        }
+        
+        // 4. Pattern-Based Plagiarism Detection (N-Gram + Rabin-Karp)
+        // Detect repeated patterns and phrases
+        const patternSimilarity = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp) / 2
+        if (patternSimilarity > 0.65) {
+          // High pattern similarity indicates copied phrases
+          overallSim = Math.min(1, overallSim * 1.12) // 12% boost for pattern copying
+        }
+        
+        // 5. Sentence-Level Plagiarism Detection
+        // Check if individual sentences are copied
+        if (abstractMultiAlgo.sentence > 0.7) {
+          // High sentence similarity even with different words
+          overallSim = Math.min(1, overallSim * 1.14) // 14% boost for sentence plagiarism
+        }
+        
+        // 6. Title Plagiarism with Abstract Similarity
+        // Detect if title is very similar AND abstract has some similarity
+        if (enhancedTitleLexical > 0.8 && avgAbstractScore > 0.3) {
+          // Same/similar title with related content = likely plagiarism
+          overallSim = Math.min(1, overallSim * 1.10) // 10% boost for title+content match
+        }
+        
+        // 7. Fingerprint Hash Collision Detection
+        // Multiple hash matches indicate direct copying
+        if (titleMultiAlgo.fingerprint > 0.75 && abstractMultiAlgo.fingerprint > 0.75) {
+          // Very high fingerprint similarity = direct copy
+          overallSim = Math.min(1, overallSim * 1.20) // 20% boost for hash collision
+        }
+        
+        // 8. Sequential Text Similarity (LCS)
+        // Long common subsequences indicate large copied sections
+        if (abstractMultiAlgo.lcs > 0.75) {
+          // Very long common subsequence = substantial copying
+          overallSim = Math.min(1, overallSim * 1.13) // 13% boost for sequential copying
+        }
+        
+        // 9. Multi-Pattern Agreement (N-Gram + Rabin-Karp + Fingerprint)
+        // Triple agreement on pattern matching
+        const patternAgreement = (abstractMultiAlgo.nGram + abstractMultiAlgo.rabinKarp + abstractMultiAlgo.fingerprint) / 3
+        if (patternAgreement > 0.7) {
+          // All pattern algorithms agree = strong evidence
+          overallSim = Math.min(1, overallSim * 1.16) // 16% boost for triple pattern agreement
+        }
+        
+        // 10. Confidence-Weighted Security Enhancement
+        // Higher confidence means more reliable detection
+        if (avgConfidence > 0.85) {
+          overallSim = Math.min(1, overallSim * 1.08) // 8% boost for very high confidence
+        } else if (avgConfidence > 0.75) {
+          overallSim = Math.min(1, overallSim * 1.05) // 5% boost for high confidence
+        }
+        
+        // 11. Synonym Substitution Detection
+        // Detect if words are changed but sentence structure remains
+        if (abstractMultiAlgo.sentence > 0.6 && abstractMultiAlgo.lcs > 0.5 && enhancedAbstractLexical < 0.35) {
+          // High sentence/structure similarity but low word match = synonym substitution
+          overallSim = Math.min(1, overallSim * 1.15) // 15% boost for synonym plagiarism
+        }
       }
       
       // Calculate combined title and abstract similarity for display
       const combinedTitleSim = avgTitleScore
       const combinedAbstractSim = avgAbstractScore
 
-      // Determine similarity type with multi-algorithm context
+      // Determine similarity type with multi-algorithm and concept context
       let similarityType: 'Lexical' | 'Conceptual' | 'Both'
       if (lexicalSim > 0.5 && multiAlgoOverallScore > 0.5) {
         similarityType = 'Both'
-      } else if (multiAlgoAbstractScore > 0.6 && abstractMultiAlgo.sentence > 0.6) {
+      } else if (abstractMultiAlgo.concept > 0.6 || (multiAlgoAbstractScore > 0.6 && abstractMultiAlgo.sentence > 0.6)) {
+        // High concept similarity OR high semantic similarity = Conceptual
         similarityType = 'Conceptual'
       } else {
         similarityType = 'Lexical'
@@ -825,7 +1049,8 @@ async function calculateCosineSimilarity(
         research.title,
         research.thesis_brief,
         lexicalSim,
-        multiAlgoOverallScore
+        multiAlgoOverallScore,
+        abstractMultiAlgo.concept
       )
 
       return {
@@ -850,6 +1075,7 @@ async function calculateCosineSimilarity(
           lcs: Math.round(abstractMultiAlgo.lcs * 10000) / 10000,
           sentenceSimilarity: Math.round(abstractMultiAlgo.sentence * 10000) / 10000,
           featureSimilarity: Math.round(abstractMultiAlgo.feature * 10000) / 10000,
+          conceptSimilarity: Math.round(abstractMultiAlgo.concept * 10000) / 10000,
           multiAlgoComposite: Math.round(multiAlgoOverallScore * 10000) / 10000,
           confidence: Math.round(avgConfidence * 10000) / 10000
         }

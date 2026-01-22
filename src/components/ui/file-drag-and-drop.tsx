@@ -14,7 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface FileDragAndDropProps {
-  onFileContentRead: (content: string) => void
+  onFileContentRead: (content: string, title?: string) => void
 }
 
 export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
@@ -64,8 +64,13 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
 
       // Set the extracted text
       setExtractedContent(data.text)
-      onFileContentRead(data.text)
-      toast.success(`Text extracted successfully from ${data.fileName}`)
+      onFileContentRead(data.text, data.title)
+      
+      if (data.title && data.title !== 'Untitled Research') {
+        toast.success(`Extracted: "${data.title}" (${data.extractedLength} chars)`)
+      } else {
+        toast.success(`Text extracted successfully from ${data.fileName}`)
+      }
     } catch (error) {
       console.error('File extraction error:', error)
       toast.error(error instanceof Error ? error.message : 'Failed to extract text from file')
@@ -131,7 +136,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleRemoveFile = () => {
     setUploadedFile(null)
     setExtractedContent("")
-    onFileContentRead("")
+    onFileContentRead("", "")
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
