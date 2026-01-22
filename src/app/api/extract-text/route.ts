@@ -146,26 +146,63 @@ async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, meta
 // Fallback: pdf-parse for pure JavaScript PDF parsing (works on Vercel)
 async function parsePDFLegacy(buffer: Buffer) {
   try {
+    console.log('[pdf-parse] Starting PDF parsing with buffer size:', buffer.length)
+    
+    // Validate buffer
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Empty buffer provided to pdf-parse')
+    }
+    
+    // Validate PDF header
+    const pdfHeader = buffer.slice(0, 5).toString('utf8')
+    console.log('[pdf-parse] PDF header:', pdfHeader)
+    if (!pdfHeader.startsWith('%PDF-')) {
+      throw new Error('Invalid PDF header - file may be corrupted')
+    }
+    
+    // Import pdf-parse dynamically
     const pdfParse = await import('pdf-parse')
+    console.log('[pdf-parse] Module imported successfully')
+    
     // Handle both ESM and CommonJS exports
     const parseFunction = (pdfParse as any).default || pdfParse
+    console.log('[pdf-parse] Parse function type:', typeof parseFunction)
     
     if (typeof parseFunction !== 'function') {
       throw new Error('pdf-parse import failed - not a function')
     }
     
-    const result = await parseFunction(buffer)
+    // Parse with minimal options for better compatibility
+    const result = await parseFunction(buffer, {
+      max: 0, // Parse all pages
+      version: 'default',
+      // Disable problematic features that might fail on Vercel
+      pagerender: undefined
+    })
     
-    if (!result || !result.text) {
-      throw new Error('pdf-parse returned no text')
+    console.log('[pdf-parse] Parsing completed:', {
+      hasResult: !!result,
+      textLength: result?.text?.length || 0,
+      numPages: result?.numpages || 0,
+      hasInfo: !!result?.info,
+      hasMetadata: !!result?.metadata
+    })
+    
+    if (!result) {
+      throw new Error('pdf-parse returned null result')
+    }
+    
+    if (!result.text || result.text.length === 0) {
+      throw new Error('pdf-parse returned empty text - PDF may contain only images or be corrupt')
     }
     
     return result
   } catch (error) {
-    console.error('[pdf-parse] Detailed error:', {
+    console.error('[pdf-parse] Error details:', {
       error,
       errorType: error instanceof Error ? error.constructor.name : typeof error,
-      message: error instanceof Error ? error.message : String(error)
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
     })
     throw error
   }
@@ -285,13 +322,34 @@ export async function POST(request: NextRequest) {
           })
         } catch (fallbackError) {
           console.error('[Extract-Text] Both PDF parsing methods failed')
-          console.error('[Extract-Text] PyMuPDF error:', pymupdfError)
-          console.error('[Extract-Text] pdf-parse error:', fallbackError)
+          console.error('[Extract-Text] PyMuPDF error:', {
+            message: pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError),
+            stack: pymupdfError instanceof Error ? pymupdfError.stack : undefined
+          })
+          console.error('[Extract-Text] pdf-parse error:', {
+            message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            stack: fallbackError instanceof Error ? fallbackError.stack : undefined
+          })
+          
+          // Provide more specific error message
+          let userMessage = 'Failed to parse PDF file.'
+          if (fallbackError instanceof Error) {
+            if (fallbackError.message.includes('images')) {
+              userMessage = 'This PDF appears to contain only images. Please use a PDF with selectable text.'
+            } else if (fallbackError.message.includes('password') || fallbackError.message.includes('encrypted')) {
+              userMessage = 'This PDF is password-protected. Please remove the password and try again.'
+            } else if (fallbackError.message.includes('corrupt')) {
+              userMessage = 'This PDF file appears to be corrupted. Please try with a different file.'
+            } else {
+              userMessage = 'Failed to extract text from PDF. The file may be corrupted, password-protected, or contain only images.'
+            }
+          }
+          
           return NextResponse.json(
             { 
-              error: 'Failed to parse PDF file. The file may be corrupted, password-protected, or in an unsupported format.',
+              error: userMessage,
               details: process.env.NODE_ENV === 'development' 
-                ? `PyMuPDF: ${pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError)}, pdf-parse: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                ? `pdf-parse error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
                 : undefined
             },
             { status: 400 }
