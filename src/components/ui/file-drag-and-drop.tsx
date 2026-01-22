@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useRef, useState, useEffect } from "react"
 import { Upload, FileText, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -17,20 +17,59 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
+  // Prevent default drag/drop behavior on the entire component
+  useEffect(() => {
+    const preventDefaults = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    // Add listeners to prevent browser from opening files
+    const events = ['dragenter', 'dragover', 'dragleave', 'drop']
+    events.forEach(eventName => {
+      document.body.addEventListener(eventName, preventDefaults as any)
+    })
+
+    return () => {
+      events.forEach(eventName => {
+        document.body.removeEventListener(eventName, preventDefaults as any)
+      })
+    }
+  }, [])
+
   const processFile = async (file: File) => {
-    // Validate file type
-    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    const validExtensions = ['.pdf', '.docx']
-    const fileName = file.name.toLowerCase()
+    console.log('Processing file:', { 
+      name: file.name, 
+      type: file.type, 
+      size: file.size 
+    })
     
-    if (!validTypes.includes(file.type) && !validExtensions.some(ext => fileName.endsWith(ext))) {
-      toast.error("Please upload a PDF or DOCX file")
+    // Validate file type - be more lenient with MIME types
+    const fileName = file.name.toLowerCase()
+    const validExtensions = ['.pdf', '.docx']
+    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext))
+    
+    // Some systems may not set MIME type correctly, so prioritize file extension
+    if (!hasValidExtension) {
+      toast.error("Please upload a PDF or DOCX file", {
+        description: `File: ${file.name}`
+      })
       return
     }
 
     // Validate file size (10MB max)
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("File size must be less than 10MB")
+      toast.error("File size must be less than 10MB", {
+        description: `Current size: ${(file.size / 1024 / 1024).toFixed(2)} MB`
+      })
+      return
+    }
+    
+    // Validate file is not empty
+    if (file.size === 0) {
+      toast.error("File is empty", {
+        description: "Please upload a file with content"
+      })
       return
     }
 
@@ -121,9 +160,11 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    const items = e.dataTransfer.items
-    if (items && items.length > 0 && items[0].kind === 'file') {
+    
+    // Check if we have files being dragged
+    if (e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
       setIsDragging(true)
+      console.log('Drag enter - Files detected')
     }
   }
 
@@ -142,6 +183,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
       
       if (isOutside) {
         setIsDragging(false)
+        console.log('Drag leave - Outside drop zone')
       }
     }
   }
@@ -158,10 +200,23 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     e.stopPropagation()
     setIsDragging(false)
 
+    console.log('Drop event triggered', {
+      filesCount: e.dataTransfer.files.length,
+      types: e.dataTransfer.types
+    })
+
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
       const file = files[0]
+      console.log('File dropped:', { 
+        name: file.name, 
+        type: file.type, 
+        size: file.size 
+      })
       await processFile(file)
+    } else {
+      console.warn('No files found in drop event')
+      toast.error('No file detected. Please try again or click to browse.')
     }
   }
 
@@ -186,10 +241,10 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         className={`
           relative border-2 border-dashed rounded-lg py-4 px-4 transition-all duration-200
           ${isDragging 
-            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
+            ? 'border-blue-500 bg-blue-100 ring-4 ring-blue-300 scale-105 shadow-lg' 
             : 'border-gray-300 bg-gray-50'
           }
-          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}
+          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50 hover:shadow-md'}
         `}
         onClick={(e) => {
           if (!isExtracting && !isDragging && !uploadedFile) {
@@ -197,6 +252,14 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           }
         }}
       >
+        {isDragging && (
+          <div className="absolute inset-0 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm rounded-lg z-10 pointer-events-none">
+            <div className="text-center">
+              <Upload className="h-12 w-12 text-blue-600 mx-auto mb-2 animate-bounce" />
+              <p className="text-lg font-bold text-blue-700">Drop your file here</p>
+            </div>
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
