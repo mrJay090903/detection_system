@@ -54,7 +54,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         const errorMessage = data.error || 'Failed to extract text from file'
         
         // Display main error
-        console.error('File extraction error:', error)
+        console.error('File extraction failed:', { status: response.status, error: errorMessage })
         toast.error(errorMessage, { 
           duration: 7000,
           description: data.suggestions && data.suggestions.length > 0 
