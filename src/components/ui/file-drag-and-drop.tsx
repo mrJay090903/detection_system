@@ -152,15 +152,15 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`
-          relative border border-dashed rounded-lg py-3 px-4 transition-all duration-200
+          relative border-2 border-dashed rounded-lg py-4 px-4 transition-all duration-200
           ${isDragging 
-            ? 'border-blue-400 bg-blue-50' 
+            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
             : 'border-gray-300 bg-gray-50'
           }
           ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}
         `}
         onClick={(e) => {
-          if (!isExtracting && !isDragging) {
+          if (!isExtracting && !isDragging && !uploadedFile) {
             fileInputRef.current?.click()
           }
         }}
@@ -174,50 +174,52 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           disabled={isExtracting}
         />
         
-        <div className="flex items-center gap-3 pointer-events-none">
-          {isExtracting ? (
-            <>
-              <Loader2 className="h-5 w-5 animate-spin text-blue-600 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-blue-600">Extracting text...</p>
-              </div>
-            </>
-          ) : uploadedFile ? (
-            <>
-              <div className="p-1.5 rounded bg-green-100 flex-shrink-0">
-                <FileText className="h-4 w-4 text-green-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate text-gray-700">{uploadedFile.name}</p>
-                <p className="text-xs text-gray-500">
-                  {(uploadedFile.size / 1024).toFixed(0)} KB • {extractedContent.length.toLocaleString()} chars
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  handleRemoveFile()
-                }}
-                disabled={isExtracting}
-                className="shrink-0 h-7 w-7 p-0 pointer-events-auto hover:bg-red-100"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="p-1.5 rounded-md bg-blue-100 flex-shrink-0">
-                <Upload className="h-4 w-4 text-blue-600" />
-              </div>
-              <div className="flex-1">
-                <p className="text-xs font-medium text-gray-700">
-                  Drop file or click to upload
-                </p>
-                <p className="text-xs text-gray-500">PDF or DOCX • Max 10MB</p>
+        {isExtracting ? (
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-600 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-blue-600">Extracting text from document...</p>
+            </div>
+          </div>
+        ) : uploadedFile ? (
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 rounded bg-green-100 flex-shrink-0">
+              <FileText className="h-4 w-4 text-green-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate text-gray-700">{uploadedFile.name}</p>
+              <p className="text-xs text-gray-500">
+                {(uploadedFile.size / 1024).toFixed(0)} KB • {extractedContent.length.toLocaleString()} chars extracted
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                handleRemoveFile()
+              }}
+              disabled={isExtracting}
+              className="shrink-0 h-8 w-8 p-0 hover:bg-red-100"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-md bg-blue-100 flex-shrink-0">
+              <Upload className="h-5 w-5 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-700">
+                Drag & drop your file here or click to browse
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">PDF or DOCX • Max 10MB</p>
+            </div>
+          </div>
+        )}
               </div>
             </>
           )}
