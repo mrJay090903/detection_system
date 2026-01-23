@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useEffect } from "react"
+import { useRef, useState } from "react"
 import { Upload, FileText, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -17,63 +17,39 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
-  // Prevent browser from opening dropped files outside the drop zone
-  useEffect(() => {
-    const preventDefaults = (e: DragEvent) => {
-      // Only prevent if NOT over our drop zone
-      const target = e.target as HTMLElement
-      if (dropZoneRef.current && !dropZoneRef.current.contains(target)) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    }
-
-    // Prevent browser default behavior for drag/drop on body
-    document.body.addEventListener('dragover', preventDefaults)
-    document.body.addEventListener('drop', preventDefaults)
-
-    return () => {
-      document.body.removeEventListener('dragover', preventDefaults)
-      document.body.removeEventListener('drop', preventDefaults)
-    }
-  }, [])
-
   const processFile = async (file: File) => {
-    console.log('Processing file:', { 
-      name: file.name, 
-      type: file.type, 
-      size: file.size 
+    console.log('[FileDragAndDrop] Processing file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
     })
     
-    // Validate file type - be more lenient with MIME types
+    // Validate file type - be more lenient with validation
     const fileName = file.name.toLowerCase()
-    const validExtensions = ['.pdf', '.docx']
-    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext))
+    const isPDF = fileName.endsWith('.pdf') || file.type === 'application/pdf'
+    const isDOCX = fileName.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     
-    // Some systems may not set MIME type correctly, so prioritize file extension
-    if (!hasValidExtension) {
+    if (!isPDF && !isDOCX) {
+      console.error('[FileDragAndDrop] Invalid file type:', { name: file.name, type: file.type })
       toast.error("Please upload a PDF or DOCX file", {
-        description: `File: ${file.name}`
+        description: `File type: ${file.type || 'unknown'}`
       })
       return
     }
 
     // Validate file size (10MB max)
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("File size must be less than 10MB", {
-        description: `Current size: ${(file.size / 1024 / 1024).toFixed(2)} MB`
-      })
+      toast.error("File size must be less than 10MB")
       return
     }
     
-    // Validate file is not empty
-    if (file.size === 0) {
-      toast.error("File is empty", {
-        description: "Please upload a file with content"
-      })
+    // Validate file has content
+    if (file.size < 100) {
+      toast.error("File is too small or empty")
       return
     }
 
+    console.log('[FileDragAndDrop] File validation passed, starting extraction')
     setUploadedFile(file)
     setIsExtracting(true)
 
@@ -153,8 +129,17 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[FileDragAndDrop] File input change event')
     const file = event.target.files?.[0]
-    if (!file) return
+    if (!file) {
+      console.warn('[FileDragAndDrop] No file selected')
+      return
+    }
+    console.log('[FileDragAndDrop] File selected from input:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    })
     await processFile(file)
   }
 
@@ -162,14 +147,19 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     e.preventDefault()
     e.stopPropagation()
     
-    // Check if we have files being dragged
-    const hasFiles = e.dataTransfer.types && 
-                     (e.dataTransfer.types.includes('Files') || 
-                      e.dataTransfer.types.includes('application/x-moz-file'))
-    
-    if (hasFiles) {
+    // Check if we're dragging files
+    const items = e.dataTransfer?.items
+    if (items && items.length > 0) {
+      // Check if at least one item is a file
+      const hasFile = Array.from(items).some(item => item.kind === 'file')
+      if (hasFile) {
+        console.log('[FileDragAndDrop] Drag enter - file detected')
+        setIsDragging(true)
+      }
+    } else if (e.dataTransfer?.types?.includes('Files')) {
+      // Fallback check for browsers that don't support items
+      console.log('[FileDragAndDrop] Drag enter - Files type detected')
       setIsDragging(true)
-      console.log('Drag enter - Files detected')
     }
   }
 
@@ -177,27 +167,25 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     e.preventDefault()
     e.stopPropagation()
     
-    // Only clear dragging state if we're truly leaving the drop zone
-    if (e.currentTarget === e.target) {
-      setIsDragging(false)
-      console.log('Drag leave - Exited drop zone')
+    // Only set dragging to false when leaving the entire drop zone
+    const rect = dropZoneRef.current?.getBoundingClientRect()
+    if (rect) {
+      const isOutside = 
+        e.clientX <= rect.left ||
+        e.clientX >= rect.right ||
+        e.clientY <= rect.top ||
+        e.clientY >= rect.bottom
+      
+      if (isOutside) {
+        console.log('[FileDragAndDrop] Drag leave')
+        setIsDragging(false)
+      }
     }
   }
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    
-    // Ensure dragging state is set
-    if (!isDragging) {
-      const hasFiles = e.dataTransfer.types && 
-                       (e.dataTransfer.types.includes('Files') || 
-                        e.dataTransfer.types.includes('application/x-moz-file'))
-      if (hasFiles) {
-        setIsDragging(true)
-      }
-    }
-    
     // Set the dropEffect to show the correct cursor
     e.dataTransfer.dropEffect = 'copy'
   }
@@ -205,25 +193,23 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    
+    console.log('[FileDragAndDrop] Drop event triggered')
     setIsDragging(false)
 
-    console.log('Drop event triggered', {
-      filesCount: e.dataTransfer.files.length,
-      types: e.dataTransfer.types
+    const files = e.dataTransfer?.files
+    console.log('[FileDragAndDrop] Dropped files:', {
+      count: files?.length || 0,
+      files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : []
     })
-
-    const files = e.dataTransfer.files
+    
     if (files && files.length > 0) {
       const file = files[0]
-      console.log('File dropped:', { 
-        name: file.name, 
-        type: file.type, 
-        size: file.size 
-      })
+      console.log('[FileDragAndDrop] Processing first file:', file.name)
       await processFile(file)
     } else {
-      console.warn('No files found in drop event')
-      toast.error('No file detected. Please try again or click to browse.')
+      console.warn('[FileDragAndDrop] No files found in drop event')
+      toast.error('No file detected. Please try again.')
     }
   }
 
@@ -248,29 +234,31 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         className={`
           relative border-2 border-dashed rounded-lg py-4 px-4 transition-all duration-200
           ${isDragging 
-            ? 'border-blue-500 bg-blue-100 ring-4 ring-blue-300 scale-105 shadow-lg' 
+            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
             : 'border-gray-300 bg-gray-50'
           }
-          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50 hover:shadow-md'}
+          ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}
         `}
         onClick={(e) => {
+          e.stopPropagation()
           if (!isExtracting && !isDragging && !uploadedFile) {
+            console.log('[FileDragAndDrop] Click event - opening file picker')
+            fileInputRef.current?.click()
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !isExtracting && !uploadedFile) {
+            e.preventDefault()
             fileInputRef.current?.click()
           }
         }}
       >
-        {isDragging && (
-          <div className="absolute inset-0 flex items-center justify-center bg-blue-500/10 backdrop-blur-sm rounded-lg z-10 pointer-events-none">
-            <div className="text-center">
-              <Upload className="h-12 w-12 text-blue-600 mx-auto mb-2 animate-bounce" />
-              <p className="text-lg font-bold text-blue-700">Drop your file here</p>
-            </div>
-          </div>
-        )}
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.docx"
+          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           onChange={handleFileUpload}
           className="hidden"
           disabled={isExtracting}

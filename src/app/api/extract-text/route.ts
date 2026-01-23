@@ -3,23 +3,21 @@ import mammoth from 'mammoth'
 import { spawn } from 'child_process'
 import { writeFile, unlink } from 'fs/promises'
 import { join } from 'path'
+import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 
 // ============================================================================
 // SECURITY CONFIGURATION
 // ============================================================================
 
-// File size limits (optimized for Vercel)
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB (Vercel serverless function limit)
+// File size limits
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const MIN_FILE_SIZE = 100 // 100 bytes
 
 // Rate limiting (simple in-memory implementation)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
 const RATE_LIMIT_MAX = 10 // requests per window
 const RATE_LIMIT_WINDOW = 60 * 1000 // 1 minute
-
-// Vercel optimization: Timeout for Python processes
-const PYTHON_PROCESS_TIMEOUT = 25000 // 25 seconds (Vercel has 30s limit for hobby plan)
 
 function checkRateLimit(identifier: string): { allowed: boolean; remaining: number } {
   const now = Date.now()
@@ -54,36 +52,27 @@ function sanitizeFilename(filename: string): string {
     .substring(0, 255)
 }
 
-// Extract text from PDF using pdfminer.six (pure Python, no native dependencies)
-async function parsePDFWithPython(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
-  // Create a temporary file in /tmp directory
+// Extract text from PDF using PyMuPDF (better performance and accuracy)
+async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
+  // Create a temporary file for the PDF
   const tempFileName = `temp_pdf_${randomBytes(16).toString('hex')}.pdf`
-  const tempFilePath = join('/tmp', tempFileName)
+  const tempFilePath = join(tmpdir(), tempFileName)
   
   try {
     // Write buffer to temporary file
     await writeFile(tempFilePath, buffer)
-    console.log('[Python/pdfminer] Temporary file created:', tempFilePath)
+    console.log('[PyMuPDF] Temporary file created:', tempFilePath)
     
-    // Call Python script to extract text using pdfminer.six
+    // Call Python script to extract text using PyMuPDF
     const pythonScriptPath = join(process.cwd(), 'scripts', 'extract_pdf_text.py')
-    console.log('[Python/pdfminer] Calling Python script:', pythonScriptPath)
-    console.log('[Python/pdfminer] Python command: python3', pythonScriptPath, tempFilePath)
+    console.log('[PyMuPDF] Calling Python script:', pythonScriptPath)
+    console.log('[PyMuPDF] Python command: python3', pythonScriptPath, tempFilePath)
     
     return new Promise((resolve, reject) => {
       const pythonProcess = spawn('python3', [pythonScriptPath, tempFilePath])
       
       let stdout = ''
       let stderr = ''
-      let isComplete = false
-      
-      // Set timeout for Python process (Vercel optimization)
-      const timeout = setTimeout(() => {
-        if (!isComplete) {
-          pythonProcess.kill()
-          reject(new Error('PDF extraction timeout - file may be too large or complex'))
-        }
-      }, PYTHON_PROCESS_TIMEOUT)
       
       pythonProcess.stdout.on('data', (data) => {
         stdout += data.toString()
@@ -94,22 +83,20 @@ async function parsePDFWithPython(buffer: Buffer): Promise<{ text: string, metad
       })
       
       pythonProcess.on('close', async (code) => {
-        isComplete = true
-        clearTimeout(timeout)
-        console.log('[Python/pdfminer] Process closed with code:', code)
-        console.log('[Python/pdfminer] stdout:', stdout.substring(0, 200))
-        console.log('[Python/pdfminer] stderr:', stderr)
+        console.log('[PyMuPDF] Process closed with code:', code)
+        console.log('[PyMuPDF] stdout:', stdout.substring(0, 200))
+        console.log('[PyMuPDF] stderr:', stderr)
         
         // Clean up temporary file
         try {
           await unlink(tempFilePath)
-          console.log('[Python/pdfminer] Temporary file deleted')
+          console.log('[PyMuPDF] Temporary file deleted')
         } catch (err) {
-          console.error('[Python/pdfminer] Failed to delete temporary file:', err)
+          console.error('[PyMuPDF] Failed to delete temporary file:', err)
         }
         
         if (code !== 0) {
-          console.error('[Python/pdfminer] Python script error:', stderr)
+          console.error('[PyMuPDF] Python script error:', stderr)
           reject(new Error(`PDF extraction failed: ${stderr || 'Unknown error'}`))
           return
         }
@@ -117,142 +104,40 @@ async function parsePDFWithPython(buffer: Buffer): Promise<{ text: string, metad
         try {
           const result = JSON.parse(stdout)
           if (result.success) {
-            console.log('[Python/pdfminer] Extraction successful, text length:', result.text?.length || 0)
+            console.log('[PyMuPDF] Extraction successful, text length:', result.text?.length || 0)
             resolve({
               text: result.text,
               metadata: result.metadata
             })
           } else {
-            console.error('[Python/pdfminer] Extraction failed:', result.error)
+            console.error('[PyMuPDF] Extraction failed:', result.error)
             reject(new Error(result.error || 'PDF extraction failed'))
           }
         } catch (err) {
-          console.error('[Python/pdfminer] Failed to parse JSON output:', err)
-          console.error('[Python/pdfminer] stdout was:', stdout)
+          console.error('[PyMuPDF] Failed to parse JSON output:', err)
+          console.error('[PyMuPDF] stdout was:', stdout)
           reject(new Error(`Failed to parse extraction result: ${err}`))
         }
       })
       
       pythonProcess.on('error', async (err) => {
-        isComplete = true
-        clearTimeout(timeout)
-        console.error('[Python/pdfminer] Process error:', err)
+        console.error('[PyMuPDF] Process error:', err)
         // Clean up temporary file
         try {
           await unlink(tempFilePath)
         } catch (unlinkErr) {
-          console.error('[Python/pdfminer] Failed to delete temporary file:', unlinkErr)
+          console.error('[PyMuPDF] Failed to delete temporary file:', unlinkErr)
         }
         reject(new Error(`Failed to start Python process: ${err.message}`))
       })
     })
   } catch (err) {
-    console.error('[Python/pdfminer] Unexpected error:', err)
+    console.error('[PyMuPDF] Unexpected error:', err)
     // Clean up temporary file in case of error
     try {
       await unlink(tempFilePath)
     } catch (unlinkErr) {
-      console.error('[Python/pdfminer] Failed to delete temporary file:', unlinkErr)
-    }
-    throw err
-  }
-}
-
-// Extract text from DOCX using python-docx (pure Python, no native dependencies)
-async function parseDOCXWithPython(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
-  // Create a temporary file in /tmp directory
-  const tempFileName = `temp_docx_${randomBytes(16).toString('hex')}.docx`
-  const tempFilePath = join('/tmp', tempFileName)
-  
-  try {
-    // Write buffer to temporary file
-    await writeFile(tempFilePath, buffer)
-    console.log('[Python/python-docx] Temporary file created:', tempFilePath)
-    
-    // Call Python script to extract text using python-docx
-    const pythonScriptPath = join(process.cwd(), 'scripts', 'extract_docx_text.py')
-    console.log('[Python/python-docx] Calling Python script:', pythonScriptPath)
-    
-    return new Promise((resolve, reject) => {
-      const pythonProcess = spawn('python3', [pythonScriptPath, tempFilePath])
-      
-      let stdout = ''
-      let stderr = ''
-      let isComplete = false
-      
-      // Set timeout for Python process (Vercel optimization)
-      const timeout = setTimeout(() => {
-        if (!isComplete) {
-          pythonProcess.kill()
-          reject(new Error('DOCX extraction timeout - file may be too large or complex'))
-        }
-      }, PYTHON_PROCESS_TIMEOUT)
-      
-      pythonProcess.stdout.on('data', (data) => {
-        stdout += data.toString()
-      })
-      
-      pythonProcess.stderr.on('data', (data) => {
-        stderr += data.toString()
-      })
-      
-      pythonProcess.on('close', async (code) => {
-        isComplete = true
-        clearTimeout(timeout)
-        console.log('[Python/python-docx] Process closed with code:', code)
-        
-        // Clean up temporary file
-        try {
-          await unlink(tempFilePath)
-          console.log('[Python/python-docx] Temporary file deleted')
-        } catch (err) {
-          console.error('[Python/python-docx] Failed to delete temporary file:', err)
-        }
-        
-        if (code !== 0) {
-          console.error('[Python/python-docx] Python script error:', stderr)
-          reject(new Error(`DOCX extraction failed: ${stderr || 'Unknown error'}`))
-          return
-        }
-        
-        try {
-          const result = JSON.parse(stdout)
-          if (result.success) {
-            console.log('[Python/python-docx] Extraction successful, text length:', result.text?.length || 0)
-            resolve({
-              text: result.text,
-              metadata: result.metadata
-            })
-          } else {
-            console.error('[Python/python-docx] Extraction failed:', result.error)
-            reject(new Error(result.error || 'DOCX extraction failed'))
-          }
-        } catch (err) {
-          console.error('[Python/python-docx] Failed to parse JSON output:', err)
-          reject(new Error(`Failed to parse extraction result: ${err}`))
-        }
-      })
-      
-      pythonProcess.on('error', async (err) => {
-        isComplete = true
-        clearTimeout(timeout)
-        console.error('[Python/python-docx] Process error:', err)
-        // Clean up temporary file
-        try {
-          await unlink(tempFilePath)
-        } catch (unlinkErr) {
-          console.error('[Python/python-docx] Failed to delete temporary file:', unlinkErr)
-        }
-        reject(new Error(`Failed to start Python process: ${err.message}`))
-      })
-    })
-  } catch (err) {
-    console.error('[Python/python-docx] Unexpected error:', err)
-    // Clean up temporary file in case of error
-    try {
-      await unlink(tempFilePath)
-    } catch (unlinkErr) {
-      console.error('[Python/python-docx] Failed to delete temporary file:', unlinkErr)
+      console.error('[PyMuPDF] Failed to delete temporary file:', unlinkErr)
     }
     throw err
   }
@@ -456,25 +341,25 @@ export async function POST(request: NextRequest) {
         )
       }
       
-      // Extract text from PDF - Optimized for Vercel (prioritize JavaScript methods)
+      // Extract text from PDF - Try multiple methods for reliability
       console.log('[Extract-Text] Attempting PDF extraction')
       let pdfExtractionMethod = 'unknown'
-      let pdfJsError: any = null
+      let pymupdfError: any = null
       
       try {
-        // First try PDF.js (pure JavaScript - works perfectly on Vercel)
-        console.log('[Extract-Text] Trying PDF.js extraction (Vercel-optimized)')
-        const pdfData = await parsePDFWithPDFJS(buffer)
+        // First try PyMuPDF (best quality but requires Python - won't work on Vercel)
+        console.log('[Extract-Text] Trying PyMuPDF extraction')
+        const pdfData = await parsePDFWithPyMuPDF(buffer)
         extractedText = pdfData.text
-        pdfExtractionMethod = 'PDF.js'
-        console.log('[Extract-Text] PDF extracted using PDF.js:', {
+        pdfExtractionMethod = 'PyMuPDF'
+        console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
           textLength: extractedText.length,
-          pages: pdfData.numpages
+          metadata: pdfData.metadata
         })
-      } catch (pdfjsErr) {
-        pdfJsError = pdfjsErr
-        console.warn('[Extract-Text] PDF.js failed, trying pdf-parse fallback')
-        console.log('[Extract-Text] PDF.js error:', pdfjsErr instanceof Error ? pdfjsErr.message : String(pdfjsErr))
+      } catch (pymupdfErr) {
+        pymupdfError = pymupdfErr
+        console.warn('[Extract-Text] PyMuPDF failed (Python not available), trying PDF.js')
+        console.log('[Extract-Text] PyMuPDF error:', pymupdfErr instanceof Error ? pymupdfErr.message : String(pymupdfErr))
         
         // Try PDF.js (Mozilla's library - works great on Vercel)
         try {
@@ -502,8 +387,11 @@ export async function POST(request: NextRequest) {
             })
           } catch (fallbackError) {
             console.error('[Extract-Text] All PDF parsing methods failed')
+            console.error('[Extract-Text] PyMuPDF error:', {
+              message: pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError)
+            })
             console.error('[Extract-Text] PDF.js error:', {
-              message: pdfJsError instanceof Error ? pdfJsError.message : String(pdfJsError)
+              message: pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)
             })
             console.error('[Extract-Text] pdf-parse error:', {
               message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
@@ -552,7 +440,7 @@ export async function POST(request: NextRequest) {
                 error: userMessage,
                 suggestions: suggestions,
                 details: process.env.NODE_ENV === 'development' 
-                  ? `All methods failed | PDF.js: ${pdfJsError instanceof Error ? pdfJsError.message : String(pdfJsError)} | pdf-parse: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                  ? `All methods failed | PDF.js: ${pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)}`
                   : undefined,
                 canManualEntry: true // Signal to frontend that manual entry is available
               },
@@ -567,40 +455,17 @@ export async function POST(request: NextRequest) {
       fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       fileName.endsWith('.docx')
     ) {
-      // Extract text from DOCX - Prioritize JavaScript for Vercel
-      console.log('[Extract-Text] Attempting DOCX extraction')
-      let docxExtractionMethod = 'unknown'
-      
+      // Extract text from DOCX
       try {
-        // Use mammoth (JavaScript) - works perfectly on Vercel
-        console.log('[Extract-Text] Trying mammoth extraction (Vercel-optimized)')
         const result = await mammoth.extractRawText({ buffer })
         extractedText = result.value
-        docxExtractionMethod = 'mammoth'
-        console.log('[Extract-Text] DOCX extracted using mammoth:', {
-          textLength: extractedText.length
-        })
-      } catch (mammothError) {
-        console.error('[Extract-Text] DOCX parsing failed')
-        console.error('[Extract-Text] Mammoth error:', mammothError instanceof Error ? mammothError.message : String(mammothError))
-        
+      } catch (error) {
+        console.error('DOCX parsing error:', error)
         return NextResponse.json(
-          { 
-            error: 'Failed to parse DOCX file',
-            suggestions: [
-              'Ensure the file is a valid DOCX document',
-              'Try opening and saving the file in Microsoft Word or Google Docs',
-              'Convert the document to PDF format and try again'
-            ],
-            details: process.env.NODE_ENV === 'development' 
-              ? `Mammoth: ${mammothError instanceof Error ? mammothError.message : String(mammothError)}`
-              : undefined
-          },
+          { error: 'Failed to parse DOCX file' },
           { status: 400 }
         )
       }
-      
-      console.log(`[Extract-Text] DOCX extraction successful using ${docxExtractionMethod}`)
     } else if (
       fileType === 'application/msword' ||
       fileName.endsWith('.doc')
@@ -658,156 +523,154 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Parse research proposal to extract title and concept automatically
+// Parse research proposal to extract title and concept
 function parseResearchProposal(text: string): { title: string; concept: string } {
   // Normalize line breaks and whitespace
   let normalized = text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with 2
-    .replace(/[ \t]+/g, ' ') // Replace multiple spaces/tabs with single space
     .trim()
   
-  console.log('[Parse] Normalized text length:', normalized.length)
+  console.log('[Parse] Normalized text:', {
+    length: normalized.length,
+    preview: normalized.substring(0, 300)
+  })
   
   let title = ''
-  let concept = ''
+  let concept = normalized
   
-  // Strategy: Find "BU Thematic Area" marker (with or without colon)
-  const buThematicMarker = /BU\s+Thematic\s+Area/i
-  const buThematicMatch = normalized.search(buThematicMarker)
+  // Check if there's a "Sustainable Development Goal:" or "BU Thematic Area:" section
+  const sdgIndex = normalized.search(/Sustainable\s+Development\s+Goal:/i)
+  const buThematicIndex = normalized.search(/BU\s+Thematic\s+Area:/i)
   
-  if (buThematicMatch !== -1) {
-    // Found "BU Thematic Area" - split here
-    const titleSection = normalized.substring(0, buThematicMatch).trim()
-    const conceptSection = normalized.substring(buThematicMatch).trim()
+  // Determine the boundary where title should stop (whichever comes first)
+  let titleEndBoundary = -1
+  if (buThematicIndex !== -1 && sdgIndex !== -1) {
+    titleEndBoundary = Math.min(buThematicIndex, sdgIndex)
+  } else if (buThematicIndex !== -1) {
+    titleEndBoundary = buThematicIndex
+  } else if (sdgIndex !== -1) {
+    titleEndBoundary = sdgIndex
+  }
+  
+  // Strategy 1: Look for explicit title markers and extract until boundary
+  const titleMatch = normalized.match(/(?:proposed\s+title|research\s+title|title)\s*:/i)
+  if (titleMatch) {
+    const titleStartIndex = normalized.indexOf(titleMatch[0]) + titleMatch[0].length
     
-    console.log('[Parse] Found "BU Thematic Area" at position:', buThematicMatch)
-    console.log('[Parse] Title section length:', titleSection.length)
-    console.log('[Parse] Concept section length:', conceptSection.length)
-    
-    // Extract title from title section
-    // Look for explicit title markers: "Research Title:", "Proposed Title:", "Title:"
-    const titleMarkerRegex = /(?:Research\s+Title|Proposed\s+Title|Title)\s*:\s*(.+?)$/im
-    const titleMatch = titleSection.match(titleMarkerRegex)
-    
-    if (titleMatch) {
-      // Found title marker - extract everything after the marker
-      const titleStart = titleSection.indexOf(titleMatch[0]) + titleMatch[0].indexOf(':') + 1
-      const textAfterMarker = titleSection.substring(titleStart).trim()
-      
-      // Title is everything from after the marker until the end of the title section
-      // Clean up the text and normalize whitespace
-      title = textAfterMarker
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => {
-          // Remove boilerplate lines but keep the actual title content
-          return !(
-            /^University\s+of/i.test(line) ||
-            /^Bicol\s+University$/i.test(line) ||
-            /^College\s+of/i.test(line) ||
-            /^Department\s+of/i.test(line) ||
-            /^Submitted\s+(by|to)/i.test(line) ||
-            /^Prepared\s+by/i.test(line) ||
-            /^Research\s+Proposal$/i.test(line) ||
-            /^Thesis\s+Proposal$/i.test(line) ||
-            /^Capstone\s+(Project|Proposal)$/i.test(line) ||
-            /^Concept\s+Paper$/i.test(line) ||
-            /^\d{4}$/i.test(line) ||
-            /^Page\s+\d+/i.test(line) ||
-            line.length === 0
-          )
-        })
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      
-      console.log('[Parse] Extracted title from marker:', title.substring(0, 100))
-    } else {
-      // No title marker found - use the first substantial line
-      const lines = titleSection
-        .split('\n')
-        .map(l => l.trim())
-        .filter(l => {
-          // Skip boilerplate
-          return !(
-            /^University\s+of/i.test(l) ||
-            /^Bicol\s+University$/i.test(l) ||
-            /^College\s+of/i.test(l) ||
-            /^Department\s+of/i.test(l) ||
-            /^Submitted\s+(by|to)/i.test(l) ||
-            /^Prepared\s+by/i.test(l) ||
-            /^Research\s+Proposal$/i.test(l) ||
-            /^Thesis\s+Proposal$/i.test(l) ||
-            /^\d{4}$/i.test(l) ||
-            l.length < 10
-          )
-        })
-      
-      if (lines.length > 0) {
-        title = lines[0].substring(0, 200)
+    if (titleEndBoundary !== -1 && titleStartIndex < titleEndBoundary) {
+      // Extract title from after the marker until the boundary (BU Thematic Area or SDG)
+      title = normalized.substring(titleStartIndex, titleEndBoundary).trim()
+      // Everything from the boundary onwards is the concept
+      concept = normalized.substring(titleEndBoundary).trim()
+    } else if (titleEndBoundary === -1) {
+      // No boundary found, extract title from the line and rest is concept
+      const titleLineMatch = normalized.substring(titleStartIndex).match(/([^\n]+)/)
+      if (titleLineMatch) {
+        title = titleLineMatch[1].trim()
+        const titleLineEnd = titleStartIndex + titleLineMatch[0].length
+        concept = normalized.substring(titleLineEnd).trim()
       }
-      
-      console.log('[Parse] No title marker found, using first line:', title.substring(0, 100))
     }
+  }
+  
+  // Strategy 2: If no title marker, find first meaningful line (skip boilerplate, stop before boundary)
+  if (!title) {
+    const lines = normalized.split(/\n+/)
+    let foundTitle = false
+    let conceptStartIndex = 0
     
-    // Concept is everything from "BU Thematic Area" onwards
-    concept = conceptSection
-      .replace(/\s+/g, ' ') // Normalize all whitespace to single spaces
-      .trim()
-  } else {
-    // No "BU Thematic Area:" found - try fallback parsing
-    console.log('[Parse] "BU Thematic Area:" not found, using fallback parsing')
-    
-    // Look for SDG marker as alternative
-    const sdgMarker = /Sustainable\s+Development\s+Goal\s*:/i
-    const sdgMatch = normalized.search(sdgMarker)
-    
-    if (sdgMatch !== -1) {
-      const titleSection = normalized.substring(0, sdgMatch).trim()
-      concept = normalized.substring(sdgMatch).trim().replace(/\s+/g, ' ')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (line.length === 0) continue
       
-      // Extract title from section
-      const titleMatch = titleSection.match(/(?:proposed\s+title|research\s+title|title)\s*:(.+?)(?:\n|$)/i)
-      if (titleMatch) {
-        title = titleMatch[1].trim()
-      } else {
-        const lines = titleSection.split('\n').filter(l => l.trim().length > 10)
-        if (lines.length > 0) {
-          title = lines[0].trim().substring(0, 200)
+      // Check if we've reached the boundary section (BU Thematic Area or SDG)
+      if (titleEndBoundary !== -1) {
+        const currentPosition = lines.slice(0, i).join('\n').length
+        if (currentPosition >= titleEndBoundary) {
+          break // Stop looking for title once we reach boundary section
         }
       }
-    } else {
-      // No markers found - use basic extraction
-      const lines = normalized.split('\n').filter(l => l.trim().length > 10)
       
-      if (lines.length > 0) {
-        // First line as title
-        title = lines[0].trim().substring(0, 200)
-        // Rest as concept
-        concept = lines.slice(1).join(' ').replace(/\s+/g, ' ').trim()
-      } else {
-        title = 'Untitled Research'
-        concept = normalized.replace(/\s+/g, ' ').trim()
+      // Skip boilerplate patterns (but don't skip "BU Thematic Area:" as it marks the boundary)
+      if (
+        /Thematic\s+Area(?!\:)/i.test(line) || // Skip "Thematic Area" but not "BU Thematic Area:"
+        /University\s+of/i.test(line) ||
+        /Bicol\s+University/i.test(line) ||
+        /College\s+of/i.test(line) ||
+        /Department\s+of/i.test(line) ||
+        /Submitted\s+(by|to)/i.test(line) ||
+        /Prepared\s+by/i.test(line) ||
+        /Research\s+Proposal/i.test(line) ||
+        /Thesis\s+Proposal/i.test(line) ||
+        /Capstone/i.test(line) ||
+        /Concept\s+Paper/i.test(line) ||
+        /^\d+$/i.test(line) || // Skip standalone numbers
+        line.length < 10
+      ) {
+        continue
       }
+      
+      // Found the title
+      if (line.length <= 200) {
+        title = line
+        conceptStartIndex = i + 1
+        foundTitle = true
+        break
+      }
+    }
+    
+    // Get everything after title as concept (including BU Thematic Area onwards)
+    if (foundTitle && titleEndBoundary !== -1) {
+      // Use the boundary to get concept from BU Thematic Area or SDG onwards
+      concept = normalized.substring(titleEndBoundary).trim()
+    } else if (foundTitle && conceptStartIndex < lines.length) {
+      concept = lines.slice(conceptStartIndex).join('\n').trim()
     }
   }
   
-  // Fallback if title is still empty
-  if (!title || title.length < 3) {
-    title = 'Untitled Research'
+  // If still no title, use first substantial line
+  if (!title) {
+    const lines = normalized.split(/\n+/).filter(l => l.trim().length > 10)
+    if (lines.length > 0) {
+      title = lines[0].trim().substring(0, 200)
+      concept = lines.slice(1).join('\n').trim()
+    } else {
+      title = 'Untitled Research'
+      concept = normalized
+    }
   }
   
-  // Fallback if concept is empty
-  if (!concept || concept.length < 10) {
-    concept = normalized.replace(/\s+/g, ' ').trim()
-  }
+  // Only remove boilerplate patterns from concept, but keep "BU Thematic Area:" and everything after
+  concept = concept
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim()
+      // Only remove lines that are pure boilerplate (excluding "BU Thematic Area:" with colon)
+      return !(
+        /^Thematic\s+Area\s*\d*$/i.test(trimmed) || // Remove "Thematic Area" without colon
+        /^University\s+of/i.test(trimmed) ||
+        /^Bicol\s+University$/i.test(trimmed) ||
+        /^College\s+of/i.test(trimmed) ||
+        /^Department\s+of/i.test(trimmed) ||
+        /^Research\s+Proposal$/i.test(trimmed) ||
+        /^Thesis\s+Proposal$/i.test(trimmed) ||
+        /^Capstone\s+(Project|Proposal)$/i.test(trimmed) ||
+        /^Concept\s+Paper$/i.test(trimmed) ||
+        /^\d+$/i.test(trimmed) || // Remove standalone page numbers
+        trimmed.length === 0
+      )
+    })
+    .join(' ')
+    .trim()
+  
+  // Normalize whitespace but keep content
+  concept = concept.replace(/\s+/g, ' ').trim()
   
   console.log('[Parse] Final extraction:', {
+    title: title,
     titleLength: title.length,
     conceptLength: concept.length,
-    title: title.substring(0, 100),
     conceptPreview: concept.substring(0, 200)
   })
   
@@ -819,10 +682,6 @@ function parseResearchProposal(text: string): { title: string; concept: string }
 
 
 
-// ============================================================================
-// VERCEL CONFIGURATION - Optimized for serverless execution
-// ============================================================================
-export const maxDuration = 30; // 30 seconds max (Vercel Pro: 60s, Hobby: 10s default, extended to 30s)
-export const runtime = 'nodejs'; // Use Node.js runtime
-export const preferredRegion = 'auto'; // Auto-select best region
-export const dynamic = 'force-dynamic'; // Always run dynamically (no caching for file uploads)
+// Configure max file size (10MB)
+export const maxDuration = 60; // Maximum execution time in seconds
+export const bodyParser = false; // Disable default body parser to handle multipart/form-data
