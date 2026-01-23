@@ -18,22 +18,13 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
   const processFile = async (file: File) => {
-    console.log('[FileDragAndDrop] Processing file:', {
-      name: file.name,
-      type: file.type,
-      size: file.size
-    })
-    
-    // Validate file type - be more lenient with validation
+    // Validate file type
+    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    const validExtensions = ['.pdf', '.docx']
     const fileName = file.name.toLowerCase()
-    const isPDF = fileName.endsWith('.pdf') || file.type === 'application/pdf'
-    const isDOCX = fileName.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     
-    if (!isPDF && !isDOCX) {
-      console.error('[FileDragAndDrop] Invalid file type:', { name: file.name, type: file.type })
-      toast.error("Please upload a PDF or DOCX file", {
-        description: `File type: ${file.type || 'unknown'}`
-      })
+    if (!validTypes.includes(file.type) && !validExtensions.some(ext => fileName.endsWith(ext))) {
+      toast.error("Please upload a PDF or DOCX file")
       return
     }
 
@@ -42,14 +33,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
       toast.error("File size must be less than 10MB")
       return
     }
-    
-    // Validate file has content
-    if (file.size < 100) {
-      toast.error("File is too small or empty")
-      return
-    }
 
-    console.log('[FileDragAndDrop] File validation passed, starting extraction')
     setUploadedFile(file)
     setIsExtracting(true)
 
@@ -66,44 +50,15 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
       const data = await response.json()
 
       if (!response.ok) {
-        // Show detailed error message with suggestions
+        // Show detailed error message
         const errorMessage = data.error || 'Failed to extract text from file'
-        
-        // Display main error
-        console.error('File extraction failed:', { status: response.status, error: errorMessage })
-        toast.error(errorMessage, { 
-          duration: 7000,
-          description: data.suggestions && data.suggestions.length > 0 
-            ? `Tip: ${data.suggestions[0]}` 
-            : 'You can manually enter your research details below instead.'
-        })
-        
-        // Log all suggestions to console for user reference
-        if (data.suggestions && data.suggestions.length > 0) {
-          console.group('💡 Suggestions to fix PDF extraction:')
-          data.suggestions.forEach((suggestion: string, idx: number) => {
-            console.log(`${idx + 1}. ${suggestion}`)
-          })
-          console.groupEnd()
-        }
-        
-        // Show detailed error in development
-        if (data.details) {
-          console.error('Detailed error:', data.details)
-        }
-        
-        setUploadedFile(null)
-        return // Exit early, don't throw
+        const detailedMessage = data.details ? `${errorMessage} (${data.details})` : errorMessage
+        throw new Error(errorMessage)
       }
 
       // Validate that we got text
       if (!data.text || data.text.length < 10) {
-        toast.error('No meaningful text could be extracted from the file.', {
-          duration: 6000,
-          description: 'The file may be empty, image-based, or corrupted. Try manually entering your details below.'
-        })
-        setUploadedFile(null)
-        return
+        throw new Error('No meaningful text could be extracted from the file. The file may be empty or contain only images.')
       }
 
       // Set the extracted text
@@ -118,10 +73,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     } catch (error) {
       console.error('File extraction error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to extract text from file'
-      toast.error(errorMessage, { 
-        duration: 6000,
-        description: 'You can manually enter your research details below instead.'
-      })
+      toast.error(errorMessage, { duration: 5000 })
       setUploadedFile(null)
     } finally {
       setIsExtracting(false)
@@ -129,36 +81,16 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('[FileDragAndDrop] File input change event')
     const file = event.target.files?.[0]
-    if (!file) {
-      console.warn('[FileDragAndDrop] No file selected')
-      return
-    }
-    console.log('[FileDragAndDrop] File selected from input:', {
-      name: file.name,
-      type: file.type,
-      size: file.size
-    })
+    if (!file) return
     await processFile(file)
   }
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    
-    // Check if we're dragging files
-    const items = e.dataTransfer?.items
-    if (items && items.length > 0) {
-      // Check if at least one item is a file
-      const hasFile = Array.from(items).some(item => item.kind === 'file')
-      if (hasFile) {
-        console.log('[FileDragAndDrop] Drag enter - file detected')
-        setIsDragging(true)
-      }
-    } else if (e.dataTransfer?.types?.includes('Files')) {
-      // Fallback check for browsers that don't support items
-      console.log('[FileDragAndDrop] Drag enter - Files type detected')
+    const items = e.dataTransfer.items
+    if (items && items.length > 0 && items[0].kind === 'file') {
       setIsDragging(true)
     }
   }
@@ -177,7 +109,6 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         e.clientY >= rect.bottom
       
       if (isOutside) {
-        console.log('[FileDragAndDrop] Drag leave')
         setIsDragging(false)
       }
     }
@@ -193,23 +124,12 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    
-    console.log('[FileDragAndDrop] Drop event triggered')
     setIsDragging(false)
 
-    const files = e.dataTransfer?.files
-    console.log('[FileDragAndDrop] Dropped files:', {
-      count: files?.length || 0,
-      files: files ? Array.from(files).map(f => ({ name: f.name, type: f.type, size: f.size })) : []
-    })
-    
+    const files = e.dataTransfer.files
     if (files && files.length > 0) {
       const file = files[0]
-      console.log('[FileDragAndDrop] Processing first file:', file.name)
       await processFile(file)
-    } else {
-      console.warn('[FileDragAndDrop] No files found in drop event')
-      toast.error('No file detected. Please try again.')
     }
   }
 
@@ -240,17 +160,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
           ${isExtracting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-50'}
         `}
         onClick={(e) => {
-          e.stopPropagation()
           if (!isExtracting && !isDragging && !uploadedFile) {
-            console.log('[FileDragAndDrop] Click event - opening file picker')
-            fileInputRef.current?.click()
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && !isExtracting && !uploadedFile) {
-            e.preventDefault()
             fileInputRef.current?.click()
           }
         }}
@@ -258,7 +168,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          accept=".pdf,.docx"
           onChange={handleFileUpload}
           className="hidden"
           disabled={isExtracting}

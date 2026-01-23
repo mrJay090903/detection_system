@@ -52,17 +52,8 @@ function sanitizeFilename(filename: string): string {
     .substring(0, 255)
 }
 
-// Check if we're running in a serverless environment (Vercel)
-const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME !== undefined
-
 // Extract text from PDF using PyMuPDF (better performance and accuracy)
-// NOTE: This only works in environments with Python installed (local dev, Docker, etc.)
 async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
-  // Skip PyMuPDF in serverless environments - Python is not available
-  if (isServerless) {
-    throw new Error('PyMuPDF not available in serverless environment')
-  }
-  
   // Create a temporary file for the PDF
   const tempFileName = `temp_pdf_${randomBytes(16).toString('hex')}.pdf`
   const tempFilePath = join(tmpdir(), tempFileName)
@@ -152,135 +143,67 @@ async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, meta
   }
 }
 
-// Fallback: PDF.js (Mozilla) for pure JavaScript PDF parsing (works reliably on Vercel)
-async function parsePDFWithPDFJS(buffer: Buffer) {
+// Fallback: pdf-parse for pure JavaScript PDF parsing (works on Vercel)
+async function parsePDFLegacy(buffer: Buffer) {
   try {
-    console.log('[PDF.js] Starting PDF parsing with buffer size:', buffer.length)
+    console.log('[pdf-parse] Starting PDF parsing with buffer size:', buffer.length)
     
     // Validate buffer
     if (!buffer || buffer.length === 0) {
-      throw new Error('Empty buffer provided')
+      throw new Error('Empty buffer provided to pdf-parse')
     }
     
     // Validate PDF header
     const pdfHeader = buffer.slice(0, 5).toString('utf8')
-    console.log('[PDF.js] PDF header:', pdfHeader)
+    console.log('[pdf-parse] PDF header:', pdfHeader)
     if (!pdfHeader.startsWith('%PDF-')) {
       throw new Error('Invalid PDF header - file may be corrupted')
     }
     
-    // Import PDF.js dynamically - use the legacy build for Node.js compatibility
-    let pdfjsLib: any
-    try {
-      pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-      console.log('[PDF.js] Legacy module imported successfully')
-    } catch (importErr) {
-      console.warn('[PDF.js] Legacy import failed, trying main build:', importErr)
-      pdfjsLib = await import('pdfjs-dist')
-      console.log('[PDF.js] Main module imported successfully')
+    // Import pdf-parse dynamically
+    const pdfParse = await import('pdf-parse')
+    console.log('[pdf-parse] Module imported successfully')
+    
+    // Handle both ESM and CommonJS exports
+    const parseFunction = (pdfParse as any).default || pdfParse
+    console.log('[pdf-parse] Parse function type:', typeof parseFunction)
+    
+    if (typeof parseFunction !== 'function') {
+      throw new Error('pdf-parse import failed - not a function')
     }
     
-    // Disable worker for serverless environments
-    try {
-      if (pdfjsLib.GlobalWorkerOptions) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = ''
-      }
-    } catch (workerErr) {
-      console.warn('[PDF.js] Could not set worker options:', workerErr)
-    }
-    
-    // Load the PDF document with serverless-compatible options
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(buffer),
-      useSystemFonts: false, // Don't rely on system fonts in serverless
-      disableFontFace: true, // Disable font face for serverless compatibility
-      verbosity: 0, // Reduce logging
-      isEvalSupported: false, // Disable eval for security
-      useWorkerFetch: false, // Don't use worker fetch
+    // Parse with minimal options for better compatibility
+    const result = await parseFunction(buffer, {
+      max: 0, // Parse all pages
+      version: 'default',
+      // Disable problematic features that might fail on Vercel
+      pagerender: undefined
     })
     
-    const pdfDocument = await loadingTask.promise
-    console.log('[PDF.js] PDF loaded, pages:', pdfDocument.numPages)
-    
-    if (pdfDocument.numPages === 0) {
-      throw new Error('PDF has no pages')
-    }
-    
-    // Extract text from all pages
-    let fullText = ''
-    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-      const page = await pdfDocument.getPage(pageNum)
-      const textContent = await page.getTextContent()
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ')
-      fullText += pageText + '\n'
-    }
-    
-    console.log('[PDF.js] Text extraction completed:', {
-      textLength: fullText.length,
-      numPages: pdfDocument.numPages
+    console.log('[pdf-parse] Parsing completed:', {
+      hasResult: !!result,
+      textLength: result?.text?.length || 0,
+      numPages: result?.numpages || 0,
+      hasInfo: !!result?.info,
+      hasMetadata: !!result?.metadata
     })
     
-    // Clean up
-    await pdfDocument.destroy()
-    
-    // Validate extracted text
-    const cleanedText = fullText.trim()
-    if (!cleanedText || cleanedText.length === 0) {
-      throw new Error('PDF contains no extractable text - it may be image-based (scanned document) or empty')
+    if (!result) {
+      throw new Error('pdf-parse returned null result')
     }
     
-    if (cleanedText.length < 10) {
-      throw new Error('PDF contains insufficient text content - it may be primarily images')
+    if (!result.text || result.text.length === 0) {
+      throw new Error('pdf-parse returned empty text - PDF may contain only images or be corrupt')
     }
     
-    return {
-      text: cleanedText,
-      numpages: pdfDocument.numPages
-    }
+    return result
   } catch (error) {
-    console.error('[PDF.js] Error details:', {
+    console.error('[pdf-parse] Error details:', {
       error,
       errorType: error instanceof Error ? error.constructor.name : typeof error,
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
     })
-    
-    // Provide specific error messages
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    if (errorMsg.includes('password') || errorMsg.includes('encrypted')) {
-      throw new Error('PDF is password-protected or encrypted')
-    } else if (errorMsg.includes('Invalid') || errorMsg.includes('corrupt')) {
-      throw new Error('PDF file is corrupted or invalid')
-    } else if (errorMsg.includes('image-based') || errorMsg.includes('no extractable text')) {
-      throw error // Pass through our custom messages
-    } else {
-      throw new Error(`PDF parsing failed: ${errorMsg}`)
-    }
-  }
-}
-
-// Legacy fallback: pdf-parse (keep as last resort)
-async function parsePDFLegacy(buffer: Buffer) {
-  try {
-    console.log('[pdf-parse] Starting legacy PDF parsing')
-    const pdfParse = await import('pdf-parse')
-    const parseFunction = (pdfParse as any).default || pdfParse
-    
-    const result = await parseFunction(buffer, {
-      max: 0,
-      version: 'default',
-      pagerender: undefined
-    })
-    
-    if (!result?.text || result.text.trim().length < 10) {
-      throw new Error('PDF contains no extractable text - it may be image-based (scanned document) or empty')
-    }
-    
-    return result
-  } catch (error) {
-    console.error('[pdf-parse] Failed:', error instanceof Error ? error.message : String(error))
     throw error
   }
 }
@@ -368,110 +291,73 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-
-      // Use only pdf-parse in serverless (Vercel) environments
-      if (isServerless) {
+      
+      // Extract text from PDF - Try PyMuPDF first, fallback to pdf-parse
+      console.log('[Extract-Text] Attempting PDF extraction')
+      let pdfExtractionMethod = 'unknown'
+      
+      try {
+        // First try PyMuPDF (better quality but requires Python)
+        console.log('[Extract-Text] Trying PyMuPDF extraction')
+        const pdfData = await parsePDFWithPyMuPDF(buffer)
+        extractedText = pdfData.text
+        pdfExtractionMethod = 'PyMuPDF'
+        console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
+          textLength: extractedText.length,
+          metadata: pdfData.metadata
+        })
+      } catch (pymupdfError) {
+        console.warn('[Extract-Text] PyMuPDF failed (likely Python not available), using pdf-parse fallback')
+        console.log('[Extract-Text] PyMuPDF error details:', pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError))
+        
+        // Fallback to pdf-parse (pure JavaScript, works everywhere)
         try {
-          console.log('[Extract-Text] Using pdf-parse for PDF extraction (serverless)')
+          console.log('[Extract-Text] Attempting pdf-parse fallback')
           const pdfData = await parsePDFLegacy(buffer)
           extractedText = pdfData.text
-          console.log('[Extract-Text] PDF extracted using pdf-parse:', {
+          pdfExtractionMethod = 'pdf-parse'
+          console.log('[Extract-Text] PDF extracted using pdf-parse fallback:', {
             textLength: extractedText.length,
             pages: pdfData.numpages
           })
-        } catch (err) {
-          console.error('[Extract-Text] pdf-parse failed:', err)
-          let userMessage = 'Unable to extract text from this PDF.'
-          let suggestions: string[] = [
-            'Ensure the PDF contains selectable text (not just images)',
-            'Try removing any password protection',
-            'Save a new copy of the PDF and try uploading again',
-            'Alternatively, manually enter your research details in the form below'
-          ]
+        } catch (fallbackError) {
+          console.error('[Extract-Text] Both PDF parsing methods failed')
+          console.error('[Extract-Text] PyMuPDF error:', {
+            message: pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError),
+            stack: pymupdfError instanceof Error ? pymupdfError.stack : undefined
+          })
+          console.error('[Extract-Text] pdf-parse error:', {
+            message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            stack: fallbackError instanceof Error ? fallbackError.stack : undefined
+          })
+          
+          // Provide more specific error message
+          let userMessage = 'Failed to parse PDF file.'
+          if (fallbackError instanceof Error) {
+            if (fallbackError.message.includes('images')) {
+              userMessage = 'This PDF appears to contain only images. Please use a PDF with selectable text.'
+            } else if (fallbackError.message.includes('password') || fallbackError.message.includes('encrypted')) {
+              userMessage = 'This PDF is password-protected. Please remove the password and try again.'
+            } else if (fallbackError.message.includes('corrupt')) {
+              userMessage = 'This PDF file appears to be corrupted. Please try with a different file.'
+            } else {
+              userMessage = 'Failed to extract text from PDF. The file may be corrupted, password-protected, or contain only images.'
+            }
+          }
+          
           return NextResponse.json(
-            {
+            { 
               error: userMessage,
-              suggestions: suggestions,
-              details: process.env.NODE_ENV === 'development' ? String(err) : undefined,
-              canManualEntry: true
+              details: process.env.NODE_ENV === 'development' 
+                ? `pdf-parse error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                : undefined
             },
             { status: 400 }
           )
         }
-      } else {
-        // Local/dev: Try all methods for best quality
-        let pdfExtractionMethod = 'unknown'
-        let pymupdfError: any = null
-        try {
-          // First try PyMuPDF (best quality but requires Python)
-          console.log('[Extract-Text] Trying PyMuPDF extraction')
-          const pdfData = await parsePDFWithPyMuPDF(buffer)
-          extractedText = pdfData.text
-          pdfExtractionMethod = 'PyMuPDF'
-          console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
-            textLength: extractedText.length,
-            metadata: pdfData.metadata
-          })
-        } catch (pymupdfErr) {
-          pymupdfError = pymupdfErr
-          console.warn('[Extract-Text] PyMuPDF failed, trying PDF.js')
-          console.log('[Extract-Text] PyMuPDF error:', pymupdfErr instanceof Error ? pymupdfErr.message : String(pymupdfErr))
-        }
-        if (!extractedText) {
-          try {
-            console.log('[Extract-Text] Attempting PDF.js extraction')
-            const pdfData = await parsePDFWithPDFJS(buffer)
-            extractedText = pdfData.text
-            pdfExtractionMethod = 'PDF.js'
-            console.log('[Extract-Text] PDF extracted using PDF.js:', {
-              textLength: extractedText.length,
-              pages: pdfData.numpages
-            })
-          } catch (pdfjsError) {
-            console.warn('[Extract-Text] PDF.js failed, trying pdf-parse as last resort')
-            console.log('[Extract-Text] PDF.js error:', pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError))
-            try {
-              console.log('[Extract-Text] Attempting pdf-parse fallback')
-              const pdfData = await parsePDFLegacy(buffer)
-              extractedText = pdfData.text
-              pdfExtractionMethod = 'pdf-parse'
-              console.log('[Extract-Text] PDF extracted using pdf-parse:', {
-                textLength: extractedText.length,
-                pages: pdfData.numpages
-              })
-            } catch (fallbackError) {
-              console.error('[Extract-Text] All PDF parsing methods failed')
-              console.error('[Extract-Text] PyMuPDF error:', {
-                message: pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError)
-              })
-              console.error('[Extract-Text] PDF.js error:', {
-                message: pdfjsError instanceof Error ? pdfjsError.message : String(pdfjsError)
-              })
-              console.error('[Extract-Text] pdf-parse error:', {
-                message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-                stack: fallbackError instanceof Error ? fallbackError.stack : undefined
-              })
-              let userMessage = 'Unable to extract text from this PDF.'
-              let suggestions: string[] = [
-                'Ensure the PDF contains selectable text (not just images)',
-                'Try removing any password protection',
-                'Save a new copy of the PDF and try uploading again',
-                'Alternatively, manually enter your research details in the form below'
-              ]
-              return NextResponse.json(
-                {
-                  error: userMessage,
-                  suggestions: suggestions,
-                  details: process.env.NODE_ENV === 'development' ? String(fallbackError) : undefined,
-                  canManualEntry: true
-                },
-                { status: 400 }
-              )
-            }
-          }
-        }
-        console.log(`[Extract-Text] PDF extraction successful using ${pdfExtractionMethod}`)
       }
+      
+      console.log(`[Extract-Text] PDF extraction successful using ${pdfExtractionMethod}`)
     } else if (
       fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       fileName.endsWith('.docx')

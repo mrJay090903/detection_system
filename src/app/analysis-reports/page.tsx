@@ -38,9 +38,29 @@ function AnalysisReportsContent() {
   const overallSimilarity = parseFloat(searchParams.get('overallSimilarity') || '0')
 
   // Use AI similarities if available, otherwise fall back to algorithmic ones
-  const displayLexical = aiLexicalSimilarity !== null ? aiLexicalSimilarity : lexicalSimilarity
-  const displaySemantic = aiSemanticSimilarity !== null ? aiSemanticSimilarity : semanticSimilarity
-  const displayOverall = aiOverallSimilarity !== null ? aiOverallSimilarity : overallSimilarity
+  // Blend AI and algorithmic similarities so the AI-reported percentage stays close to the underlying algorithm
+  // If the AI value is missing, fall back to the algorithm; if it deviates significantly, return a conservative blend.
+  function blendSimilarity(aiValue: number | null, algoValue: number): number {
+    if (aiValue === null || aiValue === undefined) return algoValue
+    const ai = Math.max(0, Math.min(1, aiValue))
+    const algo = Math.max(0, Math.min(1, algoValue))
+
+    const diff = Math.abs(ai - algo)
+    // If within 5 percentage points, trust the AI directly
+    if (diff <= 0.05) return ai
+
+    // If AI is substantially higher than algorithm, bias toward the algorithm (reduce the AI percentage)
+    if (ai > algo) {
+      return Math.max(0, Math.min(1, ai * 0.4 + algo * 0.6))
+    }
+
+    // If AI is substantially lower than algorithm, bias toward the algorithm as well (avoid underreporting)
+    return Math.max(0, Math.min(1, ai * 0.6 + algo * 0.4))
+  }
+
+  const displayLexical = blendSimilarity(aiLexicalSimilarity, lexicalSimilarity)
+  const displaySemantic = blendSimilarity(aiSemanticSimilarity, semanticSimilarity)
+  const displayOverall = blendSimilarity(aiOverallSimilarity, overallSimilarity)
 
   const metrics = {
     lexical: { 
@@ -73,20 +93,61 @@ function AnalysisReportsContent() {
       improvements: ''
     }
 
-    // Try to match sections with flexible patterns
-    const section0Match = text.match(/SECTION 0[:\s]*AI Similarity Assessment\s*([\s\S]*?)(?=SECTION 1|$)/i)
-    const section1Match = text.match(/SECTION 1[:\s]*Core Idea Match\s*([\s\S]*?)(?=SECTION 2|$)/i)
-    const section2Match = text.match(/SECTION 2[:\s]*Key Overlaps\s*([\s\S]*?)(?=SECTION 3|$)/i)
-    const section3Match = text.match(/SECTION 3[:\s]*Similarity Reason\s*([\s\S]*?)(?=SECTION 4|$)/i)
-    const section4Match = text.match(/SECTION 4[:\s]*Improvement Suggestions\s*([\s\S]*?)$/i)
+    // Generic SECTION parser - captures `SECTION <n>: <heading>` and the following block until the next SECTION or end
+    const genericSectionRegex = /SECTION\s*(\d+)\s*[:\-]?\s*([^\n\r]*)\n?([\s\S]*?)(?=(?:SECTION\s*\d+\s*[:\-]?\s*[^\n\r]*\n?)|$)/ig
+    let match: RegExpExecArray | null
+    while ((match = genericSectionRegex.exec(text)) !== null) {
+      const num = parseInt(match[1], 10)
+      const heading = (match[2] || '').trim()
+      const content = (match[3] || '').trim()
 
-    if (section0Match) sections.aiAssessment = section0Match[1].trim()
-    if (section1Match) sections.coreIdea = section1Match[1].trim()
-    if (section2Match) sections.keyOverlaps = section2Match[1].trim()
-    if (section3Match) sections.similarityReason = section3Match[1].trim()
-    if (section4Match) sections.improvements = section4Match[1].trim()
+      // Map section number / heading keywords to UI sections
+      if (num === 0 || /ai\s*similar/i.test(heading)) {
+        sections.aiAssessment = content || sections.aiAssessment
+      } else if (num === 1 || /core|concept|idea/i.test(heading)) {
+        sections.coreIdea = content || sections.coreIdea
+      } else if (num === 2 || /method|approach|key|overlap/i.test(heading)) {
+        // If heading explicitly mentions Overlap or Key Overlaps, prefer keyOverlaps
+        if (/overlap/i.test(heading)) {
+          sections.keyOverlaps = content || sections.keyOverlaps
+        } else {
+          // Methodology content may be relevant to the similarity reason section
+          sections.similarityReason = content || sections.similarityReason
+        }
+      } else if (num === 3 || /application|use case|similarity reason|why/i.test(heading)) {
+        sections.similarityReason = content || sections.similarityReason
+      } else if (num >= 4 || /improv|suggest|recommend|conclusion|summary/i.test(heading)) {
+        sections.improvements = content || sections.improvements
+      }
+    }
 
-    // If no sections found, try the entire text as core idea
+    // Fallbacks: Try keyword-based extraction if specific SECTION headings were not present
+    if (!sections.aiAssessment) {
+      const m = text.match(/AI\s*Similarity\s*Assessment[:\s]*([\s\S]*?)(?=SECTION\s*\d+|$)/i)
+      if (m) sections.aiAssessment = m[1].trim()
+    }
+
+    if (!sections.coreIdea) {
+      const m = text.match(/(?:SECTION\s*1[:\s]*[^\n\r]*\n)?(Core\s*(?:Concept|Idea)[^\n\r]*[:\s]*)([\s\S]*?)(?=SECTION\s*\d+|$)/i)
+      if (m) sections.coreIdea = (m[2] || '').trim()
+    }
+
+    if (!sections.keyOverlaps) {
+      const m = text.match(/(Key\s*Overlaps|Conceptual\s*Overlap\s*Summary|Overlap)[\s\S]*?(?=SECTION\s*\d+|$)/i)
+      if (m) sections.keyOverlaps = m[0].replace(/^(Key\s*Overlaps[:\s]*)/i, '').trim()
+    }
+
+    if (!sections.similarityReason) {
+      const m = text.match(/(Similarity\s*Reason|Why\s*These\s*Similarities\s*Exist|Methodology[\s\S]*?)(?=SECTION\s*\d+|$)/i)
+      if (m) sections.similarityReason = m[0].replace(/^(Similarity\s*Reason[:\s]*|Why\s*These\s*Similarities\s*Exist[:\s]*)/i, '').trim()
+    }
+
+    if (!sections.improvements) {
+      const m = text.match(/(Improvement\s*Suggestions|Recommendations|Suggested\s*Actions|Improvement)[\s\S]*?(?=SECTION\s*\d+|$)/i)
+      if (m) sections.improvements = m[0].replace(/^(Improvement\s*Suggestions[:\s]*|Recommendations[:\s]*)/i, '').trim()
+    }
+
+    // If still empty, put the whole text into coreIdea as a last resort
     if (!sections.aiAssessment && !sections.coreIdea && !sections.keyOverlaps && !sections.similarityReason && !sections.improvements) {
       sections.coreIdea = text
     }
