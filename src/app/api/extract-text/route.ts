@@ -52,8 +52,17 @@ function sanitizeFilename(filename: string): string {
     .substring(0, 255)
 }
 
+// Check if we're running in a serverless environment (Vercel)
+const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME !== undefined
+
 // Extract text from PDF using PyMuPDF (better performance and accuracy)
+// NOTE: This only works in environments with Python installed (local dev, Docker, etc.)
 async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
+  // Skip PyMuPDF in serverless environments - Python is not available
+  if (isServerless) {
+    throw new Error('PyMuPDF not available in serverless environment')
+  }
+  
   // Create a temporary file for the PDF
   const tempFileName = `temp_pdf_${randomBytes(16).toString('hex')}.pdf`
   const tempFilePath = join(tmpdir(), tempFileName)
@@ -342,25 +351,31 @@ export async function POST(request: NextRequest) {
       }
       
       // Extract text from PDF - Try multiple methods for reliability
-      console.log('[Extract-Text] Attempting PDF extraction')
+      console.log('[Extract-Text] Attempting PDF extraction, serverless:', isServerless)
       let pdfExtractionMethod = 'unknown'
       let pymupdfError: any = null
       
-      try {
-        // First try PyMuPDF (best quality but requires Python - won't work on Vercel)
-        console.log('[Extract-Text] Trying PyMuPDF extraction')
-        const pdfData = await parsePDFWithPyMuPDF(buffer)
-        extractedText = pdfData.text
-        pdfExtractionMethod = 'PyMuPDF'
-        console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
-          textLength: extractedText.length,
-          metadata: pdfData.metadata
-        })
-      } catch (pymupdfErr) {
-        pymupdfError = pymupdfErr
-        console.warn('[Extract-Text] PyMuPDF failed (Python not available), trying PDF.js')
-        console.log('[Extract-Text] PyMuPDF error:', pymupdfErr instanceof Error ? pymupdfErr.message : String(pymupdfErr))
-        
+      // In serverless environments (Vercel), skip PyMuPDF and go directly to PDF.js
+      if (!isServerless) {
+        try {
+          // First try PyMuPDF (best quality but requires Python - won't work on Vercel)
+          console.log('[Extract-Text] Trying PyMuPDF extraction')
+          const pdfData = await parsePDFWithPyMuPDF(buffer)
+          extractedText = pdfData.text
+          pdfExtractionMethod = 'PyMuPDF'
+          console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
+            textLength: extractedText.length,
+            metadata: pdfData.metadata
+          })
+        } catch (pymupdfErr) {
+          pymupdfError = pymupdfErr
+          console.warn('[Extract-Text] PyMuPDF failed, trying PDF.js')
+          console.log('[Extract-Text] PyMuPDF error:', pymupdfErr instanceof Error ? pymupdfErr.message : String(pymupdfErr))
+        }
+      }
+      
+      // Try PDF.js if PyMuPDF failed or was skipped
+      if (!extractedText) {
         // Try PDF.js (Mozilla's library - works great on Vercel)
         try {
           console.log('[Extract-Text] Attempting PDF.js extraction')
