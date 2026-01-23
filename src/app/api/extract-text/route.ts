@@ -169,15 +169,34 @@ async function parsePDFWithPDFJS(buffer: Buffer) {
       throw new Error('Invalid PDF header - file may be corrupted')
     }
     
-    // Import PDF.js dynamically
-    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    console.log('[PDF.js] Module imported successfully')
+    // Import PDF.js dynamically - use the legacy build for Node.js compatibility
+    let pdfjsLib: any
+    try {
+      pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      console.log('[PDF.js] Legacy module imported successfully')
+    } catch (importErr) {
+      console.warn('[PDF.js] Legacy import failed, trying main build:', importErr)
+      pdfjsLib = await import('pdfjs-dist')
+      console.log('[PDF.js] Main module imported successfully')
+    }
     
-    // Load the PDF document
+    // Disable worker for serverless environments
+    try {
+      if (pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      }
+    } catch (workerErr) {
+      console.warn('[PDF.js] Could not set worker options:', workerErr)
+    }
+    
+    // Load the PDF document with serverless-compatible options
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(buffer),
-      useSystemFonts: true,
-      verbosity: 0 // Reduce logging
+      useSystemFonts: false, // Don't rely on system fonts in serverless
+      disableFontFace: true, // Disable font face for serverless compatibility
+      verbosity: 0, // Reduce logging
+      isEvalSupported: false, // Disable eval for security
+      useWorkerFetch: false, // Don't use worker fetch
     })
     
     const pdfDocument = await loadingTask.promise
