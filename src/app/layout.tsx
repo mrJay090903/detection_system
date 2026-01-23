@@ -27,6 +27,7 @@ export const metadata: Metadata = {
 
 import { Toaster } from "sonner";
 import SpeedInsights from '@/components/SpeedInsights'
+import { Analytics } from '@vercel/analytics/react'
 
 export default function RootLayout({
   children,
@@ -42,6 +43,8 @@ export default function RootLayout({
         {/* Speed Insights (Vercel) script will be injected on the client to capture page vitals */}
         {/* This client component will call @vercel/speed-insights.injectSpeedInsights */}
         <SpeedInsights />
+        {/* Vercel analytics captures page views and events client-side */}
+        <Analytics />
         {children}
       </body>
     </html>
