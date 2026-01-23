@@ -1,63 +1,19 @@
 #!/usr/bin/env node
 /*
-  Simple wrapper that runs @vercel/speed-insights CLI against one or more local pages
-  Usage: node scripts/run_speed_insights.js [url1 url2 ...]
-  By default it runs against http://localhost:3000/research-check and /analysis-reports
+  NOTE: @vercel/speed-insights is a client-side library (it injects a script tag to collect vitals).
+  There is no dedicated CLI provided by the package to run Lighthouse from Node in this version.
+
+  This helper prints quick instructions for using Speed Insights and verifying the injection.
+  Usage: node scripts/run_speed_insights.js
 */
-const { exec } = require('child_process')
-const fs = require('fs')
-const path = require('path')
 
-const urls = process.argv.slice(2)
-if (urls.length === 0) {
-  urls.push('http://localhost:3000/research-check')
-  urls.push('http://localhost:3000/analysis-reports')
-}
-
-async function runForUrl(url) {
-  console.log('Running Speed Insights for', url)
-  return new Promise((resolve, reject) => {
-    // Use the installed package via npx to ensure proper binary resolution
-    // Output JSON for easy parsing
-    const cmd = `npx @vercel/speed-insights --output json --form json ${url}`
-    exec(cmd, { maxBuffer: 1024 * 1024 * 5 }, (err, stdout, stderr) => {
-      if (err) {
-        return reject({ err, stderr: stderr && stderr.toString() })
-      }
-
-      try {
-        const parsed = JSON.parse(stdout)
-        const outDir = path.join(process.cwd(), 'tmp')
-        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
-        const outFile = path.join(outDir, `speed-insights-${encodeURIComponent(url)}-${Date.now()}.json`)
-        fs.writeFileSync(outFile, JSON.stringify(parsed, null, 2))
-        console.log('Saved results to', outFile)
-        resolve({ url, file: outFile, parsed })
-      } catch (parseErr) {
-        reject({ err: parseErr, raw: stdout })
-      }
-    })
-  })
-}
-
-;(async () => {
-  const results = []
-  for (const url of urls) {
-    try {
-      const r = await runForUrl(url)
-      // Print a short summary if available
-      const lighthouse = r.parsed && r.parsed.lighthouseResult
-      if (lighthouse && lighthouse.categories) {
-        console.log('Summary for', url)
-        for (const [key, val] of Object.entries(lighthouse.categories)) {
-          console.log(`  ${key}: ${(val.score * 100).toFixed(0)}%`) 
-        }
-      }
-      results.push(r)
-    } catch (e) {
-      console.error('Error running for', url, e.stderr || e.err || e.raw || e)
-    }
-  }
-
-  console.log('\nCompleted. Parsed', results.length, 'results.')
-})()
+console.log('Speed Insights helper')
+console.log('1) The app has a client component that injects the Speed Insights script into pages:')
+console.log('   -> src/components/SpeedInsights.tsx is included in src/app/layout.tsx')
+console.log('2) To see it in action:')
+console.log('   - Start the dev server: npm run dev')
+console.log('   - Open a page (e.g., http://localhost:3000/research-check)')
+console.log('   - Open DevTools -> Console and look for "[Speed Insights] injected script"')
+console.log('   - In network tab, you may see requests to va.vercel-scripts.com when the script runs')
+console.log('3) To collect Lighthouse reports programmatically, use Lighthouse (npm i -D lighthouse) or a separate runner.')
+console.log('\nThis helper intentionally does not attempt a CLI run because @vercel/speed-insights is a browser sdk.')
