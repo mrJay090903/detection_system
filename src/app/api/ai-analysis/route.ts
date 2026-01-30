@@ -363,6 +363,9 @@ export async function POST(request: Request) {
       success: true,
       analysis,
       aiSimilarities,
+      aiLexicalSimilarity: aiSimilarities.lexical !== null ? (aiSimilarities.lexical * 100).toFixed(2) : null,
+      aiSemanticSimilarity: aiSimilarities.semantic !== null ? (aiSimilarities.semantic * 100).toFixed(2) : null,
+      aiOverallSimilarity: aiSimilarities.overall !== null ? (aiSimilarities.overall * 100).toFixed(2) : null,
       timestamp: new Date().toISOString()
     });
 

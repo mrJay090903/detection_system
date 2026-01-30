@@ -58,9 +58,18 @@ function AnalysisReportsContent() {
     return Math.max(0, Math.min(1, ai * 0.6 + algo * 0.4))
   }
 
-  const displayLexical = blendSimilarity(aiLexicalSimilarity, lexicalSimilarity)
-  const displaySemantic = blendSimilarity(aiSemanticSimilarity, semanticSimilarity)
-  const displayOverall = blendSimilarity(aiOverallSimilarity, overallSimilarity)
+  // Prefer direct AI-reported percentages when available. Otherwise fall back to blended values.
+  const displayLexical = (aiLexicalSimilarity !== null && aiLexicalSimilarity !== undefined)
+    ? aiLexicalSimilarity
+    : blendSimilarity(aiLexicalSimilarity, lexicalSimilarity)
+
+  const displaySemantic = (aiSemanticSimilarity !== null && aiSemanticSimilarity !== undefined)
+    ? aiSemanticSimilarity
+    : blendSimilarity(aiSemanticSimilarity, semanticSimilarity)
+
+  const displayOverall = (aiOverallSimilarity !== null && aiOverallSimilarity !== undefined)
+    ? aiOverallSimilarity
+    : blendSimilarity(aiOverallSimilarity, overallSimilarity)
 
   const metrics = {
     lexical: { 

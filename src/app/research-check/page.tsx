@@ -342,8 +342,8 @@ export default function ResearchCheckPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
+      {/* Header - Fixed */}
+      <header className="bg-white border-b border-gray-200 shadow-sm fixed top-0 left-0 w-full z-40">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -365,71 +365,16 @@ export default function ResearchCheckPage() {
       </header>
 
       {/* Main Content */}
-      <div className="container mx-auto px-6 py-12">
-        <div className="max-w-4xl mx-auto">
-          {/* Page Title */}
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-12"
-          >
-            <h1 className="text-4xl font-bold text-gray-800 mb-3">Research Similarity Check</h1>
-            <p className="text-gray-600 text-lg">Complete the steps below to analyze your research for similarity</p>
-          </motion.div>
+      <div className="container mx-auto px-6 pt-32 pb-12">
+        <div className="max-w-6xl mx-auto">
+  
 
-          {/* Stepper Card */}
+          {/* Stepper Card (Stepper Navigation removed) */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-white rounded-2xl shadow-xl p-8 md:p-12"
           >
-            {/* Stepper Navigation */}
-            <div className="mb-12">
-              <div className="flex items-center justify-between">
-                {steps.map((step, index) => {
-                  const Icon = step.icon
-                  const isCompleted = currentStep > step.id
-                  const isCurrent = currentStep === step.id
-                  
-                  return (
-                    <div key={step.id} className="flex items-center flex-1">
-                      <div className="flex flex-col items-center flex-1">
-                        <motion.div
-                          initial={false}
-                          animate={{
-                            scale: isCurrent ? 1.1 : 1,
-                            backgroundColor: isCompleted ? '#10b981' : isCurrent ? '#3b82f6' : '#e5e7eb'
-                          }}
-                          transition={{ duration: 0.3 }}
-                          className={`
-                            w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all duration-300
-                            ${isCompleted ? 'border-green-500 text-white' : ''}
-                            ${isCurrent ? 'border-blue-500 text-white' : ''}
-                            ${!isCompleted && !isCurrent ? 'border-gray-300 text-gray-500' : ''}
-                          `}
-                        >
-                          {isCompleted ? <Check className="w-8 h-8" /> : <Icon className="w-8 h-8" />}
-                        </motion.div>
-                        <span className={`mt-3 text-sm font-medium ${isCurrent ? 'text-blue-600' : 'text-gray-600'}`}>
-                          {step.name}
-                        </span>
-                      </div>
-                      
-                      {index < steps.length - 1 && (
-                        <motion.div
-                          initial={false}
-                          animate={{
-                            backgroundColor: isCompleted ? '#10b981' : '#e5e7eb'
-                          }}
-                          transition={{ duration: 0.3 }}
-                          className="h-1 flex-1 mx-4 rounded"
-                        />
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
 
             {/* Step Content */}
             <AnimatePresence mode="wait">
@@ -981,11 +926,10 @@ export default function ResearchCheckPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setShowDetailsDialog(false)}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
           />
-          
           {/* Modal Container */}
-          <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6" onClick={() => setShowDetailsDialog(false)}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1005,15 +949,14 @@ export default function ResearchCheckPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
-                
-                <div className="relative flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg">
-                    <FileText className="w-7 h-7 text-white" />
-                  </div>
-                  <div>
+                <div className="relative flex flex-col items-center justify-center gap-2 py-2">
+                  <div className="flex items-center justify-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg">
+                      <FileText className="w-7 h-7 text-white" />
+                    </div>
                     <h2 className="text-3xl font-black text-white">Research Details</h2>
-                    <p className="text-indigo-100 mt-1">Comprehensive information about the similar research found</p>
                   </div>
+                  <p className="text-indigo-100 mt-1 text-center">Comprehensive information about the similar research found</p>
                 </div>
               </div>
               
