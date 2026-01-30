@@ -65,21 +65,25 @@ const LandingPage = () => {
     transition={{ duration: 0.6 }}
     className="container mx-auto px-6 py-6 flex justify-between items-center relative z-20 backdrop-blur-sm"
   >
-    <motion.div 
-      className="flex items-center gap-3 group"
-      whileHover={{ scale: 1.05 }}
-      transition={{ type: "spring", stiffness: 300 }}
-    >
-      {/* Logo - BU Seal */}
-      <div className="w-12 h-12 rounded-full flex items-center justify-center overflow-hidden bg-white/10 backdrop-blur-md border border-white/20 shadow-lg transition-transform duration-300 group-hover:scale-110">
-        <Image src="/assets/bu-logo.png" width={48} height={48} alt="BU Logo" className="object-cover" />
-      </div>
-      
-      {/* Brand Name */}
-      <div className="font-bold tracking-wide uppercase text-lg md:text-xl">
-        <span className="text-[#3896DA] drop-shadow-lg">BICOL</span> <span className="text-[#F86D1B] drop-shadow-lg">UNIVERSITY</span>
-      </div>
-    </motion.div>
+    <Link href="/" className="group">
+      <motion.div 
+        className="flex items-center gap-3 group"
+        whileHover={{ scale: 1.05 }}
+        transition={{ type: "spring", stiffness: 300 }}
+      >
+        {/* Logo - BU Seal */}
+        <div className="w-12 h-12 rounded-full flex items-center justify-center overflow-hidden bg-white/10 backdrop-blur-md border border-white/20 shadow-lg transition-transform duration-300 group-hover:scale-110">
+          <Image src="/assets/bu-logo.png" width={48} height={48} alt="BU Logo" className="object-cover" />
+        </div>
+        
+        {/* Brand Name */}
+        <div className="font-bold tracking-wide uppercase text-lg md:text-xl leading-none">
+          <span className="text-[#3896DA] drop-shadow-lg">BICOL</span>
+          <span className="text-[#F86D1B] drop-shadow-lg ml-1">UNIVERSITY</span>
+          <span className="block text-xs md:text-sm font-semibold text-white mt-0.5 normal-case">BICOL UNIVERSITY POLANGUI</span>
+        </div>
+      </motion.div>
+    </Link>
 
     {/* Login Button */}
     <LoginForm />
