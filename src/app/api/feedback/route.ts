@@ -31,7 +31,11 @@ const likertLabels: Record<number, string> = {
 
 function getRatingEmoji(rating: number): string {
   const emojis = ['😞', '😕', '😐', '😊', '😄']
-  returnfunctionalSuitability = (
+  return emojis[rating - 1] || '😐'
+}
+
+function generateEmailHTML(data: FeedbackData): string {
+  const functionalSuitability = (
     data.functionalCompleteness + 
     data.functionalCorrectness + 
     data.functionalAppropriateness
@@ -56,11 +60,7 @@ function getRatingEmoji(rating: number): string {
     data.userErrorProtection +
     data.userInterfaceAesthetics +
     data.accessibility
-  ) / 9a.accuracy + 
-    data.helpfulness + 
-    data.design + 
-    data.overallSatisfaction
-  ) / 5
+  ) / 9
 
   return `
     <!DOCTYPE html>
@@ -185,7 +185,27 @@ function getRatingEmoji(rating: number): string {
       
       <div class="content">
         <div class="info-section">
-          <h3 sOverall Average Rating</div>
+          <h3 style="margin: 0 0 10px 0; color: #333;">Respondent Information</h3>
+          <div class="info-row">
+            <span class="info-label">Name:</span>
+            <span class="info-value">${data.name}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Email:</span>
+            <span class="info-value">${data.email}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Role:</span>
+            <span class="info-value">${data.role}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Date:</span>
+            <span class="info-value">${new Date().toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div class="average-rating">
+          <div style="font-size: 14px; opacity: 0.9;">Overall Average Rating</div>
           <div class="score">${avgRating.toFixed(1)} / 5.0</div>
           <div style="font-size: 32px;">${getRatingEmoji(Math.round(avgRating))}</div>
         </div>
@@ -275,12 +295,10 @@ function getRatingEmoji(rating: number): string {
 
           <div class="rating-item">
             <div class="rating-question">User Interface Aesthetics</div>
-            <dfunctionalCompleteness || !data.functionalCorrectness || 
-        !data.functionalAppropriateness || !data.appropriatenessRecognizability ||
-        !data.learnability || !data.operability || !data.userErrorProtection ||
-        !data.userInterfaceAesthetics || !data.accessibility) {
-      return NextResponse.json(
-        { error: 'All quality characteristiclass="rating-label">(${likertLabels[data.userInterfaceAesthetics]})</span>
+            <div class="rating-value">
+              <span class="rating-stars">${'★'.repeat(data.userInterfaceAesthetics)}${'☆'.repeat(5 - data.userInterfaceAesthetics)}</span>
+              <span>${data.userInterfaceAesthetics}/5</span>
+              <span class="rating-label">(${likertLabels[data.userInterfaceAesthetics]})</span>
             </div>
           </div>
 
@@ -289,40 +307,9 @@ function getRatingEmoji(rating: number): string {
             <div class="rating-value">
               <span class="rating-stars">${'★'.repeat(data.accessibility)}${'☆'.repeat(5 - data.accessibility)}</span>
               <span>${data.accessibility}/5</span>
-              <span class="rating-label">(${likertLabels[data.accessibility
-            <div class="rating-question">Helpfulness for Research</div>
-            <div class="rating-value">
-              <span class="rating-stars">${'★'.repeat(data.helpfulness)}${'☆'.repeat(5 - data.helpfulness)}</span>
-              <span>${data.helpfulness}/5</span>
-              <span class="rating-label">(${likertLabels[data.helpfulness]})</span>
-            </div>
-ISO 25010 Quality Characteristics (1-5 scale):
-
-FUNCTIONAL SUITABILITY:
-- Functional Completeness: ${data.functionalCompleteness}/5 (${likertLabels[data.functionalCompleteness]})
-- Functional Correctness: ${data.functionalCorrectness}/5 (${likertLabels[data.functionalCorrectness]})
-- Functional Appropriateness: ${data.functionalAppropriateness}/5 (${likertLabels[data.functionalAppropriateness]})
-
-INTERACTION CAPABILITY:
-- Appropriateness Recognizability: ${data.appropriatenessRecognizability}/5 (${likertLabels[data.appropriatenessRecognizability]})
-- Learnability: ${data.learnability}/5 (${likertLabels[data.learnability]})
-- Operability: ${data.operability}/5 (${likertLabels[data.operability]})
-- User Error Protection: ${data.userErrorProtection}/5 (${likertLabels[data.userErrorProtection]})
-- User Interface Aesthetics: ${data.userInterfaceAesthetics}/5 (${likertLabels[data.userInterfaceAesthetics]})
-- Accessibility: ${data.accessibility}/5 (${likertLabels[data.accessibility]})
-
-Average Rating: ${((data.functionalCompleteness + data.functionalCorrectness + data.functionalAppropriateness + data.appropriatenessRecognizability + data.learnability + data.operability + data.userErrorProtection + data.userInterfaceAesthetics + data.accessibility) / 9
+              <span class="rating-label">(${likertLabels[data.accessibility]})</span>
             </div>
           </div>
-
-          <div class="rating-item">
-            <div class="rating-question">Overall Satisfaction</div>
-            <div class="rating-value">
-              <span class="rating-stars">${'★'.repeat(data.overallSatisfaction)}${'☆'.repeat(5 - data.overallSatisfaction)}</span>
-              <span>${data.overallSatisfaction}/5</span>
-              <span class="rating-label">(${likertLabels[data.overallSatisfaction]})</span>
-            </div>
-          </div>functionalCompleteness + data.functionalCorrectness + data.functionalAppropriateness + data.appropriatenessRecognizability + data.learnability + data.operability + data.userErrorProtection + data.userInterfaceAesthetics + data.accessibility) / 9
         </div>
 
         ${data.comments ? `
@@ -342,7 +329,7 @@ Average Rating: ${((data.functionalCompleteness + data.functionalCorrectness + d
         <div class="footer">
           <p>This feedback was submitted through the Research Similarity Detection System</p>
           <p>Bicol University Polangui Campus</p>
-        </div>functionalCompleteness + data.functionalCorrectness + data.functionalAppropriateness + data.appropriatenessRecognizability + data.learnability + data.operability + data.userErrorProtection + data.userInterfaceAesthetics + data.accessibility) / 9
+        </div>
       </div>
     </body>
     </html>
@@ -361,13 +348,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!data.easeOfUse || !data.accuracy || !data.helpfulness || 
-        !data.design || !data.overallSatisfaction) {
+    if (!data.functionalCompleteness || !data.functionalCorrectness || 
+        !data.functionalAppropriateness || !data.appropriatenessRecognizability ||
+        !data.learnability || !data.operability || !data.userErrorProtection ||
+        !data.userInterfaceAesthetics || !data.accessibility) {
       return NextResponse.json(
-        { error: 'All ratings are required' },
+        { error: 'All quality characteristics are required' },
         { status: 400 }
       )
     }
+
+    // Calculate averages for email subject
+    const avgRating = (
+      data.functionalCompleteness + 
+      data.functionalCorrectness + 
+      data.functionalAppropriateness +
+      data.appropriatenessRecognizability +
+      data.learnability +
+      data.operability +
+      data.userErrorProtection +
+      data.userInterfaceAesthetics +
+      data.accessibility
+    ) / 9
 
     // Generate email content
     const emailHTML = generateEmailHTML(data)
@@ -380,14 +382,22 @@ Email: ${data.email}
 Role: ${data.role}
 Date: ${new Date().toLocaleString()}
 
-Ratings (1-5 scale):
-- Ease of Use: ${data.easeOfUse}/5 (${likertLabels[data.easeOfUse]})
-- Accuracy: ${data.accuracy}/5 (${likertLabels[data.accuracy]})
-- Helpfulness: ${data.helpfulness}/5 (${likertLabels[data.helpfulness]})
-- Design: ${data.design}/5 (${likertLabels[data.design]})
-- Overall Satisfaction: ${data.overallSatisfaction}/5 (${likertLabels[data.overallSatisfaction]})
+ISO 25010 Quality Characteristics (1-5 scale):
 
-Average Rating: ${((data.easeOfUse + data.accuracy + data.helpfulness + data.design + data.overallSatisfaction) / 5).toFixed(1)}/5
+FUNCTIONAL SUITABILITY:
+- Functional Completeness: ${data.functionalCompleteness}/5 (${likertLabels[data.functionalCompleteness]})
+- Functional Correctness: ${data.functionalCorrectness}/5 (${likertLabels[data.functionalCorrectness]})
+- Functional Appropriateness: ${data.functionalAppropriateness}/5 (${likertLabels[data.functionalAppropriateness]})
+
+INTERACTION CAPABILITY:
+- Appropriateness Recognizability: ${data.appropriatenessRecognizability}/5 (${likertLabels[data.appropriatenessRecognizability]})
+- Learnability: ${data.learnability}/5 (${likertLabels[data.learnability]})
+- Operability: ${data.operability}/5 (${likertLabels[data.operability]})
+- User Error Protection: ${data.userErrorProtection}/5 (${likertLabels[data.userErrorProtection]})
+- User Interface Aesthetics: ${data.userInterfaceAesthetics}/5 (${likertLabels[data.userInterfaceAesthetics]})
+- Accessibility: ${data.accessibility}/5 (${likertLabels[data.accessibility]})
+
+Average Rating: ${avgRating.toFixed(1)}/5
 
 Comments: ${data.comments || 'N/A'}
 
@@ -397,36 +407,45 @@ Suggestions: ${data.suggestions || 'N/A'}
     // Send email using Supabase Edge Function or your email service
     // For now, we'll use a simple email API approach
     
-    // Option 1: Using Resend (recommended)
-    if (process.env.RESEND_API_KEY) {
-      const resendResponse = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: SYSTEM_EMAIL,
-          to: FEEDBACK_EMAIL,
-          subject: `New Feedback: ${data.name} (${data.role}) - ${((data.easeOfUse + data.accuracy + data.helpfulness + data.design + data.overallSatisfaction) / 5).toFixed(1)}/5 Rating`,
-          html: emailHTML,
-          text: emailText
-        }),
-      })
-
-      if (!resendResponse.ok) {
-        throw new Error('Failed to send email via Resend')
-      }
-    }
-
-    // Log feedback to console for debugging
+    // Log feedback to console (always)
     console.log('[Feedback] New submission:', {
       name: data.name,
       email: data.email,
       role: data.role,
-      averageRating: ((data.easeOfUse + data.accuracy + data.helpfulness + data.design + data.overallSatisfaction) / 5).toFixed(1),
+      averageRating: avgRating.toFixed(1),
       timestamp: new Date().toISOString()
     })
+
+    // Try to send email via Resend (optional, non-blocking)
+    if (process.env.RESEND_API_KEY) {
+      try {
+        const resendResponse = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: SYSTEM_EMAIL,
+            to: FEEDBACK_EMAIL,
+            subject: `New Feedback: ${data.name} (${data.role}) - ${avgRating.toFixed(1)}/5 Rating`,
+            html: emailHTML,
+            text: emailText
+          }),
+        })
+
+        if (!resendResponse.ok) {
+          const errorData = await resendResponse.json()
+          console.error('[Feedback] Email send failed:', errorData)
+        } else {
+          console.log('[Feedback] Email sent successfully')
+        }
+      } catch (emailError) {
+        console.error('[Feedback] Email error (non-blocking):', emailError)
+      }
+    } else {
+      console.log('[Feedback] Email skipped - RESEND_API_KEY not configured')
+    }
 
     return NextResponse.json({
       success: true,
