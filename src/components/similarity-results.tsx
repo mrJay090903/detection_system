@@ -71,6 +71,12 @@ export function SimilarityResults() {
   const [viewProposedConcept, setViewProposedConcept] = useState(false)
   const [viewAbstractIndex, setViewAbstractIndex] = useState<number | null>(null)
 
+  // Helper function to clean titles by removing "BU Thematic Area:" prefix
+  const cleanTitle = (title: string): string => {
+    if (!title) return title
+    return title.replace(/^bu thematic area:\s*/i, '').trim()
+  }
+
   useEffect(() => {
     const loadResults = () => {
       try {
@@ -240,7 +246,7 @@ export function SimilarityResults() {
                       <BarChart
                         data={result.similarities.slice(0, 3).map((s, i) => ({
                           name: `#${i + 1}`,
-                          title: s.title.substring(0, 30) + (s.title.length > 30 ? '...' : ''),
+                          title: cleanTitle(s.title).substring(0, 30) + (cleanTitle(s.title).length > 30 ? '...' : ''),
                           overall: (s.overallSimilarity * 100).toFixed(1),
                           titleSim: (s.titleSimilarity * 100).toFixed(1),
                           abstractSim: (s.abstractSimilarity * 100).toFixed(1),
@@ -332,7 +338,7 @@ export function SimilarityResults() {
                             
                             <div className="flex-1 min-w-0">
                               <h4 className="font-bold text-lg text-foreground mb-2 leading-tight">
-                                {similarity.title}
+                                {cleanTitle(similarity.title)}
                               </h4>
                               
                               {(similarity.year || similarity.course) && (
@@ -600,7 +606,7 @@ export function SimilarityResults() {
                         {(result.similarities[0].overallSimilarity * 100).toFixed(2)}%
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {result.similarities[0].title}
+                        {cleanTitle(result.similarities[0].title)}
                       </div>
                     </div>
                   )}
@@ -665,7 +671,7 @@ export function SimilarityResults() {
         <Dialog open={viewAbstractIndex !== null} onOpenChange={() => setViewAbstractIndex(null)}>
           <DialogContent className="max-w-3xl max-h-[80vh]">
             <DialogHeader>
-              <DialogTitle>{result.similarities[viewAbstractIndex].title}</DialogTitle>
+              <DialogTitle>{cleanTitle(result.similarities[viewAbstractIndex].title)}</DialogTitle>
               <DialogDescription>
                 {result.similarities[viewAbstractIndex].year && `Year: ${result.similarities[viewAbstractIndex].year}`}
                 {result.similarities[viewAbstractIndex].course && ` • Course: ${result.similarities[viewAbstractIndex].course}`}

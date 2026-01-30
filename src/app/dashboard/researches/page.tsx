@@ -49,6 +49,12 @@ export default function ResearchDashboard() {
   const [selectedCourse, setSelectedCourse] = useState<string>("")
   const [selectedYear, setSelectedYear] = useState<string>("")
 
+  // Helper function to clean titles by removing "BU Thematic Area:" prefix
+  const cleanTitle = (title: string): string => {
+    if (!title) return title
+    return title.replace(/^bu thematic area:\s*/i, '').trim()
+  }
+
   // Get unique years from researches
   const years = [...new Set(researches.map(r => r.year))].sort((a, b) => b - a)
 
@@ -288,7 +294,7 @@ export default function ResearchDashboard() {
               filteredResearches.map((research) => (
                 <TableRow key={research.id}>
                   <TableCell className="font-medium">{research.year}</TableCell>
-                  <TableCell>{research.title}</TableCell>
+                  <TableCell>{cleanTitle(research.title)}</TableCell>
                   <TableCell className="text-right space-x-2">
                     <ResearchViewDialog 
                       research={research}

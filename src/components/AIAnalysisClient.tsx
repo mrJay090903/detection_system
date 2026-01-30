@@ -152,6 +152,10 @@ export default function AIAnalysisClient() {
         let title = match[1].trim()
           .split(/[\n\r]/)[0]
 
+        // Remove 'BU Thematic Area:' prefix if present
+        title = title.replace(/^bu thematic area:\s*/i, '').trim()
+        
+        // Stop capturing at BU Thematic Area if it appears later
         const buThematicIndex = title.toLowerCase().indexOf('bu thematic area')
         if (buThematicIndex !== -1) {
           title = title.substring(0, buThematicIndex).trim()

@@ -48,6 +48,12 @@ export default function ResearchCheckPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [selectedResearch, setSelectedResearch] = useState<any>(null)
   const [showDetailsDialog, setShowDetailsDialog] = useState(false)
+
+  // Helper function to clean titles by removing "BU Thematic Area:" prefix
+  const cleanTitle = (title: string): string => {
+    if (!title) return title
+    return title.replace(/^bu thematic area:\s*/i, '').trim()
+  }
   const [stepData, setStepData] = useState<StepData>({
     course: "",
     title: "",
@@ -128,7 +134,10 @@ export default function ResearchCheckPage() {
             .replace(/^(proposed title:|title:|research title:)/i, '')
             .trim()
           
-          // Stop capturing at BU Thematic Area
+          // Remove 'BU Thematic Area:' prefix if present
+          titleToUse = titleToUse.replace(/^bu thematic area:\s*/i, '').trim()
+          
+          // Stop capturing at BU Thematic Area if it appears later
           const buThematicIndex = titleToUse.toLowerCase().indexOf('bu thematic area')
           if (buThematicIndex !== -1) {
             titleToUse = titleToUse.substring(0, buThematicIndex).trim()
@@ -268,7 +277,10 @@ export default function ResearchCheckPage() {
           .trim()
           .split(/[\n\r]/)[0]  // Take only first line
         
-        // Stop capturing at BU Thematic Area
+        // Remove 'BU Thematic Area:' prefix if present
+        extractedTitle = extractedTitle.replace(/^bu thematic area:\s*/i, '').trim()
+        
+        // Stop capturing at BU Thematic Area if it appears later
         const buThematicIndex = extractedTitle.toLowerCase().indexOf('bu thematic area')
         if (buThematicIndex !== -1) {
           extractedTitle = extractedTitle.substring(0, buThematicIndex).trim()
@@ -727,7 +739,7 @@ export default function ResearchCheckPage() {
                                   >
                                     <div className="flex items-start justify-between mb-3">
                                       <div className="flex-1">
-                                        <h5 className="font-medium text-gray-800 mb-2">{match.title}</h5>
+                                        <h5 className="font-medium text-gray-800 mb-2">{cleanTitle(match.title)}</h5>
                                         <p className="text-sm text-gray-600">Course: {match.course} | Year: {match.year}</p>
                                       </div>
                                       <div className="ml-4">
@@ -1060,7 +1072,7 @@ export default function ResearchCheckPage() {
                     </div>
                     <Label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Research Title</Label>
                   </div>
-                  <p className="text-xl font-bold text-gray-900 leading-relaxed">{selectedResearch.title}</p>
+                  <p className="text-xl font-bold text-gray-900 leading-relaxed">{cleanTitle(selectedResearch.title)}</p>
                 </motion.div>
 
                 {/* Researchers Card */}

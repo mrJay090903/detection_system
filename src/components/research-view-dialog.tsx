@@ -29,6 +29,12 @@ interface ResearchViewDialogProps {
 export function ResearchViewDialog({ research, trigger, onEdit }: ResearchViewDialogProps) {
   const formattedDate = format(new Date(research.created_at), "MMMM d, yyyy")
 
+  // Helper function to clean titles by removing "BU Thematic Area:" prefix
+  const cleanTitle = (title: string): string => {
+    if (!title) return title
+    return title.replace(/^bu thematic area:\s*/i, '').trim()
+  }
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -39,7 +45,7 @@ export function ResearchViewDialog({ research, trigger, onEdit }: ResearchViewDi
         <div className="relative bg-primary/10 p-6 pb-8">
           <DialogHeader className="mb-2">
             <DialogTitle className="text-2xl font-bold tracking-tight">
-              {research.title}
+              {cleanTitle(research.title)}
             </DialogTitle>
             <DialogDescription className="text-primary mt-2">
               Added on {formattedDate}
