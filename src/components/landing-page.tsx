@@ -151,6 +151,11 @@ const LandingPage = () => {
         <motion.button 
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            const el = document.getElementById('how-it-works')
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            else window.location.hash = '#how-it-works'
+          }}
           className="bg-white/10 hover:bg-white/20 text-white px-10 py-4 rounded-lg font-semibold border-2 border-white/30 hover:border-white transition-all duration-300 backdrop-blur-md"
         >
           Learn More
@@ -279,7 +284,7 @@ const LandingPage = () => {
       </section>
 
       {/* ================= HOW IT WORKS SECTION ================= */}
-      <section className="py-24 bg-gradient-to-b from-white to-blue-50">
+      <section id="how-it-works" className="py-24 bg-gradient-to-b from-white to-blue-50">
         <div className="container mx-auto px-6">
           <div className="mb-20 text-center">
             <h2 className="text-[#1e3a5f] text-4xl md:text-5xl font-bold mb-4">How it works</h2>
@@ -335,7 +340,7 @@ const LandingPage = () => {
                    <UploadCloud size={48} className="mx-auto" />
                 </div>
                 <h4 className="font-bold text-gray-800 mb-3 text-lg">Upload your paper</h4>
-                <p className="text-sm text-gray-600 max-w-[220px] leading-relaxed">Drag & drop a PDF or DOCX, or import from your favorite cloud drive.</p>
+                <p className="text-sm text-gray-600 max-w-[220px] leading-relaxed">Drag & drop a PDF or DOCX, or input your proposed research text directly.</p>
               </motion.div>
 
               {/* Step 3 */}
