@@ -192,23 +192,22 @@ export async function POST(request: NextRequest) {
           mergePages: true
         })
         
+        const pdfDataPreview = typeof pdfData === 'string' 
+          ? (pdfData as string).substring(0, 100) 
+          : pdfData ? JSON.stringify(pdfData).substring(0, 200) : ''
+        
         console.log('[Extract-Text] unpdf returned:', {
           type: typeof pdfData,
           isString: typeof pdfData === 'string',
           hasText: pdfData?.text !== undefined,
-          hasPages: Array.isArray(pdfData?.pages),
+          totalPages: pdfData?.totalPages,
           keys: typeof pdfData === 'object' ? Object.keys(pdfData) : [],
-          preview: typeof pdfData === 'string' ? pdfData.substring(0, 100) : JSON.stringify(pdfData).substring(0, 200)
+          preview: pdfDataPreview
         })
         
-        // unpdf returns an object with pages array, where each page has text
+        // unpdf returns an object with totalPages and text properties
         if (typeof pdfData === 'string') {
           extractedText = pdfData
-        } else if (pdfData && Array.isArray(pdfData.pages)) {
-          // Each page is an object with a text property
-          extractedText = pdfData.pages
-            .map((page: any) => typeof page === 'string' ? page : page.text || '')
-            .join('\n\n')
         } else if (pdfData && typeof pdfData.text === 'string') {
           extractedText = pdfData.text
         } else {
@@ -216,7 +215,7 @@ export async function POST(request: NextRequest) {
           extractedText = String(pdfData)
         }
         
-        const pageCount = (pdfData && Array.isArray(pdfData.pages)) ? pdfData.pages.length : 1
+        const pageCount = (pdfData && pdfData.totalPages) ? pdfData.totalPages : 1
         parsingNotes = `Extracted from ${pageCount} PDF page${pageCount !== 1 ? 's' : ''}`
         
         console.log('[Extract-Text] PDF parsed successfully:', {
