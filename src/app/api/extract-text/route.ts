@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import mammoth from 'mammoth'
-import { supabaseServer } from '@/lib/supabaseServer'
+import { getSupabaseServer } from '@/lib/supabaseServer'
 
 // ============================================================================
 // SECURITY CONFIGURATION
@@ -130,7 +130,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Download from Supabase storage (server-side, uses service role key)
-      const downloadRes = await supabaseServer.storage.from(bucket).download(path)
+      const supabase = getSupabaseServer()
+      const downloadRes = await supabase.storage.from(bucket).download(path)
       if (downloadRes.error || !downloadRes.data) {
         console.error('[Extract-Text] Supabase download error:', downloadRes.error)
         return NextResponse.json({ error: 'Failed to download file from storage' }, { status: 500 })
@@ -158,7 +159,7 @@ export async function POST(request: NextRequest) {
 
       // Optional cleanup
       if (process.env.CLEAN_UP_UPLOADED_FILES === '1') {
-        const removeRes = await supabaseServer.storage.from(bucket).remove([path])
+        const removeRes = await supabase.storage.from(bucket).remove([path])
         if (removeRes.error) console.warn('[Extract-Text] Failed to remove uploaded file:', removeRes.error)
       }
 
@@ -277,8 +278,8 @@ export async function POST(request: NextRequest) {
       success: true,
       text: parsedContent.concept,  // Return the cleaned concept
       title: parsedContent.title,    // Return extracted title if found
-      fileName: file.name,
-      fileSize: file.size,
+      fileName: fileName,
+      fileSize: buffer.length,
       extractedLength: parsedContent.concept.length,
       rawLength: extractedText.length
     })
