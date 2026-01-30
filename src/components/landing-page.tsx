@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { LoginForm } from '@/components/ui/login-form';
+import { FeedbackForm } from '@/components/ui/feedback-form';
 import { 
   Cpu, 
   Search, 
@@ -410,14 +411,18 @@ const LandingPage = () => {
             <p className="text-gray-600 text-base mb-8 leading-relaxed">
               Get instant feedback on your draft while ensuring academic integrity and streamlining your thesis planning process.
             </p>
-            <motion.button 
-              whileHover={{ scale: 1.05, boxShadow: "0 25px 50px -12px rgba(252, 163, 17, 0.5)" }}
-              whileTap={{ scale: 0.95 }}
-              className="bg-[#fca311] hover:bg-[#e59200] text-white px-8 py-4 rounded-lg font-bold shadow-lg transition-all duration-300 inline-flex items-center gap-2"
-            >
-              Give Us Feedback 
-              <ArrowRight className="w-5 h-5" />
-            </motion.button>
+            <FeedbackForm 
+              trigger={
+                <motion.button 
+                  whileHover={{ scale: 1.05, boxShadow: "0 25px 50px -12px rgba(252, 163, 17, 0.5)" }}
+                  whileTap={{ scale: 0.95 }}
+                  className="bg-[#fca311] hover:bg-[#e59200] text-white px-8 py-4 rounded-lg font-bold shadow-lg transition-all duration-300 inline-flex items-center gap-2"
+                >
+                  Give Us Feedback 
+                  <ArrowRight className="w-5 h-5" />
+                </motion.button>
+              }
+            />
           </motion.div>
 
           <motion.div 

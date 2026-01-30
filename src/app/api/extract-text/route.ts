@@ -53,37 +53,8 @@ function sanitizeFilename(filename: string): string {
 // and Python/PyMuPDF is not available in the default serverless runtime. We use a pure JS
 // parser (pdf-parse) for production on Vercel and keep the extraction in-memory (no local disk writes).
 
-async function parsePDF(buffer: Buffer) {
-  try {
-    console.log('[pdf-parse] Starting PDF parsing with buffer size:', buffer.length)
+// --- PDF parsing function removed as requested by user ---
 
-    if (!buffer || buffer.length === 0) {
-      throw new Error('Empty buffer provided to pdf-parse')
-    }
-
-    const pdfHeader = buffer.slice(0, 5).toString('utf8')
-    if (!pdfHeader.startsWith('%PDF-')) {
-      throw new Error('Invalid PDF header - file may be corrupted')
-    }
-
-    const pdfParse = await import('pdf-parse')
-    const parseFunction = (pdfParse as any).default || pdfParse
-    if (typeof parseFunction !== 'function') {
-      throw new Error('pdf-parse import failed - not a function')
-    }
-
-    const result = await parseFunction(buffer, { max: 0 })
-
-    if (!result || !result.text || result.text.length === 0) {
-      throw new Error('pdf-parse returned empty text - PDF may contain only images or be corrupt')
-    }
-
-    return result
-  } catch (error) {
-    console.error('[pdf-parse] Error details:', error)
-    throw error
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -120,6 +91,7 @@ export async function POST(request: NextRequest) {
     let buffer: Buffer
     let fileType: string | undefined
     let fileName: string = 'uploaded-file'
+    let usePdfJs = false
 
     if (contentType.includes('application/json')) {
       // JSON flow with bucket + path
@@ -172,11 +144,15 @@ export async function POST(request: NextRequest) {
       if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: `File too large. Max ${MAX_FILE_SIZE} bytes` }, { status: 413 })
       if (file.size < MIN_FILE_SIZE) return NextResponse.json({ error: 'File is too small or corrupted' }, { status: 400 })
 
+      // Check for engine preference (e.g., 'pdfjs') passed from client for drag-and-drop
+      const engine = (formData.get('engine') as string | null) || undefined
+      if (engine === 'pdfjs') usePdfJs = true
+
       fileName = file.name.toLowerCase()
       fileType = file.type
       buffer = Buffer.from(await file.arrayBuffer())
 
-      console.log('[Extract-Text] Received file via multipart/form-data for local processing:', { fileName, fileType, size: buffer.length })
+      console.log('[Extract-Text] Received file via multipart/form-data for local processing:', { fileName, fileType, size: buffer.length, engine })
 
     } else {
       return NextResponse.json({ error: 'Unsupported content type. Use JSON with storage path or multipart/form-data.' }, { status: 415 })
@@ -195,6 +171,7 @@ export async function POST(request: NextRequest) {
     })
 
     let extractedText = ''
+    let parsingNotes: string | undefined
     
     // Extract text based on file type
     if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
@@ -203,21 +180,56 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'File is not a valid PDF.' }, { status: 400 })
       }
 
-      // Use the Node/JS parser (pdf-parse) for production compatibility. This processes entirely in memory
-      // and does not write to disk or spawn child processes (works on Vercel serverless)
+      // Parse PDF using unpdf (pure JS, serverless-friendly)
       try {
-        const pdfData = await parsePDF(buffer)
-        extractedText = pdfData.text
-        console.log('[Extract-Text] PDF extracted using pdf-parse:', { textLength: extractedText.length, pages: pdfData.numpages })
-      } catch (pdfError) {
-        console.error('[Extract-Text] PDF parsing failed:', pdfError)
-
-        let userMessage = 'Failed to parse PDF file.'
-        const msg = pdfError instanceof Error ? pdfError.message.toLowerCase() : String(pdfError).toLowerCase()
-        if (msg.includes('images')) userMessage = 'This PDF appears to contain only images. Please use a PDF with selectable text.'
-        if (msg.includes('password') || msg.includes('encrypted')) userMessage = 'This PDF is password-protected. Please remove the password and try again.'
-
-        return NextResponse.json({ error: userMessage, details: process.env.NODE_ENV === 'development' ? String(pdfError) : undefined }, { status: 400 })
+        const { extractText } = await import('unpdf')
+        
+        // Convert Buffer to Uint8Array (unpdf requires Uint8Array)
+        const uint8Array = new Uint8Array(buffer)
+        
+        console.log('[Extract-Text] Attempting PDF extraction with unpdf...')
+        const pdfData = await extractText(uint8Array, {
+          mergePages: true
+        })
+        
+        console.log('[Extract-Text] unpdf returned:', {
+          type: typeof pdfData,
+          isString: typeof pdfData === 'string',
+          hasText: pdfData?.text !== undefined,
+          hasPages: Array.isArray(pdfData?.pages),
+          keys: typeof pdfData === 'object' ? Object.keys(pdfData) : [],
+          preview: typeof pdfData === 'string' ? pdfData.substring(0, 100) : JSON.stringify(pdfData).substring(0, 200)
+        })
+        
+        // unpdf returns an object with pages array, where each page has text
+        if (typeof pdfData === 'string') {
+          extractedText = pdfData
+        } else if (pdfData && Array.isArray(pdfData.pages)) {
+          // Each page is an object with a text property
+          extractedText = pdfData.pages
+            .map((page: any) => typeof page === 'string' ? page : page.text || '')
+            .join('\n\n')
+        } else if (pdfData && typeof pdfData.text === 'string') {
+          extractedText = pdfData.text
+        } else {
+          console.error('[Extract-Text] Unexpected unpdf response format')
+          extractedText = String(pdfData)
+        }
+        
+        const pageCount = (pdfData && Array.isArray(pdfData.pages)) ? pdfData.pages.length : 1
+        parsingNotes = `Extracted from ${pageCount} PDF page${pageCount !== 1 ? 's' : ''}`
+        
+        console.log('[Extract-Text] PDF parsed successfully:', {
+          pages: pageCount,
+          textLength: extractedText.length,
+          preview: extractedText.substring(0, 200)
+        })
+      } catch (error) {
+        console.error('PDF parsing error:', error)
+        return NextResponse.json(
+          { error: 'Failed to parse PDF file', details: String(error) },
+          { status: 400 }
+        )
       }
 
     } else if (
@@ -267,7 +279,7 @@ export async function POST(request: NextRequest) {
       conceptPreview: parsedContent.concept.substring(0, 300)
     })
     
-    if (!parsedContent.concept || parsedContent.concept.length < 10) {
+    if (!extractedText || extractedText.length < 10) {
       return NextResponse.json(
         { error: 'No meaningful text could be extracted from the file' },
         { status: 400 }
@@ -281,7 +293,8 @@ export async function POST(request: NextRequest) {
       fileName: fileName,
       fileSize: buffer.length,
       extractedLength: parsedContent.concept.length,
-      rawLength: extractedText.length
+      rawLength: extractedText.length,
+      parsingNotes: parsingNotes
     })
   } catch (error) {
     console.error('Text extraction error:', error)
@@ -298,6 +311,7 @@ function parseResearchProposal(text: string): { title: string; concept: string }
   let normalized = text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
     .trim()
   
   console.log('[Parse] Normalized text:', {
@@ -305,136 +319,69 @@ function parseResearchProposal(text: string): { title: string; concept: string }
     preview: normalized.substring(0, 300)
   })
   
+  if (!normalized || normalized.length < 10) {
+    return { title: '', concept: '' }
+  }
+  
   let title = ''
-  let concept = normalized
+  let concept = ''
   
-  // Check if there's a "Sustainable Development Goal:" or "BU Thematic Area:" section
-  const sdgIndex = normalized.search(/Sustainable\s+Development\s+Goal:/i)
-  const buThematicIndex = normalized.search(/BU\s+Thematic\s+Area:/i)
+  // Split by periods or newlines to get potential title
+  const sentences = normalized.split(/[.\n]+/).map(s => s.trim()).filter(s => s.length > 0)
   
-  // Determine the boundary where title should stop (whichever comes first)
-  let titleEndBoundary = -1
-  if (buThematicIndex !== -1 && sdgIndex !== -1) {
-    titleEndBoundary = Math.min(buThematicIndex, sdgIndex)
-  } else if (buThematicIndex !== -1) {
-    titleEndBoundary = buThematicIndex
-  } else if (sdgIndex !== -1) {
-    titleEndBoundary = sdgIndex
+  if (sentences.length === 0) {
+    return { title: '', concept: normalized }
   }
   
-  // Strategy 1: Look for explicit title markers and extract until boundary
-  const titleMatch = normalized.match(/(?:proposed\s+title|research\s+title|title)\s*:/i)
-  if (titleMatch) {
-    const titleStartIndex = normalized.indexOf(titleMatch[0]) + titleMatch[0].length
-    
-    if (titleEndBoundary !== -1 && titleStartIndex < titleEndBoundary) {
-      // Extract title from after the marker until the boundary (BU Thematic Area or SDG)
-      title = normalized.substring(titleStartIndex, titleEndBoundary).trim()
-      // Everything from the boundary onwards is the concept
-      concept = normalized.substring(titleEndBoundary).trim()
-    } else if (titleEndBoundary === -1) {
-      // No boundary found, extract title from the line and rest is concept
-      const titleLineMatch = normalized.substring(titleStartIndex).match(/([^\n]+)/)
-      if (titleLineMatch) {
-        title = titleLineMatch[1].trim()
-        const titleLineEnd = titleStartIndex + titleLineMatch[0].length
-        concept = normalized.substring(titleLineEnd).trim()
-      }
-    }
-  }
-  
-  // Strategy 2: If no title marker, find first meaningful line (skip boilerplate, stop before boundary)
-  if (!title) {
-    const lines = normalized.split(/\n+/)
-    let foundTitle = false
-    let conceptStartIndex = 0
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
-      if (line.length === 0) continue
+  // Strategy 1: Look for explicit title markers
+  const titleMatch = normalized.match(/(?:proposed\s+title|research\s+title|title)\s*:\s*([^\n.]+)/i)
+  if (titleMatch && titleMatch[1]) {
+    title = titleMatch[1].trim()
+    // Everything after the title marker is the concept
+    const titleEndIndex = normalized.indexOf(titleMatch[0]) + titleMatch[0].length
+    concept = normalized.substring(titleEndIndex).trim()
+  } else {
+    // Strategy 2: First substantial sentence/line is the title, rest is thesis brief
+    // Skip common boilerplate patterns
+    let titleIndex = -1
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i].trim()
       
-      // Check if we've reached the boundary section (BU Thematic Area or SDG)
-      if (titleEndBoundary !== -1) {
-        const currentPosition = lines.slice(0, i).join('\n').length
-        if (currentPosition >= titleEndBoundary) {
-          break // Stop looking for title once we reach boundary section
-        }
-      }
-      
-      // Skip boilerplate patterns (but don't skip "BU Thematic Area:" as it marks the boundary)
+      // Skip boilerplate
       if (
-        /Thematic\s+Area(?!\:)/i.test(line) || // Skip "Thematic Area" but not "BU Thematic Area:"
-        /University\s+of/i.test(line) ||
-        /Bicol\s+University/i.test(line) ||
-        /College\s+of/i.test(line) ||
-        /Department\s+of/i.test(line) ||
-        /Submitted\s+(by|to)/i.test(line) ||
-        /Prepared\s+by/i.test(line) ||
-        /Research\s+Proposal/i.test(line) ||
-        /Thesis\s+Proposal/i.test(line) ||
-        /Capstone/i.test(line) ||
-        /Concept\s+Paper/i.test(line) ||
-        /^\d+$/i.test(line) || // Skip standalone numbers
-        line.length < 10
+        sentence.length < 10 ||
+        sentence.length > 300 || // Title shouldn't be too long
+        /^(University|College|Department|Bicol|Submitted|Prepared|Research\s+Proposal|Thesis\s+Proposal|Capstone|Concept\s+Paper|\d+)$/i.test(sentence)
       ) {
         continue
       }
       
       // Found the title
-      if (line.length <= 200) {
-        title = line
-        conceptStartIndex = i + 1
-        foundTitle = true
-        break
-      }
+      title = sentence
+      titleIndex = i
+      break
     }
     
-    // Get everything after title as concept (including BU Thematic Area onwards)
-    if (foundTitle && titleEndBoundary !== -1) {
-      // Use the boundary to get concept from BU Thematic Area or SDG onwards
-      concept = normalized.substring(titleEndBoundary).trim()
-    } else if (foundTitle && conceptStartIndex < lines.length) {
-      concept = lines.slice(conceptStartIndex).join('\n').trim()
-    }
-  }
-  
-  // If still no title, use first substantial line
-  if (!title) {
-    const lines = normalized.split(/\n+/).filter(l => l.trim().length > 10)
-    if (lines.length > 0) {
-      title = lines[0].trim().substring(0, 200)
-      concept = lines.slice(1).join('\n').trim()
-    } else {
-      title = 'Untitled Research'
+    // Everything after the title is the thesis brief/concept
+    if (titleIndex >= 0 && titleIndex < sentences.length - 1) {
+      concept = sentences.slice(titleIndex + 1).join('. ').trim()
+    } else if (titleIndex >= 0) {
+      // If only one sentence, use the full text as concept
       concept = normalized
+    } else {
+      // If no title found, use first sentence as title and rest as concept
+      title = sentences[0]
+      concept = sentences.slice(1).join('. ').trim()
     }
   }
   
-  // Only remove boilerplate patterns from concept, but keep "BU Thematic Area:" and everything after
-  concept = concept
-    .split('\n')
-    .filter(line => {
-      const trimmed = line.trim()
-      // Only remove lines that are pure boilerplate (excluding "BU Thematic Area:" with colon)
-      return !(
-        /^Thematic\s+Area\s*\d*$/i.test(trimmed) || // Remove "Thematic Area" without colon
-        /^University\s+of/i.test(trimmed) ||
-        /^Bicol\s+University$/i.test(trimmed) ||
-        /^College\s+of/i.test(trimmed) ||
-        /^Department\s+of/i.test(trimmed) ||
-        /^Research\s+Proposal$/i.test(trimmed) ||
-        /^Thesis\s+Proposal$/i.test(trimmed) ||
-        /^Capstone\s+(Project|Proposal)$/i.test(trimmed) ||
-        /^Concept\s+Paper$/i.test(trimmed) ||
-        /^\d+$/i.test(trimmed) || // Remove standalone page numbers
-        trimmed.length === 0
-      )
-    })
-    .join(' ')
-    .trim()
+  // If concept is empty, use the full text
+  if (!concept || concept.length < 10) {
+    concept = normalized
+  }
   
-  // Normalize whitespace but keep content
-  concept = concept.replace(/\s+/g, ' ').trim()
+  // Clean up title (remove extra whitespace)
+  title = title.replace(/\s+/g, ' ').trim()
   
   console.log('[Parse] Final extraction:', {
     title: title,
@@ -444,12 +391,10 @@ function parseResearchProposal(text: string): { title: string; concept: string }
   })
   
   return {
-    title: title,
+    title: title || 'Untitled Research',
     concept: concept
   }
 }
-
-
 
 // Configure function runtime and duration
 export const maxDuration = 60; // Maximum execution time in seconds

@@ -355,13 +355,13 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
   // Weighted composite score (tuned for academic plagiarism detection)
   // Increased weights for semantic and concept algorithms
   const weights = {
-    nGram: 0.18,
-    fingerprint: 0.15,
-    rabinKarp: 0.10,
-    lcs: 0.12,
-    sentence: 0.18,
-    feature: 0.10,
-    concept: 0.17  // NEW: Concept similarity is highly weighted
+    nGram: 0.15,
+    fingerprint: 0.12,
+    rabinKarp: 0.08,
+    lcs: 0.10,
+    sentence: 0.15,
+    feature: 0.08,
+    concept: 0.32  // ENHANCED: Concept similarity is now the dominant factor (32%)
   }
   
   const composite = 
@@ -851,14 +851,17 @@ async function calculateCosineSimilarity(
       // If concept similarity is high, boost overall similarity
       // This catches cases where different words are used but same idea
       let conceptBoost = 1.0
-      if (conceptualMatch > 0.7) {
-        // Very high concept match - likely same core idea
-        conceptBoost = 1.25
-      } else if (conceptualMatch > 0.5) {
-        // Moderate concept match - related ideas
-        conceptBoost = 1.15
-      } else if (conceptualMatch > 0.3) {
-        // Some concept overlap
+      if (conceptualMatch > 0.6) {
+        // Very high concept match - likely same core idea (lowered from 0.7)
+        conceptBoost = 1.35  // Increased from 1.25
+      } else if (conceptualMatch > 0.4) {
+        // Moderate concept match - related ideas (lowered from 0.5)
+        conceptBoost = 1.25  // Increased from 1.15
+      } else if (conceptualMatch > 0.25) {
+        // Some concept overlap (lowered from 0.3)
+        conceptBoost = 1.15  // Increased from 1.08
+      } else if (conceptualMatch > 0.15) {
+        // Slight concept overlap - still relevant
         conceptBoost = 1.08
       }
       
@@ -922,38 +925,45 @@ async function calculateCosineSimilarity(
       // 1. Cross-Algorithm Consensus Detection
       // Check if multiple algorithms independently detect high similarity
       const highSimilarityCount = [
-        titleMultiAlgo.nGram > 0.5,        // Lowered threshold from 0.6
-        titleMultiAlgo.fingerprint > 0.5,   // Lowered threshold from 0.6
-        titleMultiAlgo.rabinKarp > 0.5,     // Lowered threshold from 0.6
-        titleMultiAlgo.lcs > 0.5,           // Lowered threshold from 0.6
-        abstractMultiAlgo.nGram > 0.5,      // Lowered threshold from 0.6
-        abstractMultiAlgo.fingerprint > 0.5, // Lowered threshold from 0.6
-        abstractMultiAlgo.rabinKarp > 0.5,   // Lowered threshold from 0.6
-        abstractMultiAlgo.lcs > 0.5,         // Lowered threshold from 0.6
-        abstractMultiAlgo.concept > 0.5      // NEW: Concept similarity check
+        titleMultiAlgo.nGram > 0.4,        // More sensitive threshold
+        titleMultiAlgo.fingerprint > 0.4,   // More sensitive threshold
+        titleMultiAlgo.rabinKarp > 0.4,     // More sensitive threshold
+        titleMultiAlgo.lcs > 0.4,           // More sensitive threshold
+        abstractMultiAlgo.nGram > 0.4,      // More sensitive threshold
+        abstractMultiAlgo.fingerprint > 0.4, // More sensitive threshold
+        abstractMultiAlgo.rabinKarp > 0.4,   // More sensitive threshold
+        abstractMultiAlgo.lcs > 0.4,         // More sensitive threshold
+        abstractMultiAlgo.concept > 0.35,    // ENHANCED: Lower threshold for concept detection
+        titleMultiAlgo.concept > 0.35        // ENHANCED: Check title concepts too
       ].filter(Boolean).length
       
-      if (highSimilarityCount >= 6) {
-        // 6+ algorithms agree on high similarity - very strong evidence
-        overallSim = Math.min(1, overallSim * 1.25) // 25% boost for strong consensus
+      if (highSimilarityCount >= 7) {
+        // 7+ algorithms agree on high similarity - very strong evidence
+        overallSim = Math.min(1, overallSim * 1.30) // 30% boost for strong consensus
       } else if (highSimilarityCount >= 5) {
-        // 5 algorithms agree - strong evidence
-        overallSim = Math.min(1, overallSim * 1.18) // 18% boost for strong consensus
+        // 5-6 algorithms agree - strong evidence
+        overallSim = Math.min(1, overallSim * 1.22) // 22% boost for strong consensus
       } else if (highSimilarityCount >= 4) {
         // 4 algorithms agree - moderate evidence
-        overallSim = Math.min(1, overallSim * 1.12) // 12% boost for moderate consensus
+        overallSim = Math.min(1, overallSim * 1.15) // 15% boost for moderate consensus
+      } else if (highSimilarityCount >= 3) {
+        // 3 algorithms agree - some evidence
+        overallSim = Math.min(1, overallSim * 1.08) // 8% boost for some consensus
       }
       
-      // 2. Concept-Based Plagiarism Detection (NEW)
+      // 2. Concept-Based Plagiarism Detection (ENHANCED)
       // Detect if the core concept is the same even with different wording
       // Skip if already detected as identical
       if (overallSim < 0.95) {
-        if (abstractMultiAlgo.concept > 0.7) {
-          // Very high concept similarity = same core idea
-          overallSim = Math.min(1, overallSim * 1.22) // 22% boost for conceptual match
-        } else if (abstractMultiAlgo.concept > 0.5 && enhancedAbstractLexical < 0.4) {
-          // High concept similarity but low word match = paraphrased plagiarism
-          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for paraphrased concepts
+        if (abstractMultiAlgo.concept > 0.6) {
+          // Very high concept similarity = same core idea (lowered from 0.7)
+          overallSim = Math.min(1, overallSim * 1.30) // 30% boost for conceptual match (increased from 22%)
+        } else if (abstractMultiAlgo.concept > 0.4 && enhancedAbstractLexical < 0.45) {
+          // High concept similarity but low word match = paraphrased plagiarism (lowered from 0.5)
+          overallSim = Math.min(1, overallSim * 1.25) // 25% boost for paraphrased concepts (increased from 18%)
+        } else if (abstractMultiAlgo.concept > 0.3 && enhancedAbstractLexical < 0.35) {
+          // Moderate concept similarity with very low word match = sophisticated paraphrasing
+          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for sophisticated paraphrasing
         }
       }
       

@@ -17,7 +17,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
-  const processFile = async (file: File) => {
+  const processFile = async (file: File, usePdfJs: boolean = false) => {
     // Validate file type
     const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
     const validExtensions = ['.pdf', '.docx']
@@ -40,6 +40,10 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      // If requested (drag-and-drop flow) and this is a PDF, ask the server to use pdfjs-serverless
+      if (usePdfJs && file.type === 'application/pdf') {
+        formData.append('engine', 'pdfjs')
+      }
 
       // File is sent to API for text extraction only - not saved to server
       const response = await fetch('/api/extract-text', {
@@ -53,7 +57,8 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
         // Show detailed error message
         const errorMessage = data.error || 'Failed to extract text from file'
         const detailedMessage = data.details ? `${errorMessage} (${data.details})` : errorMessage
-        throw new Error(errorMessage)
+        // Throw the detailed message so the UI toast shows extra context (dev only)
+        throw new Error(detailedMessage)
       }
 
       // Validate that we got text
@@ -83,7 +88,7 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
-    await processFile(file)
+    await processFile(file, false)
   }
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
@@ -129,7 +134,8 @@ export function FileDragAndDrop({ onFileContentRead }: FileDragAndDropProps) {
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
       const file = files[0]
-      await processFile(file)
+      // For drag-and-drop PDFs we prefer the pdfjs-serverless extractor
+      await processFile(file, true)
     }
   }
 
