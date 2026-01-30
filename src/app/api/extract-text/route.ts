@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import mammoth from 'mammoth'
-import { spawn } from 'child_process'
-import { writeFile, unlink } from 'fs/promises'
-import { join } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
+import { supabaseServer } from '@/lib/supabaseServer'
 
 // ============================================================================
 // SECURITY CONFIGURATION
@@ -52,158 +48,39 @@ function sanitizeFilename(filename: string): string {
     .substring(0, 255)
 }
 
-// Extract text from PDF using PyMuPDF (better performance and accuracy)
-async function parsePDFWithPyMuPDF(buffer: Buffer): Promise<{ text: string, metadata?: any }> {
-  // Create a temporary file for the PDF
-  const tempFileName = `temp_pdf_${randomBytes(16).toString('hex')}.pdf`
-  const tempFilePath = join(tmpdir(), tempFileName)
-  
-  try {
-    // Write buffer to temporary file
-    await writeFile(tempFilePath, buffer)
-    console.log('[PyMuPDF] Temporary file created:', tempFilePath)
-    
-    // Call Python script to extract text using PyMuPDF
-    const pythonScriptPath = join(process.cwd(), 'scripts', 'extract_pdf_text.py')
-    console.log('[PyMuPDF] Calling Python script:', pythonScriptPath)
-    console.log('[PyMuPDF] Python command: python3', pythonScriptPath, tempFilePath)
-    
-    return new Promise((resolve, reject) => {
-      const pythonProcess = spawn('python3', [pythonScriptPath, tempFilePath])
-      
-      let stdout = ''
-      let stderr = ''
-      
-      pythonProcess.stdout.on('data', (data) => {
-        stdout += data.toString()
-      })
-      
-      pythonProcess.stderr.on('data', (data) => {
-        stderr += data.toString()
-      })
-      
-      pythonProcess.on('close', async (code) => {
-        console.log('[PyMuPDF] Process closed with code:', code)
-        console.log('[PyMuPDF] stdout:', stdout.substring(0, 200))
-        console.log('[PyMuPDF] stderr:', stderr)
-        
-        // Clean up temporary file
-        try {
-          await unlink(tempFilePath)
-          console.log('[PyMuPDF] Temporary file deleted')
-        } catch (err) {
-          console.error('[PyMuPDF] Failed to delete temporary file:', err)
-        }
-        
-        if (code !== 0) {
-          console.error('[PyMuPDF] Python script error:', stderr)
-          reject(new Error(`PDF extraction failed: ${stderr || 'Unknown error'}`))
-          return
-        }
-        
-        try {
-          const result = JSON.parse(stdout)
-          if (result.success) {
-            console.log('[PyMuPDF] Extraction successful, text length:', result.text?.length || 0)
-            resolve({
-              text: result.text,
-              metadata: result.metadata
-            })
-          } else {
-            console.error('[PyMuPDF] Extraction failed:', result.error)
-            reject(new Error(result.error || 'PDF extraction failed'))
-          }
-        } catch (err) {
-          console.error('[PyMuPDF] Failed to parse JSON output:', err)
-          console.error('[PyMuPDF] stdout was:', stdout)
-          reject(new Error(`Failed to parse extraction result: ${err}`))
-        }
-      })
-      
-      pythonProcess.on('error', async (err) => {
-        console.error('[PyMuPDF] Process error:', err)
-        // Clean up temporary file
-        try {
-          await unlink(tempFilePath)
-        } catch (unlinkErr) {
-          console.error('[PyMuPDF] Failed to delete temporary file:', unlinkErr)
-        }
-        reject(new Error(`Failed to start Python process: ${err.message}`))
-      })
-    })
-  } catch (err) {
-    console.error('[PyMuPDF] Unexpected error:', err)
-    // Clean up temporary file in case of error
-    try {
-      await unlink(tempFilePath)
-    } catch (unlinkErr) {
-      console.error('[PyMuPDF] Failed to delete temporary file:', unlinkErr)
-    }
-    throw err
-  }
-}
+// PyMuPDF-based extraction (removed for Vercel compatibility)
+// Note: Running Python / spawning child processes is not supported on Vercel Edge functions
+// and Python/PyMuPDF is not available in the default serverless runtime. We use a pure JS
+// parser (pdf-parse) for production on Vercel and keep the extraction in-memory (no local disk writes).
 
-// Fallback: pdf-parse for pure JavaScript PDF parsing (works on Vercel)
-async function parsePDFLegacy(buffer: Buffer) {
+async function parsePDF(buffer: Buffer) {
   try {
     console.log('[pdf-parse] Starting PDF parsing with buffer size:', buffer.length)
-    
-    // Validate buffer
+
     if (!buffer || buffer.length === 0) {
       throw new Error('Empty buffer provided to pdf-parse')
     }
-    
-    // Validate PDF header
+
     const pdfHeader = buffer.slice(0, 5).toString('utf8')
-    console.log('[pdf-parse] PDF header:', pdfHeader)
     if (!pdfHeader.startsWith('%PDF-')) {
       throw new Error('Invalid PDF header - file may be corrupted')
     }
-    
-    // Import pdf-parse dynamically
+
     const pdfParse = await import('pdf-parse')
-    console.log('[pdf-parse] Module imported successfully')
-    
-    // Handle both ESM and CommonJS exports
     const parseFunction = (pdfParse as any).default || pdfParse
-    console.log('[pdf-parse] Parse function type:', typeof parseFunction)
-    
     if (typeof parseFunction !== 'function') {
       throw new Error('pdf-parse import failed - not a function')
     }
-    
-    // Parse with minimal options for better compatibility
-    const result = await parseFunction(buffer, {
-      max: 0, // Parse all pages
-      version: 'default',
-      // Disable problematic features that might fail on Vercel
-      pagerender: undefined
-    })
-    
-    console.log('[pdf-parse] Parsing completed:', {
-      hasResult: !!result,
-      textLength: result?.text?.length || 0,
-      numPages: result?.numpages || 0,
-      hasInfo: !!result?.info,
-      hasMetadata: !!result?.metadata
-    })
-    
-    if (!result) {
-      throw new Error('pdf-parse returned null result')
-    }
-    
-    if (!result.text || result.text.length === 0) {
+
+    const result = await parseFunction(buffer, { max: 0 })
+
+    if (!result || !result.text || result.text.length === 0) {
       throw new Error('pdf-parse returned empty text - PDF may contain only images or be corrupt')
     }
-    
+
     return result
   } catch (error) {
-    console.error('[pdf-parse] Error details:', {
-      error,
-      errorType: error instanceof Error ? error.constructor.name : typeof error,
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
-    })
+    console.error('[pdf-parse] Error details:', error)
     throw error
   }
 }
@@ -233,131 +110,115 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    const formData = await request.formData()
-    const file = formData.get('file') as File
-    
-    if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      )
+    // Support two flows:
+    // 1) Client uploaded the file to Supabase storage and sent JSON: { bucket, path, fileName }
+    // 2) Legacy: client included the file in a multipart/form-data (local dev). We still accept it but
+    //    recommend using Supabase direct upload to avoid Vercel request size limits.
+
+    const contentType = request.headers.get('content-type') || ''
+
+    let buffer: Buffer
+    let fileType: string | undefined
+    let fileName: string = 'uploaded-file'
+
+    if (contentType.includes('application/json')) {
+      // JSON flow with bucket + path
+      const body = await request.json()
+      const { bucket, path, fileName: fname } = body || {}
+      if (!bucket || !path) {
+        return NextResponse.json({ error: 'Missing bucket or path in request body' }, { status: 400 })
+      }
+
+      // Download from Supabase storage (server-side, uses service role key)
+      const downloadRes = await supabaseServer.storage.from(bucket).download(path)
+      if (downloadRes.error || !downloadRes.data) {
+        console.error('[Extract-Text] Supabase download error:', downloadRes.error)
+        return NextResponse.json({ error: 'Failed to download file from storage' }, { status: 500 })
+      }
+
+      // Convert to Buffer (handles Blob, ReadableStream, Node stream)
+      const data = downloadRes.data as any
+      if (typeof data.arrayBuffer === 'function') {
+        const ab = await data.arrayBuffer()
+        buffer = Buffer.from(ab)
+      } else if (data.on && typeof data.on === 'function') {
+        // Node stream
+        buffer = await new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = []
+          data.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+          data.on('end', () => resolve(Buffer.concat(chunks)))
+          data.on('error', (err: any) => reject(err))
+        })
+      } else {
+        return NextResponse.json({ error: 'Unknown data type returned from storage' }, { status: 500 })
+      }
+
+      fileType = undefined // unknown (we can infer from filename)
+      if (fname) fileName = fname.toLowerCase()
+
+      // Optional cleanup
+      if (process.env.CLEAN_UP_UPLOADED_FILES === '1') {
+        const removeRes = await supabaseServer.storage.from(bucket).remove([path])
+        if (removeRes.error) console.warn('[Extract-Text] Failed to remove uploaded file:', removeRes.error)
+      }
+
+    } else if (contentType.includes('multipart/form-data')) {
+      // Legacy local dev flow
+      const formData = await request.formData()
+      const file = formData.get('file') as File
+      if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+
+      if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: `File too large. Max ${MAX_FILE_SIZE} bytes` }, { status: 413 })
+      if (file.size < MIN_FILE_SIZE) return NextResponse.json({ error: 'File is too small or corrupted' }, { status: 400 })
+
+      fileName = file.name.toLowerCase()
+      fileType = file.type
+      buffer = Buffer.from(await file.arrayBuffer())
+
+      console.log('[Extract-Text] Received file via multipart/form-data for local processing:', { fileName, fileType, size: buffer.length })
+
+    } else {
+      return NextResponse.json({ error: 'Unsupported content type. Use JSON with storage path or multipart/form-data.' }, { status: 415 })
     }
     
-    // 2. Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: `File size exceeds maximum limit of ${MAX_FILE_SIZE / 1024 / 1024}MB` },
-        { status: 413 }
-      )
-    }
-    
-    if (file.size < MIN_FILE_SIZE) {
-      return NextResponse.json(
-        { error: 'File is too small or corrupted' },
-        { status: 400 }
-      )
-    }
-    
-    // 3. Sanitize filename
-    const originalName = file.name
+    // File summary and sanitation
+    const originalName = fileName
     const sanitizedName = sanitizeFilename(originalName)
-    
-    console.log('[Extract-Text] File received:', {
+
+    console.log('[Extract-Text] File ready for processing:', {
       originalName,
       sanitizedName,
-      size: file.size,
-      type: file.type,
+      inferredType: fileType,
+      size: buffer.length,
       clientIP
     })
 
-    const fileType = file.type
-    const fileName = file.name.toLowerCase()
-    
-    // IMPORTANT: File is only processed in memory for text extraction
-    // The file is NOT saved to disk or database - it's only scanned to read the content
-    // Convert file to buffer for in-memory processing
-    const arrayBuffer = await file.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    
     let extractedText = ''
     
     // Extract text based on file type
     if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
       // 4. Validate PDF magic bytes
       if (!validatePDFSignature(buffer)) {
-        console.error('[Extract-Text] Invalid PDF signature')
-        return NextResponse.json(
-          { error: 'File is not a valid PDF. File content does not match PDF format.' },
-          { status: 400 }
-        )
+        return NextResponse.json({ error: 'File is not a valid PDF.' }, { status: 400 })
       }
-      
-      // Extract text from PDF - Try PyMuPDF first, fallback to pdf-parse
-      console.log('[Extract-Text] Attempting PDF extraction')
-      let pdfExtractionMethod = 'unknown'
-      
+
+      // Use the Node/JS parser (pdf-parse) for production compatibility. This processes entirely in memory
+      // and does not write to disk or spawn child processes (works on Vercel serverless)
       try {
-        // First try PyMuPDF (better quality but requires Python)
-        console.log('[Extract-Text] Trying PyMuPDF extraction')
-        const pdfData = await parsePDFWithPyMuPDF(buffer)
+        const pdfData = await parsePDF(buffer)
         extractedText = pdfData.text
-        pdfExtractionMethod = 'PyMuPDF'
-        console.log('[Extract-Text] PDF extracted using PyMuPDF:', {
-          textLength: extractedText.length,
-          metadata: pdfData.metadata
-        })
-      } catch (pymupdfError) {
-        console.warn('[Extract-Text] PyMuPDF failed (likely Python not available), using pdf-parse fallback')
-        console.log('[Extract-Text] PyMuPDF error details:', pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError))
-        
-        // Fallback to pdf-parse (pure JavaScript, works everywhere)
-        try {
-          console.log('[Extract-Text] Attempting pdf-parse fallback')
-          const pdfData = await parsePDFLegacy(buffer)
-          extractedText = pdfData.text
-          pdfExtractionMethod = 'pdf-parse'
-          console.log('[Extract-Text] PDF extracted using pdf-parse fallback:', {
-            textLength: extractedText.length,
-            pages: pdfData.numpages
-          })
-        } catch (fallbackError) {
-          console.error('[Extract-Text] Both PDF parsing methods failed')
-          console.error('[Extract-Text] PyMuPDF error:', {
-            message: pymupdfError instanceof Error ? pymupdfError.message : String(pymupdfError),
-            stack: pymupdfError instanceof Error ? pymupdfError.stack : undefined
-          })
-          console.error('[Extract-Text] pdf-parse error:', {
-            message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-            stack: fallbackError instanceof Error ? fallbackError.stack : undefined
-          })
-          
-          // Provide more specific error message
-          let userMessage = 'Failed to parse PDF file.'
-          if (fallbackError instanceof Error) {
-            if (fallbackError.message.includes('images')) {
-              userMessage = 'This PDF appears to contain only images. Please use a PDF with selectable text.'
-            } else if (fallbackError.message.includes('password') || fallbackError.message.includes('encrypted')) {
-              userMessage = 'This PDF is password-protected. Please remove the password and try again.'
-            } else if (fallbackError.message.includes('corrupt')) {
-              userMessage = 'This PDF file appears to be corrupted. Please try with a different file.'
-            } else {
-              userMessage = 'Failed to extract text from PDF. The file may be corrupted, password-protected, or contain only images.'
-            }
-          }
-          
-          return NextResponse.json(
-            { 
-              error: userMessage,
-              details: process.env.NODE_ENV === 'development' 
-                ? `pdf-parse error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
-                : undefined
-            },
-            { status: 400 }
-          )
-        }
+        console.log('[Extract-Text] PDF extracted using pdf-parse:', { textLength: extractedText.length, pages: pdfData.numpages })
+      } catch (pdfError) {
+        console.error('[Extract-Text] PDF parsing failed:', pdfError)
+
+        let userMessage = 'Failed to parse PDF file.'
+        const msg = pdfError instanceof Error ? pdfError.message.toLowerCase() : String(pdfError).toLowerCase()
+        if (msg.includes('images')) userMessage = 'This PDF appears to contain only images. Please use a PDF with selectable text.'
+        if (msg.includes('password') || msg.includes('encrypted')) userMessage = 'This PDF is password-protected. Please remove the password and try again.'
+
+        return NextResponse.json({ error: userMessage, details: process.env.NODE_ENV === 'development' ? String(pdfError) : undefined }, { status: 400 })
       }
-      
-      console.log(`[Extract-Text] PDF extraction successful using ${pdfExtractionMethod}`)
+
     } else if (
       fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
       fileName.endsWith('.docx')
@@ -589,6 +450,6 @@ function parseResearchProposal(text: string): { title: string; concept: string }
 
 
 
-// Configure max file size (10MB)
+// Configure function runtime and duration
 export const maxDuration = 60; // Maximum execution time in seconds
-export const bodyParser = false; // Disable default body parser to handle multipart/form-data
+export const runtime = 'nodejs'

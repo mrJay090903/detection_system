@@ -64,22 +64,37 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
     setIsExtracting(true)
 
     try {
-      // Extract text from file
-      const formData = new FormData()
-      formData.append('file', file)
+      // Upload directly to Supabase storage (avoids Vercel serverless request size limits)
+      const ext = file.name.split('.').pop() || 'pdf'
+      const path = `uploads/${Date.now()}_${crypto.randomUUID()}.${ext}`
 
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('uploads')
+        .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type })
+
+      if (uploadError) {
+        // If file already exists, try with upsert true
+        if ((uploadError as any)?.status === 409) {
+          await supabase.storage.from('uploads').upload(path, file, { upsert: true, contentType: file.type })
+        } else {
+          throw uploadError
+        }
+      }
+
+      // Tell server to process the uploaded file (server will download from Supabase using service key)
       const response = await fetch('/api/extract-text', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bucket: 'uploads', path, fileName: file.name })
       })
 
       if (!response.ok) {
-        const error = await response.json()
+        const error = await response.json().catch(() => ({}))
         throw new Error(error.error || 'Failed to extract text')
       }
 
       const result = await response.json()
-      
+
       // Populate the form with extracted data (user can edit)
       setFormData(prev => ({
         ...prev,
