@@ -83,7 +83,6 @@ async function main() {
   const { data: researches, error } = await supabase
     .from('researches')
     .select('id, title, thesis_brief, tfidf_vector')
-    .eq('status', 'approved')
   
   if (error) {
     console.error('❌ Error fetching researches:', error)
@@ -91,11 +90,11 @@ async function main() {
   }
   
   if (!researches || researches.length === 0) {
-    console.log('✅ No approved researches found')
+    console.log('✅ No researches found')
     return
   }
   
-  console.log(`📊 Found ${researches.length} approved researches\n`)
+  console.log(`📊 Found ${researches.length} researches\n`)
   
   // Filter researches that need vectors
   const researchesNeedingVectors = researches.filter(r => !r.tfidf_vector)
@@ -124,16 +123,23 @@ async function main() {
       const vector = generateTfIdfVector(text, corpus)
       
       // Store vector in database
-      const { error: updateError } = await supabase
+      const { data: updateData, error: updateError } = await supabase
         .from('researches')
         .update({ tfidf_vector: vector })
         .eq('id', research.id)
+        .select()
       
       if (updateError) {
-        console.error(`${progress} ❌ Error updating ${research.id}:`, updateError.message)
+        console.error(`${progress} ❌ Error updating ${research.id}:`, updateError)
+        console.error('   Error details:', JSON.stringify(updateError, null, 2))
         errorCount++
       } else {
         console.log(`${progress} ✅ Generated vector for: ${research.title.substring(0, 50)}...`)
+        // Verify it was actually stored
+        if (i === 0) {
+          console.log('   First vector sample:', Object.keys(vector).slice(0, 5))
+          console.log('   Update result:', updateData ? 'success' : 'no data returned')
+        }
         successCount++
       }
     } catch (err) {
@@ -155,6 +161,24 @@ async function main() {
   console.log(`   Successfully generated: ${successCount}`)
   console.log(`   Errors: ${errorCount}`)
   console.log('='.repeat(60))
+  
+  // Verify vectors were actually stored
+  console.log('\n🔍 Verifying vectors in database...')
+  const { data: verifyData, error: verifyError } = await supabase
+    .from('researches')
+    .select('id, title, tfidf_vector')
+    .not('tfidf_vector', 'is', null)
+    .limit(3)
+  
+  if (verifyError) {
+    console.error('❌ Verification error:', verifyError)
+  } else {
+    console.log(`✅ Found ${verifyData?.length || 0} researches with vectors in database`)
+    if (verifyData && verifyData.length > 0) {
+      console.log('   Sample:', verifyData[0].title.substring(0, 50))
+      console.log('   Vector keys:', Object.keys(verifyData[0].tfidf_vector || {}).length)
+    }
+  }
   
   if (errorCount === 0) {
     console.log('\n✅ Backfill completed successfully!')

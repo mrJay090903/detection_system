@@ -3,7 +3,7 @@
  * Precompute and store TF-IDF vectors for fast similarity checking
  */
 
-// Stop words to filter out
+// Stop words to filter out (including common research terms)
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
   'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
@@ -14,7 +14,14 @@ const STOP_WORDS = new Set([
   'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor',
   'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just',
   'about', 'into', 'through', 'during', 'including', 'against', 'among',
-  'throughout', 'despite', 'towards', 'upon', 'concerning', 'using'
+  'throughout', 'despite', 'towards', 'upon', 'concerning', 'using',
+  // Common research/academic terms
+  'system', 'application', 'app', 'web', 'based', 'using', 'use', 'users',
+  'development', 'study', 'research', 'analysis', 'design', 'implementation',
+  'project', 'thesis', 'paper', 'work', 'data', 'information', 'process',
+  'method', 'approach', 'technique', 'result', 'results', 'conclusion',
+  'proposed', 'provide', 'provides', 'help', 'helps', 'improve', 'improves',
+  'develop', 'developed', 'create', 'created', 'build', 'built', 'make', 'makes'
 ])
 
 /**
@@ -29,8 +36,9 @@ export function normalizeText(text: string): string[] {
     .replace(/\s+/g, ' ')
     .trim()
     .split(' ')
-    .filter(word => word.length > 2) // Remove short words
+    .filter(word => word.length >= 4) // Keep only meaningful words (4+ chars)
     .filter(word => !STOP_WORDS.has(word)) // Remove stop words
+    .filter(word => !/^\d+$/.test(word)) // Remove pure numbers
 }
 
 /**

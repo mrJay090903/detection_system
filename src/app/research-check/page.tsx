@@ -867,9 +867,9 @@ export default function ResearchCheckPage() {
                                             userConcept: userConceptText,
                                             existingTitle: match.title,
                                             existingThesisBrief: match.thesis_brief,
-                                            lexicalSimilarity: match.lexicalSimilarity.toString(),
-                                            semanticSimilarity: match.semanticSimilarity.toString(),
-                                            overallSimilarity: match.overallSimilarity.toString(),
+                                            lexicalSimilarity: (match.lexicalSimilarity || match.overallSimilarity || 0).toString(),
+                                            semanticSimilarity: (match.semanticSimilarity || match.overallSimilarity || 0).toString(),
+                                            overallSimilarity: (match.overallSimilarity || 0).toString(),
                                           }))
                                           
                                           window.location.href = '/analysis-reports'
