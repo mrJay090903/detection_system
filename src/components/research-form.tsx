@@ -17,6 +17,11 @@ import { ResearchFormData } from "@/types/research"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import {
+  buildTfIdfIndex,
+  vectorizeTfIdf,
+  buildResearchText
+} from "@/lib/tfidf-vectors"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -123,6 +128,31 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
 
     try {
       if (mode === 'create') {
+        // Fetch all existing researches to build corpus
+        const { data: existingResearches } = await supabase
+          .from('researches')
+          .select('title, thesis_brief')
+        
+        // Build corpus from existing researches
+        const corpus = (existingResearches || []).map(r => 
+          buildResearchText(r.title, r.thesis_brief || '')
+        )
+        
+        // Add new research text to corpus
+        const newResearchText = buildResearchText(formData.title, formData.thesis_brief)
+        corpus.push(newResearchText)
+        
+        // Build TF-IDF index and generate vector
+        const tfidfIndex = buildTfIdfIndex(corpus, {
+          minTokenLen: 4,
+          useBigrams: true,
+          minDf: 2,
+          maxDfRatio: 0.8,
+          topK: 400
+        })
+        
+        const tfidfVector = vectorizeTfIdf(newResearchText, tfidfIndex)
+        
         const { error } = await supabase
           .from('researches')
           .insert([
@@ -132,7 +162,8 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
               year: formData.year,
               course: formData.course,
               researchers: formData.researchers,
-              faculty_id: facultyId
+              faculty_id: facultyId,
+              tfidf_vector: tfidfVector
             }
           ])
 
@@ -151,6 +182,31 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
         setResearchersInput("")
         
       } else if (initialData?.id) {
+        // Fetch all existing researches to build corpus
+        const { data: existingResearches } = await supabase
+          .from('researches')
+          .select('title, thesis_brief')
+        
+        // Build corpus from existing researches
+        const corpus = (existingResearches || []).map(r => 
+          buildResearchText(r.title, r.thesis_brief || '')
+        )
+        
+        // Add updated research text to corpus
+        const updatedResearchText = buildResearchText(formData.title, formData.thesis_brief)
+        corpus.push(updatedResearchText)
+        
+        // Build TF-IDF index and generate vector
+        const tfidfIndex = buildTfIdfIndex(corpus, {
+          minTokenLen: 4,
+          useBigrams: true,
+          minDf: 2,
+          maxDfRatio: 0.8,
+          topK: 400
+        })
+        
+        const tfidfVector = vectorizeTfIdf(updatedResearchText, tfidfIndex)
+        
         const { error } = await supabase
           .from('researches')
           .update({
@@ -158,7 +214,8 @@ export function ResearchForm({ mode, initialData, onSuccess, facultyId, trigger 
             thesis_brief: formData.thesis_brief,
             year: formData.year,
             course: formData.course,
-            researchers: formData.researchers
+            researchers: formData.researchers,
+            tfidf_vector: tfidfVector
           })
           .eq('id', initialData.id)
 

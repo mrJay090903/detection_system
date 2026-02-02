@@ -11,9 +11,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { 
-  generateTfIdfVector, 
-  cosineSimilarity, 
-  buildResearchText 
+  buildTfIdfIndex,
+  vectorizeTfIdf,
+  cosineSimilarity,
+  buildResearchText
 } from '@/lib/tfidf-vectors'
 
 export const maxDuration = 60
@@ -90,8 +91,8 @@ export async function POST(req: NextRequest) {
 
     console.log(`✅ Fetched ${researches.length} researches with TF-IDF vectors in ${fetchTime}ms`)
 
-    // STEP 1: Generate TF-IDF vector for the proposed research (ONCE)
-    console.log('🔄 Generating TF-IDF vector for proposed research...')
+    // STEP 1: Build TF-IDF index from corpus
+    console.log('🔄 Building TF-IDF index...')
     const vectorGenStartTime = Date.now()
     
     // Build corpus from all existing researches
@@ -101,8 +102,17 @@ export async function POST(req: NextRequest) {
     const proposedText = buildResearchText(title, thesis_brief || concept)
     corpus.push(proposedText)
     
+    // Build TF-IDF index once for all vectorization
+    const tfidfIndex = buildTfIdfIndex(corpus, {
+      minTokenLen: 4,
+      useBigrams: true,
+      minDf: 2,
+      maxDfRatio: 0.8,
+      topK: 400
+    })
+    
     // Generate TF-IDF vector for proposed research
-    const proposedVector = generateTfIdfVector(proposedText, corpus)
+    const proposedVector = vectorizeTfIdf(proposedText, tfidfIndex)
     const vectorGenTime = Date.now() - vectorGenStartTime
     
     console.log(`✅ Generated proposed vector in ${vectorGenTime}ms`)
