@@ -25,13 +25,15 @@ function AnalysisReportsContent() {
   const [progress, setProgress] = useState(0)
   const [loadingMessage, setLoadingMessage] = useState('Initializing...')
   const [analysis, setAnalysis] = useState<string>("")
-  const [activeTab, setActiveTab] = useState('ai-assessment')
+  const [activeTab, setActiveTab] = useState('overview')
   const [userTitle, setUserTitle] = useState('')
   const [existingTitle, setExistingTitle] = useState('')
   const [userConcept, setUserConcept] = useState('')
   const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
   const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
   const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
+  const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -74,19 +76,22 @@ function AnalysisReportsContent() {
   const metrics = {
     lexical: { 
       score: displayLexical * 100, 
-      label: 'AI Lexical Similarity', 
-      status: (displayLexical * 100) < 15 ? 'low' : (displayLexical * 100) < 30 ? 'medium' : 'high',
-      color: (displayLexical * 100) < 15 ? 'bg-green-500' : (displayLexical * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      label: 'Text Similarity (Lexical)', 
+      description: 'Cosine similarity - word/phrase overlap including methodology & tech stack',
+      status: (displayLexical * 100) < 30 ? 'low' : (displayLexical * 100) < 60 ? 'medium' : 'high',
+      color: (displayLexical * 100) < 30 ? 'bg-blue-500' : (displayLexical * 100) < 60 ? 'bg-blue-600' : 'bg-blue-700'
     },
     semantic: { 
       score: displaySemantic * 100, 
-      label: 'AI Semantic Similarity', 
+      label: 'Concept Similarity (AI Semantic)', 
+      description: 'AI evaluation of core research problem similarity',
       status: (displaySemantic * 100) < 15 ? 'low' : (displaySemantic * 100) < 30 ? 'medium' : 'high',
       color: (displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     overall: { 
       score: displayOverall * 100, 
-      label: 'AI Overall Similarity', 
+      label: 'Overall Assessment', 
+      description: 'Reflects concept similarity per academic standards',
       status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
       color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
     }
@@ -95,70 +100,106 @@ function AnalysisReportsContent() {
   // Parse AI analysis into sections
   const parseAnalysis = (text: string) => {
     const sections = {
-      aiAssessment: '',
-      coreIdea: '',
-      keyOverlaps: '',
-      similarityReason: '',
-      improvements: ''
+      proposedResearch: '',
+      existingResearch: '',
+      problemComparison: '',
+      textSimilarity: '',
+      conceptSimilarity: '',
+      acceptanceStatus: '',
+      justification: '',
+      finalVerdict: '',
+      breakdown: '',
+      problemIdentityCheck: '',
+      detailedComparison: '',
+      similarityAnalysis: '',
+      recommendations: ''
     }
 
-    // Generic SECTION parser - captures `SECTION <n>: <heading>` and the following block until the next SECTION or end
-    const genericSectionRegex = /SECTION\s*(\d+)\s*[:\-]?\s*([^\n\r]*)\n?([\s\S]*?)(?=(?:SECTION\s*\d+\s*[:\-]?\s*[^\n\r]*\n?)|$)/ig
-    let match: RegExpExecArray | null
-    while ((match = genericSectionRegex.exec(text)) !== null) {
-      const num = parseInt(match[1], 10)
-      const heading = (match[2] || '').trim()
-      const content = (match[3] || '').trim()
+    // Extract Proposed Research
+    const proposedMatch = text.match(/Proposed Research:\s*([\s\S]+?)(?=\n\nExisting Research:|\nExisting Research:)/i)
+    if (proposedMatch) sections.proposedResearch = proposedMatch[1].trim()
 
-      // Map section number / heading keywords to UI sections
-      if (num === 0 || /ai\s*similar/i.test(heading)) {
-        sections.aiAssessment = content || sections.aiAssessment
-      } else if (num === 1 || /core|concept|idea/i.test(heading)) {
-        sections.coreIdea = content || sections.coreIdea
-      } else if (num === 2 || /method|approach|key|overlap/i.test(heading)) {
-        // If heading explicitly mentions Overlap or Key Overlaps, prefer keyOverlaps
-        if (/overlap/i.test(heading)) {
-          sections.keyOverlaps = content || sections.keyOverlaps
-        } else {
-          // Methodology content may be relevant to the similarity reason section
-          sections.similarityReason = content || sections.similarityReason
-        }
-      } else if (num === 3 || /application|use case|similarity reason|why/i.test(heading)) {
-        sections.similarityReason = content || sections.similarityReason
-      } else if (num >= 4 || /improv|suggest|recommend|conclusion|summary/i.test(heading)) {
-        sections.improvements = content || sections.improvements
+    // Extract Existing Research
+    const existingMatch = text.match(/Existing Research:\s*([\s\S]+?)(?=\n\nProblem Comparison Result:|\nProblem Comparison Result:)/i)
+    if (existingMatch) sections.existingResearch = existingMatch[1].trim()
+
+    // Extract Problem Comparison Result
+    const comparisonMatch = text.match(/Problem Comparison Result:\s*(SAME|DIFFERENT)/i)
+    if (comparisonMatch) sections.problemComparison = comparisonMatch[1].toUpperCase()
+
+    // Extract Text Similarity
+    const textSimMatch = text.match(/Cosine Similarity \(Textual\):\s*(\d+(?:\.\d+)?)\s*%/i)
+    if (textSimMatch) sections.textSimilarity = textSimMatch[1] + '%'
+
+    // Extract Concept Similarity - Try multiple patterns
+    let conceptSimMatch = text.match(/Final Conceptual Similarity:\s*(\d+(?:\.\d+)?)\s*%/i)
+    if (!conceptSimMatch) {
+      // Try alternative patterns
+      conceptSimMatch = text.match(/Conceptual Similarity:\s*(\d+(?:\.\d+)?)\s*%/i) ||
+                        text.match(/Concept Similarity:\s*(\d+(?:\.\d+)?)\s*%/i) ||
+                        text.match(/Final Concept Similarity:\s*(\d+(?:\.\d+)?)\s*%/i) ||
+                        text.match(/conceptSimilarityPct['":\s]*(\d+(?:\.\d+)?)/i)
+    }
+    if (conceptSimMatch) sections.conceptSimilarity = conceptSimMatch[1] + '%'
+
+    // Extract Acceptance Status
+    const acceptanceMatch = text.match(/Acceptance Status:\s*(ACCEPTABLE|ACCEPTED|REJECTED|REVIEW|APPROVED)/i)
+    if (acceptanceMatch) sections.acceptanceStatus = acceptanceMatch[1].toUpperCase()
+
+    // Extract Justification
+    const justificationMatch = text.match(/Justification:\s*([\s\S]+?)(?=\n\nFinal Verdict:|\nFinal Verdict:)/i)
+    if (justificationMatch) sections.justification = justificationMatch[1].trim()
+
+    // Extract Final Verdict
+    const verdictMatch = text.match(/Final Verdict:\s*(.+?)(?=\n\n|BREAKDOWN|$)/i)
+    if (verdictMatch) sections.finalVerdict = verdictMatch[1].trim()
+
+    // Extract Breakdown
+    const breakdownMatch = text.match(/BREAKDOWN[\s\S]+?(?=\n\nADDITIONAL ANALYSIS:|\nADDITIONAL ANALYSIS:|$)/i)
+    if (breakdownMatch) sections.breakdown = breakdownMatch[0].trim()
+
+    // Extract Problem Identity Check
+    const identityMatch = text.match(/Problem Identity Check:[\s\S]+?Core Problem Overlap:\s*\d+\s*%/i)
+    if (identityMatch) sections.problemIdentityCheck = identityMatch[0].trim()
+
+    // Extract Detailed Comparison
+    const detailedMatch = text.match(/Detailed Comparison:[\s\S]+?(?=\n\nSimilarity Analysis:|\nSimilarity Analysis:)/i)
+    if (detailedMatch) sections.detailedComparison = detailedMatch[0].trim()
+
+    // Extract Similarity Analysis
+    const analysisMatch = text.match(/Similarity Analysis:[\s\S]+?(?=\n\nRecommendations:|\nRecommendations:)/i)
+    if (analysisMatch) sections.similarityAnalysis = analysisMatch[0].trim()
+
+    // Extract Recommendations
+    const recommendationsMatch = text.match(/Recommendations:\s*([\s\S]+?)$/i)
+    if (recommendationsMatch) sections.recommendations = recommendationsMatch[1].trim()
+
+    // FALLBACK: If concept similarity is still empty, try to find any percentage value
+    // that might be the concept similarity (look for patterns near "concept" or "similarity")
+    if (!sections.conceptSimilarity) {
+      // Look for patterns like "concept similarity: 10%" or "conceptual similarity: 10%"
+      const fallbackMatch = text.match(/(?:concept(?:ual)?\s*similarity|similarity\s*\(concept(?:ual)?\))[\s:]*(\d+(?:\.\d+)?)\s*%/i)
+      if (fallbackMatch) {
+        sections.conceptSimilarity = fallbackMatch[1] + '%'
+        console.log('📊 Found concept similarity via fallback:', sections.conceptSimilarity)
+      } else {
+        console.warn('⚠️ Could not find concept similarity in analysis text')
       }
+    } else {
+      console.log('✅ Found concept similarity:', sections.conceptSimilarity)
     }
 
-    // Fallbacks: Try keyword-based extraction if specific SECTION headings were not present
-    if (!sections.aiAssessment) {
-      const m = text.match(/AI\s*Similarity\s*Assessment[:\s]*([\s\S]*?)(?=SECTION\s*\d+|$)/i)
-      if (m) sections.aiAssessment = m[1].trim()
-    }
-
-    if (!sections.coreIdea) {
-      const m = text.match(/(?:SECTION\s*1[:\s]*[^\n\r]*\n)?(Core\s*(?:Concept|Idea)[^\n\r]*[:\s]*)([\s\S]*?)(?=SECTION\s*\d+|$)/i)
-      if (m) sections.coreIdea = (m[2] || '').trim()
-    }
-
-    if (!sections.keyOverlaps) {
-      const m = text.match(/(Key\s*Overlaps|Conceptual\s*Overlap\s*Summary|Overlap)[\s\S]*?(?=SECTION\s*\d+|$)/i)
-      if (m) sections.keyOverlaps = m[0].replace(/^(Key\s*Overlaps[:\s]*)/i, '').trim()
-    }
-
-    if (!sections.similarityReason) {
-      const m = text.match(/(Similarity\s*Reason|Why\s*These\s*Similarities\s*Exist|Methodology[\s\S]*?)(?=SECTION\s*\d+|$)/i)
-      if (m) sections.similarityReason = m[0].replace(/^(Similarity\s*Reason[:\s]*|Why\s*These\s*Similarities\s*Exist[:\s]*)/i, '').trim()
-    }
-
-    if (!sections.improvements) {
-      const m = text.match(/(Improvement\s*Suggestions|Recommendations|Suggested\s*Actions|Improvement)[\s\S]*?(?=SECTION\s*\d+|$)/i)
-      if (m) sections.improvements = m[0].replace(/^(Improvement\s*Suggestions[:\s]*|Recommendations[:\s]*)/i, '').trim()
-    }
-
-    // If still empty, put the whole text into coreIdea as a last resort
-    if (!sections.aiAssessment && !sections.coreIdea && !sections.keyOverlaps && !sections.similarityReason && !sections.improvements) {
-      sections.coreIdea = text
+    // FALLBACK: If text similarity is still empty, try to find cosine similarity
+    if (!sections.textSimilarity) {
+      const fallbackTextMatch = text.match(/(?:cosine|text(?:ual)?)\s*similarity[\s:]*(\d+(?:\.\d+)?)\s*%/i)
+      if (fallbackTextMatch) {
+        sections.textSimilarity = fallbackTextMatch[1] + '%'
+        console.log('📊 Found text similarity via fallback:', sections.textSimilarity)
+      } else {
+        console.warn('⚠️ Could not find text similarity in analysis text')
+      }
+    } else {
+      console.log('✅ Found text similarity:', sections.textSimilarity)
     }
 
     return sections
@@ -216,6 +257,17 @@ function AnalysisReportsContent() {
   const sections = analysis ? parseAnalysis(analysis) : null
   const extractedTitle = userConcept ? extractProposedTitle(userConcept) : null
   const displayTitle = extractedTitle || userTitle || 'Research Document'
+
+  // FALLBACK: If AI didn't provide concept similarity in API response, extract from parsed text
+  useEffect(() => {
+    if (sections?.conceptSimilarity && (aiSemanticSimilarity === null || aiSemanticSimilarity === 0)) {
+      const parsedValue = parseFloat(sections.conceptSimilarity) / 100
+      if (!isNaN(parsedValue) && parsedValue > 0) {
+        console.log('📊 Using concept similarity from parsed text:', parsedValue)
+        setAiSemanticSimilarity(parsedValue)
+      }
+    }
+  }, [sections, aiSemanticSimilarity])
 
   useEffect(() => {
     // Progress simulation
@@ -339,11 +391,14 @@ function AnalysisReportsContent() {
             clearTimeout(messageTimeout3)
             clearTimeout(messageTimeout4)
             
-            toast.error(friendlyMessage, { 
-              duration: 8000,
+            setError({
+              message: friendlyMessage,
+              details: errorData.details || 'API quota exceeded. This typically resets every 24 hours.',
+              isQuotaError: true,
+              retryAfter: retryAfter
             })
-            
-            throw new Error(friendlyMessage)
+            setIsLoading(false)
+            return
           }
           
           const errorMessage = errorData.message || errorData.error || errorData.details || 
@@ -357,8 +412,12 @@ function AnalysisReportsContent() {
           clearTimeout(messageTimeout3)
           clearTimeout(messageTimeout4)
           
-          toast.error(errorMessage, { duration: 5000 })
-          throw new Error(errorMessage)
+          setError({
+            message: 'AI Analysis Failed',
+            details: errorMessage
+          })
+          setIsLoading(false)
+          return
         }
 
         const data = await response.json()
@@ -399,15 +458,22 @@ function AnalysisReportsContent() {
         clearTimeout(messageTimeout4)
         
         setIsLoading(false)
-        toast.error(`Failed to generate AI analysis: ${errorMessage}`, { duration: 6000 })
-        
-        // Delay redirect to allow user to see the error
-        setTimeout(() => router.push('/research-check'), 2000)
+        setError({
+          message: 'AI Analysis Failed',
+          details: errorMessage
+        })
       }
     }
 
     loadAnalysis()
-  }, [searchParams, router])
+  }, [searchParams, router, retryCount])
+
+  const handleRetry = () => {
+    setError(null)
+    setIsLoading(true)
+    setProgress(0)
+    setRetryCount(prev => prev + 1)
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -434,7 +500,85 @@ function AnalysisReportsContent() {
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
-        {isLoading ? (
+        {error ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl shadow-xl p-12 border border-red-100"
+          >
+            <div className="text-center">
+              <div className="relative inline-block mb-6">
+                <AlertTriangle className="w-20 h-20 text-red-500 mx-auto" />
+              </div>
+              <h2 className="text-3xl font-bold text-slate-900 mb-3">{error.message}</h2>
+              <p className="text-slate-600 mb-6">{error.details}</p>
+              
+              {error.isQuotaError && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-6 text-left max-w-2xl mx-auto">
+                  <h3 className="font-semibold text-amber-900 mb-2 flex items-center gap-2 text-lg">
+                    <AlertTriangle className="w-5 h-5" />
+                    API Quota Exceeded
+                  </h3>
+                  <p className="text-sm text-amber-800 mb-3">
+                    The AI service has reached its usage limits. This typically happens when:
+                  </p>
+                  <ul className="text-sm text-amber-800 list-disc list-inside space-y-1 mb-4">
+                    <li>Daily API quota has been exhausted</li>
+                    <li>Too many requests in a short period</li>
+                    <li>All configured AI models (OpenAI & Gemini) are unavailable</li>
+                  </ul>
+                  <p className="text-sm text-amber-800 font-medium">
+                    {error.retryAfter ? `Please retry in approximately ${error.retryAfter} seconds.` : 'API quotas typically reset every 24 hours.'}
+                  </p>
+                </div>
+              )}
+
+              {!error.isQuotaError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-6 text-left max-w-2xl mx-auto">
+                  <h3 className="font-semibold text-red-900 mb-2 flex items-center gap-2 text-lg">
+                    <AlertTriangle className="w-5 h-5" />
+                    Analysis Error
+                  </h3>
+                  <p className="text-sm text-red-800 mb-3">
+                    The AI analysis encountered an error. This may be due to:
+                  </p>
+                  <ul className="text-sm text-red-800 list-disc list-inside space-y-1">
+                    <li>Temporary service unavailability</li>
+                    <li>Network connectivity issues</li>
+                    <li>Invalid or incomplete research data</li>
+                    <li>AI model configuration problems</li>
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex gap-4 justify-center">
+                <Button
+                  onClick={handleRetry}
+                  size="lg"
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8"
+                >
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Retry Analysis
+                </Button>
+                <Button
+                  onClick={() => router.push('/research-check')}
+                  variant="outline"
+                  size="lg"
+                  className="px-8"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Go Back
+                </Button>
+              </div>
+              
+              {retryCount > 0 && (
+                <p className="text-sm text-slate-500 mt-4">
+                  Retry attempt: {retryCount}
+                </p>
+              )}
+            </div>
+          </motion.div>
+        ) : isLoading ? (
           <div className="bg-white rounded-2xl shadow-xl p-12 text-center border border-slate-200">
             <div className="mb-6">
              
@@ -647,54 +791,54 @@ function AnalysisReportsContent() {
                   <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3 px-2">Report Sections</h3>
                   <nav className="flex flex-col gap-2">
                     <button 
-                      onClick={() => setActiveTab('ai-assessment')}
+                      onClick={() => setActiveTab('overview')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
-                        activeTab === 'ai-assessment' 
+                        activeTab === 'overview' 
                           ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <Sparkles className="w-4 h-4" /> AI Similarity Assessment
+                      <Sparkles className="w-4 h-4" /> Quick Overview
                     </button>
                     <button 
-                      onClick={() => setActiveTab('core-idea')}
+                      onClick={() => setActiveTab('comparison')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
-                        activeTab === 'core-idea' 
+                        activeTab === 'comparison' 
                           ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <BookOpen className="w-4 h-4" /> Core Idea Match
+                      <BookOpen className="w-4 h-4" /> Problem Comparison
                     </button>
                     <button 
-                      onClick={() => setActiveTab('overlaps')}
+                      onClick={() => setActiveTab('analysis')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
-                        activeTab === 'overlaps' 
+                        activeTab === 'analysis' 
                           ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <Layers className="w-4 h-4" /> Key Overlaps
+                      <BarChart3 className="w-4 h-4" /> Similarity Analysis
                     </button>
                     <button 
-                      onClick={() => setActiveTab('reason')}
+                      onClick={() => setActiveTab('detailed')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
-                        activeTab === 'reason' 
+                        activeTab === 'detailed' 
                           ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <BarChart3 className="w-4 h-4" /> Similarity Reason
+                      <Layers className="w-4 h-4" /> Detailed Breakdown
                     </button>
                     <button 
-                      onClick={() => setActiveTab('suggestions')}
+                      onClick={() => setActiveTab('recommendations')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
-                        activeTab === 'suggestions' 
+                        activeTab === 'recommendations' 
                           ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <Lightbulb className="w-4 h-4" /> Improvements
+                      <Lightbulb className="w-4 h-4" /> Recommendations
                     </button>
                   </nav>
                 </div>
@@ -702,62 +846,214 @@ function AnalysisReportsContent() {
 
               {/* Right Column: Dynamic Content */}
               <div className="lg:col-span-2">
-                {/* TAB: AI ASSESSMENT */}
-                {activeTab === 'ai-assessment' && sections?.aiAssessment && (
+                {!sections && (
+                  <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 text-center">
+                    <p className="text-slate-600">No analysis data available</p>
+                  </div>
+                )}
+
+                {/* TAB: OVERVIEW */}
+                {sections && activeTab === 'overview' && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    <div className="bg-white rounded-2xl shadow-lg border border-purple-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-purple-600 via-purple-500 to-pink-500 px-6 py-5">
+                    {/* Final Verdict Card */}
+                    <div className={`rounded-2xl shadow-lg border-2 overflow-hidden ${
+                      sections.problemComparison === 'DIFFERENT' 
+                        ? 'border-green-300 bg-gradient-to-br from-green-50 to-emerald-50' 
+                        : 'border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50'
+                    }`}>
+                      <div className={`px-6 py-5 ${
+                        sections.problemComparison === 'DIFFERENT'
+                          ? 'bg-gradient-to-r from-green-600 to-emerald-600'
+                          : 'bg-gradient-to-r from-amber-600 to-orange-600'
+                      }`}>
                         <div className="flex items-center gap-3 text-white">
-                          <Sparkles className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">AI Similarity Assessment</h3>
+                          {sections.problemComparison === 'DIFFERENT' ? (
+                            <CheckCircle className="w-6 h-6" />
+                          ) : (
+                            <AlertTriangle className="w-6 h-6" />
+                          )}
+                          <h3 className="text-xl font-bold">Final Verdict</h3>
                         </div>
                       </div>
-                      <div className="p-8 text-slate-700 leading-8 text-base">
-                        {cleanText(sections.aiAssessment).split('\n').map((paragraph, idx) => (
-                          paragraph.trim() && (
-                            <p key={idx} className="mb-4 last:mb-0">
-                              {paragraph}
+                      <div className="p-8">
+                        <p className="text-2xl font-bold text-slate-900 mb-4">{sections.finalVerdict}</p>
+                        <div className="flex items-center gap-4 mb-6 flex-wrap">
+                          <div className="px-4 py-2 bg-white rounded-lg shadow border border-slate-200">
+                            <span className="text-sm text-slate-600">Problem Comparison:</span>
+                            <span className={`ml-2 font-bold ${
+                              sections.problemComparison === 'DIFFERENT' ? 'text-green-600' : 'text-amber-600'
+                            }`}>{sections.problemComparison}</span>
+                          </div>
+                          {sections.acceptanceStatus && (
+                            <div className={`px-4 py-2 rounded-lg shadow border-2 ${
+                              sections.acceptanceStatus === 'ACCEPTABLE' || sections.acceptanceStatus === 'ACCEPTED' || sections.acceptanceStatus === 'APPROVED' || sections.acceptanceStatus === 'REVIEW'
+                                ? 'bg-green-100 border-green-600 text-green-900'
+                                : 'bg-red-100 border-red-600 text-red-900'
+                            }`}>
+                              <span className="text-sm font-semibold">Status:</span>
+                              <span className="ml-2 font-bold">
+                                {(sections.acceptanceStatus === 'ACCEPTABLE' || sections.acceptanceStatus === 'ACCEPTED' || sections.acceptanceStatus === 'APPROVED' || sections.acceptanceStatus === 'REVIEW') ? 'ACCEPTABLE' : sections.acceptanceStatus}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {sections.acceptanceStatus && (
+                          <div className={`mt-4 p-4 rounded-lg border-l-4 ${
+                            sections.acceptanceStatus === 'ACCEPTABLE' || sections.acceptanceStatus === 'ACCEPTED' || sections.acceptanceStatus === 'APPROVED' || sections.acceptanceStatus === 'REVIEW'
+                              ? 'bg-green-50 border-green-600'
+                              : 'bg-red-50 border-red-600'
+                          }`}>
+                            <p className="text-sm font-medium">
+                              {(sections.acceptanceStatus === 'ACCEPTABLE' || sections.acceptanceStatus === 'ACCEPTED' || sections.acceptanceStatus === 'APPROVED' || sections.acceptanceStatus === 'REVIEW') && '✓ Research ACCEPTABLE: Concept similarity is not more than 15%'}
+                              {sections.acceptanceStatus === 'REJECTED' && '✗ Research REJECTED: Concept similarity exceeds 15% threshold - potential plagiarism'}
                             </p>
-                          )
-                        ))}
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    {/* Similarity Scores Card */}
+                    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-5">
+                        <div className="flex items-center gap-3 text-white">
+                          <BarChart3 className="w-6 h-6" />
+                          <h3 className="text-xl font-bold">Similarity Scores</h3>
+                        </div>
+                      </div>
+                      <div className="p-8 grid md:grid-cols-2 gap-6">
+                        <div className="p-6 bg-blue-50 rounded-xl border-l-4 border-blue-500">
+                          <div className="text-sm text-blue-700 font-semibold mb-2">Text Similarity (Lexical)</div>
+                          <div className="text-4xl font-bold text-blue-900">{sections.textSimilarity || '0%'}</div>
+                          <p className="text-sm text-blue-600 mt-2">Word & phrase overlap including methodology</p>
+                        </div>
+                        <div className={`p-6 rounded-xl border-l-4 ${
+                          parseFloat(sections.conceptSimilarity || '0') <= 15
+                            ? 'bg-green-50 border-green-500'
+                            : 'bg-red-50 border-red-500'
+                        }`}>
+                          <div className={`text-sm font-semibold mb-2 ${
+                            parseFloat(sections.conceptSimilarity || '0') <= 15 ? 'text-green-700' : 'text-red-700'
+                          }`}>Concept Similarity (AI Semantic)</div>
+                          <div className={`text-4xl font-bold ${
+                            parseFloat(sections.conceptSimilarity || '0') <= 15 ? 'text-green-900' : 'text-red-900'
+                          }`}>{sections.conceptSimilarity || '0%'}</div>
+                          <p className={`text-sm mt-2 ${
+                            parseFloat(sections.conceptSimilarity || '0') <= 15 ? 'text-green-600' : 'text-red-600'
+                          }`}>Core research problem similarity</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Justification Card */}
+                    {sections.justification && (
+                      <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5">
+                          <div className="flex items-center gap-3 text-white">
+                            <FileText className="w-6 h-6" />
+                            <h3 className="text-xl font-bold">Justification</h3>
+                          </div>
+                        </div>
+                        <div className="p-8 text-slate-700 leading-8 text-base">
+                          {sections.justification.split('\n').map((paragraph, idx) => (
+                            paragraph.trim() && (
+                              <p key={idx} className="mb-4 last:mb-0">
+                                {paragraph}
+                              </p>
+                            )
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 )}
 
-                {/* TAB: CORE IDEA */}
-                {activeTab === 'core-idea' && sections?.coreIdea && (
+                {/* TAB: COMPARISON */}
+                {sections && activeTab === 'comparison' && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
                     <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5">
+                      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-5">
                         <div className="flex items-center gap-3 text-white">
                           <BookOpen className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">Core Idea Analysis</h3>
+                          <h3 className="text-xl font-bold">Core Problem Comparison</h3>
                         </div>
                       </div>
-                      <div className="p-8 text-slate-700 leading-8 text-base">
-                        {cleanText(sections.coreIdea).split('\n').map((paragraph, idx) => (
-                          paragraph.trim() && (
-                            <p key={idx} className="mb-4 last:mb-0">
-                              {paragraph}
-                            </p>
-                          )
-                        ))}
+                      <div className="p-8 space-y-6">
+                        {/* Proposed Research */}
+                        <div className="p-6 bg-blue-50 rounded-xl border-l-4 border-blue-500">
+                          <h4 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5" />
+                            Proposed Research (Your Submission)
+                          </h4>
+                          <p className="text-slate-700 leading-7">{sections.proposedResearch}</p>
+                        </div>
+
+                        {/* Existing Research */}
+                        <div className="p-6 bg-purple-50 rounded-xl border-l-4 border-purple-500">
+                          <h4 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
+                            <FileText className="w-5 h-5" />
+                            Existing Research (From Database)
+                          </h4>
+                          <p className="text-slate-700 leading-7">{sections.existingResearch}</p>
+                        </div>
+
+                        {/* Comparison Result */}
+                        <div className={`p-6 rounded-xl border-l-4 ${
+                          sections.problemComparison === 'DIFFERENT'
+                            ? 'bg-green-50 border-green-500'
+                            : 'bg-amber-50 border-amber-500'
+                        }`}>
+                          <h4 className={`font-bold mb-3 flex items-center gap-2 ${
+                            sections.problemComparison === 'DIFFERENT' ? 'text-green-900' : 'text-amber-900'
+                          }`}>
+                            {sections.problemComparison === 'DIFFERENT' ? (
+                              <CheckCircle className="w-5 h-5" />
+                            ) : (
+                              <AlertTriangle className="w-5 h-5" />
+                            )}
+                            Problem Comparison Result
+                          </h4>
+                          <p className={`text-2xl font-bold ${
+                            sections.problemComparison === 'DIFFERENT' ? 'text-green-700' : 'text-amber-700'
+                          }`}>{sections.problemComparison}</p>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Problem Identity Check */}
+                    {sections.problemIdentityCheck && (
+                      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-5">
+                          <div className="flex items-center gap-3 text-white">
+                            <Layers className="w-6 h-6" />
+                            <h3 className="text-xl font-bold">Problem Identity Check</h3>
+                          </div>
+                        </div>
+                        <div className="p-8">
+                          <div className="space-y-3 font-mono text-sm">
+                            {sections.problemIdentityCheck.split('\n').map((line, idx) => (
+                              line.trim() && (
+                                <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                                  <div className="flex-1 text-slate-700">{line}</div>
+                                </div>
+                              )
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 )}
 
-                {/* TAB: OVERLAPS */}
-                {activeTab === 'overlaps' && sections?.keyOverlaps && (
+                {/* TAB: ANALYSIS */}
+                {sections && activeTab === 'analysis' && sections.similarityAnalysis && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -766,32 +1062,104 @@ function AnalysisReportsContent() {
                     <div className="bg-white rounded-2xl shadow-lg border border-purple-200 overflow-hidden">
                       <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-5">
                         <div className="flex items-center gap-3 text-white">
-                          <Layers className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">Key Overlap Areas</h3>
+                          <BarChart3 className="w-6 h-6" />
+                          <h3 className="text-xl font-bold">Similarity Analysis</h3>
                         </div>
                       </div>
                       <div className="p-8">
-                        <div className="space-y-4">
-                          {cleanText(sections.keyOverlaps).split('\n').map((paragraph, idx) => (
-                            paragraph.trim() && (
-                              <div key={idx} className="flex gap-3 p-4 bg-purple-50 rounded-xl border-l-4 border-purple-500">
-                                <div className="flex-shrink-0 mt-1.5">
-                                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                        <div className="space-y-6">
+                          {sections.similarityAnalysis.split('\n').filter(line => line.trim()).map((line, idx) => {
+                            const isHeading = line.startsWith('-') && line.includes(':')
+                            if (isHeading) {
+                              const [heading, ...content] = line.substring(1).split(':')
+                              return (
+                                <div key={idx} className="space-y-2">
+                                  <h4 className="font-bold text-purple-900 text-lg">{heading.trim()}</h4>
+                                  <p className="text-slate-700 leading-7 pl-4">{content.join(':').trim()}</p>
                                 </div>
-                                <p className="text-slate-700 leading-7 text-base flex-1">
-                                  {paragraph}
-                                </p>
-                              </div>
+                              )
+                            }
+                            return (
+                              <p key={idx} className="text-slate-700 leading-7 pl-4">{line}</p>
                             )
-                          ))}
+                          })}
                         </div>
                       </div>
                     </div>
                   </motion.div>
                 )}
 
-                {/* TAB: REASON */}
-                {activeTab === 'reason' && sections?.similarityReason && (
+                {/* TAB: DETAILED */}
+                {sections && activeTab === 'detailed' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                  >
+                    {/* Detailed Comparison */}
+                    {sections.detailedComparison && (
+                      <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-5">
+                          <div className="flex items-center gap-3 text-white">
+                            <Layers className="w-6 h-6" />
+                            <h3 className="text-xl font-bold">Detailed Comparison</h3>
+                          </div>
+                        </div>
+                        <div className="p-8">
+                          <div className="space-y-6">
+                            {sections.detailedComparison.split('\n').filter(line => line.trim()).map((line, idx) => {
+                              const isMainHeading = line.includes('Research Focus:')
+                              const isSubHeading = line.startsWith('-')
+                              
+                              if (isMainHeading) {
+                                return (
+                                  <h4 key={idx} className="font-bold text-indigo-900 text-xl mt-6 first:mt-0">
+                                    {line.replace(':', '')}
+                                  </h4>
+                                )
+                              } else if (isSubHeading) {
+                                const [label, ...content] = line.substring(1).split(':')
+                                return (
+                                  <div key={idx} className="flex gap-3 p-4 bg-indigo-50 rounded-lg">
+                                    <span className="font-semibold text-indigo-700 min-w-[100px]">{label.trim()}:</span>
+                                    <span className="text-slate-700 flex-1">{content.join(':').trim()}</span>
+                                  </div>
+                                )
+                              }
+                              return null
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Breakdown */}
+                    {sections.breakdown && (
+                      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-5">
+                          <div className="flex items-center gap-3 text-white">
+                            <BarChart3 className="w-6 h-6" />
+                            <h3 className="text-xl font-bold">Similarity Breakdown</h3>
+                          </div>
+                        </div>
+                        <div className="p-8">
+                          <div className="space-y-3 font-mono text-sm">
+                            {sections.breakdown.split('\n').map((line, idx) => (
+                              line.trim() && (
+                                <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                                  <div className="flex-1 text-slate-700">{line}</div>
+                                </div>
+                              )
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {/* TAB: RECOMMENDATIONS */}
+                {sections && activeTab === 'recommendations' && sections.recommendations && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -800,55 +1168,16 @@ function AnalysisReportsContent() {
                     <div className="bg-white rounded-2xl shadow-lg border border-amber-200 overflow-hidden">
                       <div className="bg-gradient-to-r from-amber-600 to-orange-600 px-6 py-5">
                         <div className="flex items-center gap-3 text-white">
-                          <BarChart3 className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">Why These Similarities Exist</h3>
+                          <Lightbulb className="w-6 h-6" />
+                          <h3 className="text-xl font-bold">Recommendations</h3>
                         </div>
                       </div>
                       <div className="p-8 text-slate-700 leading-8 text-base">
-                        {cleanText(sections.similarityReason).split('\n').map((paragraph, idx) => (
+                        {sections.recommendations.split('\n').map((paragraph, idx) => (
                           paragraph.trim() && (
                             <p key={idx} className="mb-4 last:mb-0">
                               {paragraph}
                             </p>
-                          )
-                        ))}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* TAB: SUGGESTIONS */}
-                {activeTab === 'suggestions' && sections?.improvements && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-6"
-                  >
-                    <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl shadow-lg p-6 text-white">
-                      <div className="flex items-center gap-3 mb-2">
-                        <Lightbulb className="w-6 h-6" />
-                        <h3 className="font-bold text-xl">Differentiation Strategy</h3>
-                      </div>
-                      <p className="text-green-100 text-sm">
-                        Follow these recommendations to improve the originality and distinctiveness of your research.
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-5">
-                        <div className="flex items-center gap-3 text-white">
-                          <Lightbulb className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">Recommended Actions</h3>
-                        </div>
-                      </div>
-                      <div className="p-8 space-y-4">
-                        {cleanText(sections.improvements).split('\n').map((paragraph, idx) => (
-                          paragraph.trim() && (
-                            <div key={idx} className="bg-green-50 rounded-xl p-5 shadow-sm border-l-4 border-green-500 hover:shadow-md transition-shadow">
-                              <p className="text-slate-700 leading-7 text-base">
-                                {paragraph}
-                              </p>
-                            </div>
                           )
                         ))}
                       </div>

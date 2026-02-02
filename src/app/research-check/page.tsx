@@ -27,6 +27,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { FileDragAndDrop } from "@/components/ui/file-drag-and-drop"
+import { LoadingScreen } from "@/components/ui/loading-screen"
 
 interface StepData {
   course: string
@@ -46,6 +47,8 @@ const steps = [
 export default function ResearchCheckPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingStage, setLoadingStage] = useState(1)
+  const [stageLabel, setStageLabel] = useState("Extracting Content")
   const [selectedResearch, setSelectedResearch] = useState<any>(null)
   const [showDetailsDialog, setShowDetailsDialog] = useState(false)
 
@@ -110,6 +113,12 @@ export default function ResearchCheckPage() {
 
   const handleSimilarityCheck = async () => {
     setIsLoading(true)
+    setLoadingStage(1)
+    setStageLabel("Processing Input")
+    
+    // Give React time to render the loading screen
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     try {
       // Use file content if available, otherwise use textarea content
       const textToCheck = stepData.fileContent.trim() || stepData.concept.trim()
@@ -163,6 +172,11 @@ export default function ResearchCheckPage() {
         titleSource: stepData.title.trim() ? 'manual' : 'extracted'
       })
 
+      // Stage 2: Algorithm Analysis
+      await new Promise(resolve => setTimeout(resolve, 800))
+      setLoadingStage(2)
+      setStageLabel("Algorithm Analysis")
+
       // Perform similarity check
       const response = await fetch('/api/similarity/check', {
         method: 'POST',
@@ -174,6 +188,10 @@ export default function ResearchCheckPage() {
           proposedConcept: textToCheck,
         }),
       })
+
+      // Stage 3: Similarity Detection
+      setLoadingStage(3)
+      setStageLabel("Similarity Detection")
 
       console.log('API Response status:', response.status, response.statusText)
 
@@ -187,7 +205,17 @@ export default function ResearchCheckPage() {
         throw new Error(errorData.error || `Failed to check similarity (${response.status})`)
       }
 
+      // Stage 4: Generating Report
+      setLoadingStage(4)
+      setStageLabel("Generating Report")
+      await new Promise(resolve => setTimeout(resolve, 500))
+
       const result = await response.json()
+      
+      // Stage 5: Finalizing Results
+      setLoadingStage(5)
+      setStageLabel("Finalizing Results")
+      await new Promise(resolve => setTimeout(resolve, 300))
       
       console.log('Similarity check successful:', {
         hasResult: !!result,
@@ -206,6 +234,7 @@ export default function ResearchCheckPage() {
       toast.error(error instanceof Error ? error.message : 'Failed to analyze research. Please try again.')
     } finally {
       setIsLoading(false)
+      setLoadingStage(1)
     }
   }
 
@@ -353,7 +382,17 @@ export default function ResearchCheckPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <>
+      {/* Loading Screen Overlay */}
+      {isLoading && (
+        <LoadingScreen 
+          currentStage={loadingStage} 
+          totalStages={5}
+          stageLabel={stageLabel}
+        />
+      )}
+
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Header - Fixed */}
       <header className="bg-white border-b border-gray-200 shadow-sm fixed top-0 left-0 w-full z-40">
         <div className="container mx-auto px-6 py-4">
@@ -1141,5 +1180,6 @@ export default function ResearchCheckPage() {
         </div>
       )}
     </div>
+    </>
   )
 }

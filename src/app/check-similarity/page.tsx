@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,6 +11,7 @@ import { motion } from "framer-motion"
 import { Loader2, ArrowLeft, Sparkles, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 import { FileDragAndDrop } from "@/components/ui/file-drag-and-drop"
+import { LoadingScreen } from "@/components/ui/loading-screen"
 
 // Animation variants
 const fadeInUp = {
@@ -32,6 +33,20 @@ export default function CheckSimilarityPage() {
   const [proposedConcept, setProposedConcept] = useState("")
   const [fileContent, setFileContent] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingStage, setLoadingStage] = useState(1)
+  const [stageLabel, setStageLabel] = useState("Extracting Content")
+
+  // Prevent scrolling when loading
+  useEffect(() => {
+    if (isLoading) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [isLoading])
 
   const handleCheckSimilarity = async () => {
     // Use file content if available, otherwise use textarea content
@@ -42,7 +57,13 @@ export default function CheckSimilarityPage() {
       return
     }
 
+    // Set loading state first
     setIsLoading(true)
+    setLoadingStage(1)
+    setStageLabel("Processing Input")
+
+    // Give React time to render the loading screen
+    await new Promise(resolve => setTimeout(resolve, 100))
 
     try {
       // Log what we're sending for debugging
@@ -57,6 +78,11 @@ export default function CheckSimilarityPage() {
         proposedConceptPreview: payload.proposedConcept.substring(0, 100)
       })
 
+      // Stage 2: Algorithm Analysis
+      await new Promise(resolve => setTimeout(resolve, 800))
+      setLoadingStage(2)
+      setStageLabel("Algorithm Analysis")
+
       // Call the API directly to avoid URL length limits with large file content
       const response = await fetch("/api/similarity/check", {
         method: "POST",
@@ -65,6 +91,10 @@ export default function CheckSimilarityPage() {
         },
         body: JSON.stringify(payload),
       })
+
+      // Stage 3: Similarity Detection
+      setLoadingStage(3)
+      setStageLabel("Similarity Detection")
 
       const data = await response.json()
 
@@ -78,7 +108,17 @@ export default function CheckSimilarityPage() {
         throw new Error(data.error || "Failed to check similarity")
       }
 
+      // Stage 4: Generating Report
+      setLoadingStage(4)
+      setStageLabel("Generating Report")
+      await new Promise(resolve => setTimeout(resolve, 800))
+
       if (data.success) {
+        // Stage 5: Finalizing Results
+        setLoadingStage(5)
+        setStageLabel("Finalizing Results")
+        await new Promise(resolve => setTimeout(resolve, 500))
+
         // Store result in sessionStorage and navigate to results page
         sessionStorage.setItem("similarityResult", JSON.stringify(data))
         // Store file content if it was used
@@ -93,6 +133,7 @@ export default function CheckSimilarityPage() {
       console.error("Error checking similarity:", err)
       toast.error(err instanceof Error ? err.message : "Failed to check similarity")
       setIsLoading(false)
+      setLoadingStage(1)
     }
   }
 
@@ -107,7 +148,17 @@ export default function CheckSimilarityPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+    <>
+      {/* Loading Screen Overlay */}
+      {isLoading && (
+        <LoadingScreen 
+          currentStage={loadingStage} 
+          totalStages={5}
+          stageLabel={stageLabel}
+        />
+      )}
+
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Header with Gradient Background */}
       <header className="relative bg-gradient-to-br from-[#2d4a5f] via-[#4a667d] to-[#7a6a5a] text-white">
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
@@ -263,5 +314,6 @@ export default function CheckSimilarityPage() {
         </motion.div>
       </main>
     </div>
+    </>
   )
 }

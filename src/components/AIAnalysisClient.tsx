@@ -32,32 +32,43 @@ export default function AIAnalysisClient() {
   const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
   const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
   const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
+  const [textSimilarity, setTextSimilarity] = useState<number | null>(null)
+  const [conceptSimilarity, setConceptSimilarity] = useState<number | null>(null)
+  const [problemIdentity, setProblemIdentity] = useState<any>(null)
+  const [academicRuleApplied, setAcademicRuleApplied] = useState<boolean>(false)
+  const [similarityRationale, setSimilarityRationale] = useState<string | null>(null)
+  const [pipelineExplanation, setPipelineExplanation] = useState<any>(null)
+  const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
   const overallSimilarity = parseFloat(searchParams.get('overallSimilarity') || '0')
 
-  // Use AI similarities if available, otherwise fall back to algorithmic ones
-  const displayLexical = aiLexicalSimilarity !== null ? aiLexicalSimilarity : lexicalSimilarity
-  const displaySemantic = aiSemanticSimilarity !== null ? aiSemanticSimilarity : semanticSimilarity
+  // Two-stage pipeline: Use new text/concept similarities if available
+  const displayText = textSimilarity !== null ? textSimilarity : (aiLexicalSimilarity !== null ? aiLexicalSimilarity : lexicalSimilarity)
+  const displayConcept = conceptSimilarity !== null ? conceptSimilarity : (aiSemanticSimilarity !== null ? aiSemanticSimilarity : semanticSimilarity)
   const displayOverall = aiOverallSimilarity !== null ? aiOverallSimilarity : overallSimilarity
 
   const metrics = {
-    lexical: { 
-      score: displayLexical * 100, 
-      label: 'AI Lexical Similarity', 
-      status: (displayLexical * 100) < 15 ? 'low' : (displayLexical * 100) < 30 ? 'medium' : 'high',
-      color: (displayLexical * 100) < 15 ? 'bg-green-500' : (displayLexical * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+    text: { 
+      score: displayText * 100, 
+      label: 'Text Similarity (Lexical)', 
+      description: 'Cosine similarity - word/phrase overlap including methodology & tech stack',
+      status: (displayText * 100) < 30 ? 'low' : (displayText * 100) < 60 ? 'medium' : 'high',
+      color: (displayText * 100) < 30 ? 'bg-blue-500' : (displayText * 100) < 60 ? 'bg-blue-600' : 'bg-blue-700'
     },
-    semantic: { 
-      score: displaySemantic * 100, 
-      label: 'AI Semantic Similarity', 
-      status: (displaySemantic * 100) < 15 ? 'low' : (displaySemantic * 100) < 30 ? 'medium' : 'high',
-      color: (displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+    concept: { 
+      score: displayConcept * 100, 
+      label: 'Concept Similarity (AI Semantic)', 
+      description: 'AI evaluation of core research problem similarity',
+      status: (displayConcept * 100) < 15 ? 'low' : (displayConcept * 100) < 30 ? 'medium' : 'high',
+      color: (displayConcept * 100) < 15 ? 'bg-green-500' : (displayConcept * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
     },
     overall: { 
       score: displayOverall * 100, 
-      label: 'AI Overall Similarity', 
+      label: 'Overall Assessment', 
+      description: 'Reflects concept similarity per academic standards',
       status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
       color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
     }
@@ -277,8 +288,14 @@ export default function AIAnalysisClient() {
             clearTimeout(messageTimeout2)
             clearTimeout(messageTimeout3)
             clearTimeout(messageTimeout4)
-            toast.error(friendlyMessage, { duration: 8000 })
-            throw new Error(friendlyMessage)
+            setError({
+              message: friendlyMessage,
+              details: errorData.details || 'API quota exceeded. This typically resets every 24 hours.',
+              isQuotaError: true,
+              retryAfter: retryAfter
+            })
+            setIsLoading(false)
+            return
           }
 
           const errorMessage = errorData.message || errorData.error || errorData.details || rawResponseText.substring(0, 200) || `Server error (${response.status}): ${response.statusText}`
@@ -289,17 +306,44 @@ export default function AIAnalysisClient() {
           clearTimeout(messageTimeout3)
           clearTimeout(messageTimeout4)
 
-          toast.error(errorMessage, { duration: 5000 })
-          throw new Error(errorMessage)
+          setError({
+            message: 'AI Analysis Failed',
+            details: errorMessage
+          })
+          setIsLoading(false)
+          return
         }
 
         const data = await response.json()
         setAnalysis(data.analysis)
 
+        // Two-stage pipeline results
+        if (data.textSimilarity !== undefined) {
+          setTextSimilarity(parseFloat(data.textSimilarity) / 100)
+        }
+        if (data.conceptSimilarity !== undefined) {
+          setConceptSimilarity(parseFloat(data.conceptSimilarity) / 100)
+        }
+        
+        // Backward compatibility with traditional metrics
         if (data.aiSimilarities) {
           if (data.aiSimilarities.lexical !== null) setAiLexicalSimilarity(data.aiSimilarities.lexical)
           if (data.aiSimilarities.semantic !== null) setAiSemanticSimilarity(data.aiSimilarities.semantic)
           if (data.aiSimilarities.overall !== null) setAiOverallSimilarity(data.aiSimilarities.overall)
+        }
+
+        // Store academic rule information
+        if (data.problemIdentity) {
+          setProblemIdentity(data.problemIdentity)
+        }
+        if (data.academicRuleApplied !== undefined) {
+          setAcademicRuleApplied(data.academicRuleApplied)
+        }
+        if (data.similarityRationale) {
+          setSimilarityRationale(data.similarityRationale)
+        }
+        if (data.pipelineExplanation) {
+          setPipelineExplanation(data.pipelineExplanation)
         }
 
         setProgress(100)
@@ -321,20 +365,107 @@ export default function AIAnalysisClient() {
         clearTimeout(messageTimeout3)
         clearTimeout(messageTimeout4)
         setIsLoading(false)
-        toast.error(`Failed to generate AI analysis: ${errorMessage}`, { duration: 6000 })
-        setTimeout(() => router.push('/research-check'), 2000)
+        setError({
+          message: 'AI Analysis Failed',
+          details: errorMessage
+        })
       }
     }
 
     loadAnalysis()
-  }, [searchParams, router])
+  }, [searchParams, router, retryCount])
+
+  const handleRetry = () => {
+    setError(null)
+    setIsLoading(true)
+    setProgress(0)
+    setRetryCount(prev => prev + 1)
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-slate-50 to-blue-50">
       {/* UI markup copied from the original page component */}
       {/* ...existing UI... */}
       <main className="container mx-auto px-6 py-6 max-w-6xl">
-        {isLoading ? (
+        {error ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl shadow-lg p-10 border border-red-100"
+          >
+            <div className="text-center">
+              <div className="relative inline-block mb-6">
+                <AlertTriangle className="w-20 h-20 text-red-500 mx-auto" />
+              </div>
+              <h2 className="text-3xl font-bold text-gray-900 mb-3">{error.message}</h2>
+              <p className="text-gray-600 mb-6">{error.details}</p>
+              
+              {error.isQuotaError && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-left max-w-2xl mx-auto">
+                  <h3 className="font-semibold text-amber-900 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    API Quota Exceeded
+                  </h3>
+                  <p className="text-sm text-amber-800 mb-2">
+                    The AI service has reached its usage limits. This typically happens when:
+                  </p>
+                  <ul className="text-sm text-amber-800 list-disc list-inside space-y-1 mb-3">
+                    <li>Daily API quota has been exhausted</li>
+                    <li>Too many requests in a short period</li>
+                    <li>All configured AI models (OpenAI & Gemini) are unavailable</li>
+                  </ul>
+                  <p className="text-sm text-amber-800">
+                    {error.retryAfter ? `Please retry in approximately ${error.retryAfter} seconds.` : 'API quotas typically reset every 24 hours.'}
+                  </p>
+                </div>
+              )}
+
+              {!error.isQuotaError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-left max-w-2xl mx-auto">
+                  <h3 className="font-semibold text-red-900 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    Analysis Error
+                  </h3>
+                  <p className="text-sm text-red-800 mb-2">
+                    The AI analysis encountered an error. This may be due to:
+                  </p>
+                  <ul className="text-sm text-red-800 list-disc list-inside space-y-1">
+                    <li>Temporary service unavailability</li>
+                    <li>Network connectivity issues</li>
+                    <li>Invalid or incomplete research data</li>
+                    <li>AI model configuration problems</li>
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex gap-4 justify-center">
+                <Button
+                  onClick={handleRetry}
+                  size="lg"
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8"
+                >
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Retry Analysis
+                </Button>
+                <Button
+                  onClick={() => router.push('/research-check')}
+                  variant="outline"
+                  size="lg"
+                  className="px-8"
+                >
+                  <ArrowLeft className="w-5 h-5 mr-2" />
+                  Go Back
+                </Button>
+              </div>
+              
+              {retryCount > 0 && (
+                <p className="text-sm text-gray-500 mt-4">
+                  Retry attempt: {retryCount}
+                </p>
+              )}
+            </div>
+          </motion.div>
+        ) : isLoading ? (
           <div className="bg-white rounded-2xl shadow-lg p-10 text-center border border-gray-100">
             <div className="relative inline-block mb-6">
               <Sparkles className="w-20 h-20 text-purple-600 mx-auto animate-pulse" />

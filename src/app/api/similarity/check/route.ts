@@ -1,6 +1,203 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
+import { scoreSemanticSimilarity, GeminiSimilarityResult } from '@/lib/gemini-similarity'
+import { calculateAccurateCosine, AccurateCosineResult } from '@/lib/accurate-cosine-similarity'
+import { fastSimilarityPipeline, FastPipelineResult } from '@/lib/fast-similarity-pipeline'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
+
+// Initialize AI providers
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' })
+
+// Exponential backoff retry helper
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 2000
+): Promise<T> {
+  let lastError: Error | unknown;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if it's a rate limit error
+      const isRateLimit = errorMessage.includes('429') || 
+                         errorMessage.includes('quota') || 
+                         errorMessage.includes('Too Many Requests') ||
+                         errorMessage.includes('rate limit');
+      
+      // If not a rate limit error, don't retry
+      if (!isRateLimit) {
+        throw error;
+      }
+      
+      // If last attempt, throw the error
+      if (attempt === maxRetries - 1) {
+        throw error;
+      }
+      
+      // Calculate exponential backoff delay: 2s, 4s, 8s
+      const delay = initialDelay * Math.pow(2, attempt);
+      console.log(`⏳ Rate limit hit. Retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`);
+      await sleep(delay);
+    }
+  }
+  
+  throw lastError;
+}
+
+// ============================================================================
+// CONCEPT GATE - STRICT PROBLEM-BASED SIMILARITY CHECKER
+// ============================================================================
+
+interface ConceptGateResult {
+  coreProblemQuery: string
+  coreProblemDb: string
+  sameProblem: boolean
+  sameUsers: boolean
+  sameDomain: boolean
+  sameIntent: boolean
+  coreOverlapPct: number
+  conceptSimilarityPct: number
+  verdict: 'accepted' | 'rejected'
+  reason: string
+}
+
+async function runConceptGate(
+  queryTitle: string,
+  queryConcept: string,
+  dbTitle: string,
+  dbConcept: string
+): Promise<ConceptGateResult | null> {
+  const prompt = `You are a strict thesis concept similarity checker.
+
+Compare Research Query vs Database Research ONLY by:
+- core problem being solved
+- target users/beneficiaries
+- domain
+- intent/outcome
+
+Ignore technology, methodology, ISO 25010, Agile/RAD, and generic thesis structure.
+
+INPUT QUERY:
+Title: ${queryTitle}
+Concept: ${queryConcept}
+
+DATABASE RESEARCH:
+Title: ${dbTitle}
+Concept Summary: ${dbConcept}
+
+Return JSON with this exact structure:
+{
+  "coreProblemQuery": "...(1 sentence)",
+  "coreProblemDb": "...(1 sentence)",
+  "sameProblem": true or false,
+  "sameUsers": true or false,
+  "sameDomain": true or false,
+  "sameIntent": true or false,
+  "coreOverlapPct": 0-100,
+  "conceptSimilarityPct": 0-100,
+  "verdict": "accepted" or "rejected",
+  "reason": "2-3 academic sentences"
+}
+
+SCORING RULES (MUST FOLLOW):
+- If sameProblem=false AND sameUsers=false AND sameDomain=false AND sameIntent=false AND coreOverlapPct=0,
+  conceptSimilarityPct MUST be 0 and verdict must be "rejected".
+- If sameProblem=false, conceptSimilarityPct MUST NOT exceed 15.
+- verdict is "accepted" only if conceptSimilarityPct >= 10.
+
+Return ONLY the JSON, no additional text.`
+
+const modelPriority = [
+  // Gemini first
+  { provider: 'gemini', model: 'gemini-2.5-flash' },
+
+  // Optional secondary Gemini fallback
+  { provider: 'gemini', model: 'gemini-2.5-pro' },
+
+  // OpenAI fallback
+  { provider: 'openai', model: 'gpt-4-turbo-preview' },
+  { provider: 'openai', model: 'gpt-4' },
+  { provider: 'openai', model: 'gpt-3.5-turbo' }
+];
+
+
+
+  for (const { provider, model } of modelPriority) {
+    try {
+      if (provider === 'openai' && !process.env.OPENAI_API_KEY) continue
+      if (provider === 'gemini' && !process.env.GEMINI_API_KEY) continue
+
+      // Wrap API call with retry logic
+      const apiCall = async () => {
+        if (provider === 'openai') {
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: 'system', content: 'You are an expert academic research evaluator. Return only valid JSON.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.2,
+            max_tokens: 1000
+          })
+          return completion.choices[0]?.message?.content || ''
+        } else if (provider === 'gemini') {
+          const geminiModel = genAI.getGenerativeModel({ model })
+          const result = await geminiModel.generateContent(prompt)
+          return result.response.text()
+        }
+        return ''
+      };
+      
+      const responseText = await retryWithBackoff(apiCall, 3, 2000);
+
+      // Extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) continue
+
+      const parsed = JSON.parse(jsonMatch[0]) as ConceptGateResult
+      
+      // Validate the response follows the rules
+      const completelyDifferent = !parsed.sameProblem && !parsed.sameUsers && 
+                                   !parsed.sameDomain && !parsed.sameIntent && 
+                                   parsed.coreOverlapPct === 0
+      
+      if (completelyDifferent && parsed.conceptSimilarityPct !== 0) {
+        parsed.conceptSimilarityPct = 0
+        parsed.verdict = 'rejected'
+      }
+      
+      if (!parsed.sameProblem && parsed.conceptSimilarityPct > 15) {
+        parsed.conceptSimilarityPct = 15
+      }
+      
+      if (parsed.conceptSimilarityPct < 10) {
+        parsed.verdict = 'rejected'
+      }
+
+      console.log(`✅ Concept gate (${model}): ${parsed.verdict} - ${parsed.conceptSimilarityPct}%`)
+      return parsed
+
+    } catch (error) {
+      console.error(`Concept gate (${model}) failed:`, error)
+      continue
+    }
+  }
+
+  console.warn('⚠️  All concept gate models failed')
+  return null
+}
 
 // ============================================================================
 // STOP WORDS AND TEXT PREPROCESSING
@@ -180,45 +377,105 @@ function extractKeyConcepts(text: string): {
 } {
   const lowerText = text.toLowerCase()
   
-  // Problem domain keywords
+  // Problem domain keywords - EXPANDED to better capture research problems
   const problemKeywords = [
-    'detect', 'detection', 'identify', 'recognition', 'classify', 'classification',
-    'analyze', 'analysis', 'predict', 'prediction', 'monitor', 'monitoring',
-    'track', 'tracking', 'measure', 'measurement', 'assess', 'assessment',
-    'diagnose', 'diagnosis', 'prevent', 'prevention', 'optimize', 'optimization',
-    'improve', 'improvement', 'enhance', 'enhancement', 'solve', 'solution'
+    // Action verbs
+    'detect', 'detection', 'identify', 'identification', 'recognition', 'recognize',
+    'classify', 'classification', 'categorize', 'categorization',
+    'analyze', 'analysis', 'examine', 'examination',
+    'predict', 'prediction', 'forecast', 'forecasting',
+    'monitor', 'monitoring', 'track', 'tracking',
+    'measure', 'measurement', 'quantify', 'quantification',
+    'assess', 'assessment', 'evaluate', 'evaluation',
+    'diagnose', 'diagnosis', 'identify condition',
+    'prevent', 'prevention', 'avoid', 'mitigate', 'mitigation',
+    'optimize', 'optimization', 'maximize', 'minimize',
+    'improve', 'improvement', 'enhance', 'enhancement',
+    'solve', 'solution', 'address', 'resolve',
+    'manage', 'management', 'control', 'automate', 'automation',
+    'recommend', 'recommendation', 'suggest', 'suggestion',
+    'verify', 'verification', 'validate', 'validation',
+    'search', 'searching', 'retrieve', 'retrieval',
+    'generate', 'generation', 'create', 'creation',
+    'filter', 'filtering', 'sort', 'sorting',
+    
+    // Problem descriptors
+    'problem', 'issue', 'challenge', 'difficulty',
+    'risk', 'threat', 'vulnerability', 'attack',
+    'error', 'fault', 'failure', 'defect', 'bug',
+    'disease', 'illness', 'disorder', 'symptom',
+    'fraud', 'spam', 'fake', 'counterfeit',
+    'waste', 'pollution', 'contamination',
+    'delay', 'bottleneck', 'inefficiency',
+    'shortage', 'scarcity', 'lack',
+    'conflict', 'dispute', 'disagreement'
   ]
   
-  // Methodology keywords
+  // Methodology keywords - distinguish implementation from problem
   const methodologyKeywords = [
     'algorithm', 'model', 'method', 'approach', 'technique', 'framework',
     'system', 'architecture', 'design', 'implementation', 'development',
     'machine learning', 'deep learning', 'neural network', 'cnn', 'rnn', 'lstm',
     'supervised', 'unsupervised', 'reinforcement', 'transfer learning',
-    'feature extraction', 'data processing', 'training', 'testing', 'validation'
+    'feature extraction', 'data processing', 'training', 'testing', 'validation',
+    'pipeline', 'workflow', 'process', 'methodology',
+    'agile', 'waterfall', 'scrum', 'iterative',
+    'prototype', 'proof of concept', 'mvp'
   ]
   
-  // Technology keywords
+  // Application area keywords - EXPANDED for better domain matching
+  const applicationKeywords = [
+    // General domains
+    'healthcare', 'health', 'medical', 'clinical', 'hospital', 'patient',
+    'education', 'learning', 'teaching', 'student', 'academic', 'school', 'university',
+    'agriculture', 'farming', 'crop', 'livestock', 'soil', 'harvest',
+    'security', 'cybersecurity', 'safety', 'protection', 'surveillance',
+    'transportation', 'traffic', 'vehicle', 'parking', 'navigation', 'logistics',
+    'finance', 'banking', 'payment', 'transaction', 'investment', 'trading',
+    'retail', 'shopping', 'store', 'customer', 'sales', 'inventory',
+    'manufacturing', 'production', 'factory', 'assembly', 'quality control',
+    'entertainment', 'gaming', 'media', 'music', 'video', 'movie',
+    
+    // Specific domains
+    'social media', 'social network', 'communication', 'messaging',
+    'e-commerce', 'online shopping', 'marketplace',
+    'smart city', 'smart home', 'home automation', 'iot',
+    'environmental', 'climate', 'weather', 'sustainability',
+    'energy', 'power', 'electricity', 'renewable',
+    'disaster', 'emergency', 'crisis', 'rescue',
+    'tourism', 'travel', 'hotel', 'booking',
+    'sports', 'fitness', 'exercise', 'athletics',
+    'real estate', 'property', 'housing',
+    'government', 'public service', 'civic',
+    'legal', 'law', 'justice', 'compliance',
+    'human resources', 'recruitment', 'hiring', 'employee'
+  ]
+  
+  // Technology keywords - kept minimal (least important for concept similarity)
   const technologyKeywords = [
     'ai', 'artificial intelligence', 'ml', 'machine learning', 'computer vision',
     'nlp', 'natural language processing', 'image processing', 'video processing',
     'sensor', 'iot', 'cloud', 'mobile', 'web', 'android', 'ios',
-    'tensorflow', 'pytorch', 'opencv', 'python', 'java', 'javascript'
-  ]
-  
-  // Application area keywords
-  const applicationKeywords = [
-    'healthcare', 'medical', 'education', 'agriculture', 'security',
-    'transportation', 'finance', 'retail', 'manufacturing', 'entertainment',
-    'social media', 'e-commerce', 'smart city', 'home automation',
-    'environmental', 'energy', 'disaster', 'emergency'
+    'tensorflow', 'pytorch', 'opencv', 'python', 'java', 'javascript',
+    'react', 'angular', 'vue', 'node', 'django', 'flask',
+    'mysql', 'mongodb', 'postgresql', 'firebase', 'aws', 'azure'
   ]
   
   // Outcome keywords
   const outcomeKeywords = [
-    'accuracy', 'efficiency', 'performance', 'quality', 'effectiveness',
-    'productivity', 'reliability', 'usability', 'accessibility', 'scalability',
-    'cost reduction', 'time saving', 'automation', 'real-time', 'fast'
+    'accuracy', 'precision', 'recall', 'f1-score',
+    'efficiency', 'performance', 'speed', 'throughput',
+    'quality', 'effectiveness', 'success rate',
+    'productivity', 'output', 'yield',
+    'reliability', 'stability', 'robustness',
+    'usability', 'user experience', 'satisfaction',
+    'accessibility', 'availability', 'uptime',
+    'scalability', 'flexibility', 'adaptability',
+    'cost reduction', 'savings', 'economical',
+    'time saving', 'faster', 'quicker',
+    'automation', 'automated', 'autonomous',
+    'real-time', 'instant', 'immediate',
+    'accurate', 'precise', 'reliable'
   ]
   
   const findMatches = (keywords: string[]) => {
@@ -234,7 +491,7 @@ function extractKeyConcepts(text: string): {
   }
 }
 
-// 7. CONCEPT SIMILARITY - Compare extracted concepts
+// 7. ENHANCED CONCEPT SIMILARITY - Compare core research problems
 function conceptSimilarity(text1: string, text2: string): number {
   const concepts1 = extractKeyConcepts(text1)
   const concepts2 = extractKeyConcepts(text2)
@@ -259,23 +516,36 @@ function conceptSimilarity(text1: string, text2: string): number {
   const appMatch = calculateCategoryMatch(concepts1.applicationArea, concepts2.applicationArea)
   const outcomeMatch = calculateCategoryMatch(concepts1.outcomes, concepts2.outcomes)
   
-  // Problem domain and application area are most important for concept similarity
-  // Technology and methodology are less important (can be different but solve same problem)
-  const weights = {
-    problem: 0.35,     // What problem are they solving?
-    application: 0.30, // Where is it applied?
-    methodology: 0.20, // How do they solve it?
-    technology: 0.10,  // What tech do they use?
-    outcome: 0.05      // What results do they achieve?
+  // STRICTER SCORING: Problem domain + application area must match for high similarity
+  // If addressing different problems or different application areas, cap the score
+  const coreProblemMatch = problemMatch * 0.5 + appMatch * 0.5
+  
+  // If core problem match is very low, cap the entire concept similarity
+  let conceptScore = 0
+  
+  if (coreProblemMatch < 0.15) {
+    // Very different core problems - cap at 15%
+    conceptScore = Math.min(0.15, coreProblemMatch * 1.5)
+  } else if (coreProblemMatch < 0.30) {
+    // Somewhat different problems - cap at 30%
+    conceptScore = Math.min(0.30, 
+      problemMatch * 0.40 +
+      appMatch * 0.35 +
+      methodMatch * 0.15 +
+      techMatch * 0.05 +
+      outcomeMatch * 0.05
+    )
+  } else {
+    // Similar core problems - use full weighted scoring
+    conceptScore = 
+      problemMatch * 0.40 +  // What problem are they solving?
+      appMatch * 0.35 +      // Where is it applied?
+      methodMatch * 0.15 +   // How do they solve it? (less important)
+      techMatch * 0.05 +     // What tech do they use? (least important)
+      outcomeMatch * 0.05    // What results do they achieve? (least important)
   }
   
-  return (
-    problemMatch * weights.problem +
-    appMatch * weights.application +
-    methodMatch * weights.methodology +
-    techMatch * weights.technology +
-    outcomeMatch * weights.outcome
-  )
+  return conceptScore
 }
 
 // 8. MACHINE LEARNING-INSPIRED FEATURE EXTRACTION
@@ -333,7 +603,7 @@ function featureSimilarity(text1: string, text2: string): number {
 }
 
 // 7. COMPOSITE MULTI-ALGORITHM SIMILARITY SCORE
-function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
+function calculateMultiAlgorithmSimilarity(text1: string, text2: string, lightweight: boolean = false): {
   nGram: number
   fingerprint: number
   rabinKarp: number
@@ -344,6 +614,30 @@ function calculateMultiAlgorithmSimilarity(text1: string, text2: string): {
   composite: number
   confidence: number
 } {
+  // For lightweight mode, use faster approximate algorithms
+  if (lightweight) {
+    const nGram = nGramSimilarity(text1, text2, 2) // Shorter n-grams = faster
+    const fingerprintScore = fingerprintSimilarity(text1, text2)
+    const rabinKarp = rabinKarpSimilarity(text1, text2, 10) // Shorter pattern = faster
+    
+    // Skip expensive algorithms (sentence, feature, concept similarity)
+    // Use n-gram as approximation for all
+    const fastScore = (nGram + fingerprintScore + rabinKarp) / 3
+    
+    return {
+      nGram,
+      fingerprint: fingerprintScore,
+      rabinKarp,
+      lcs: fastScore, // Approximate
+      sentence: fastScore, // Approximate
+      feature: fastScore, // Approximate
+      concept: fastScore, // Approximate
+      composite: fastScore,
+      confidence: 0.7 // Lower confidence for lightweight
+    }
+  }
+  
+  // Full analysis (for top candidates only)
   const nGram = nGramSimilarity(text1, text2, 3)
   const fingerprintScore = fingerprintSimilarity(text1, text2)
   const rabinKarp = rabinKarpSimilarity(text1, text2, 20)
@@ -528,6 +822,120 @@ The similarity analysis has been completed using multiple algorithmic approaches
 ${similarities.length > 0 ? `The highest similarity score detected is ${(similarities[0].overallSimilarity * 100).toFixed(2)}%.` : 'No similar researches found.'}
 
 Note: This analysis uses advanced algorithmic similarity detection without AI-generated explanations.`
+}
+
+// Fast Pipeline Report Generator
+function generateFastPipelineReport(
+  proposedTitle: string,
+  proposedConcept: string,
+  similarities: Array<{
+    title: string
+    percentage: number
+    interpretation: string
+    avgSimilarity: number
+    maxSimilarity: number
+    vectorSimilarity?: number
+    geminiScores?: {
+      topicSimilarity: number
+      objectiveSimilarity: number
+      methodologySimilarity: number
+      datasetScopeSimilarity: number
+      weightedPercentage: number
+    }
+  }>,
+  performance: {
+    totalTime: number
+    embeddingTime: number
+    vectorSearchTime: number
+    detailedAnalysisTime: number
+    geminiTime: number
+    candidatesTotal: number
+    candidatesAfterThreshold: number
+    candidatesAnalyzed: number
+    candidatesWithGemini: number
+  }
+): string {
+  const topMatch = similarities[0]
+  
+  return `FAST SIMILARITY ANALYSIS REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROPOSED RESEARCH:
+Title: ${proposedTitle}
+Concept: ${proposedConcept.substring(0, 300)}${proposedConcept.length > 300 ? '...' : ''}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOP SIMILAR RESEARCHES:
+${similarities.slice(0, 5)
+  .map(
+    (r, i) => `
+${i + 1}. ${r.title}
+   ├─ Overall Similarity: ${r.percentage}% (${r.interpretation})
+   ├─ Average Chunk Similarity: ${(r.avgSimilarity * 100).toFixed(1)}%
+   ├─ Maximum Chunk Similarity: ${(r.maxSimilarity * 100).toFixed(1)}%
+   ${r.vectorSimilarity ? `├─ Vector Search Score: ${(r.vectorSimilarity * 100).toFixed(1)}%` : ''}
+   ${r.geminiScores ? `└─ Gemini Validation: Topic ${(r.geminiScores.topicSimilarity * 100).toFixed(0)}%, Objective ${(r.geminiScores.objectiveSimilarity * 100).toFixed(0)}%, Methodology ${(r.geminiScores.methodologySimilarity * 100).toFixed(0)}%, Dataset ${(r.geminiScores.datasetScopeSimilarity * 100).toFixed(0)}%` : '└─ (No Gemini validation)'}
+`
+  )
+  .join('\n')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANALYSIS ARCHITECTURE (Fast Pipeline):
+
+✓ Text Preprocessing & Chunking
+  → Removed references, boilerplate
+  → Chunked into 600-token segments with 100-token overlap
+
+✓ Embedding Generation (Gemini text-embedding-004)
+  → Generated semantic embeddings for all chunks
+  → Cached for fast re-use
+
+✓ Vector Search (Top-K Candidates)
+  → Searched ${performance.candidatesTotal} researches
+  → Selected top ${performance.candidatesAnalyzed} candidates
+  → Filtered by 30% threshold: ${performance.candidatesAfterThreshold} passed
+
+✓ Detailed Chunk-Level Analysis
+  → All-pairs chunk comparison
+  → Aggregation: (60% average) + (40% maximum)
+
+${performance.candidatesWithGemini > 0 ? `✓ Gemini AI Validation (Top ${performance.candidatesWithGemini})
+  → 4-dimension semantic scoring
+  → Topic, Objective, Methodology, Dataset analysis
+` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PERFORMANCE METRICS:
+
+Total Processing Time: ${(performance.totalTime / 1000).toFixed(2)}s
+├─ Embedding: ${performance.embeddingTime}ms
+├─ Vector Search: ${performance.vectorSearchTime}ms
+├─ Detailed Analysis: ${performance.detailedAnalysisTime}ms
+└─ Gemini Validation: ${performance.geminiTime}ms
+
+Speedup: ~${Math.round((performance.candidatesTotal * 3000) / performance.totalTime)}x faster than naive approach
+Efficiency: Processed ${performance.candidatesAnalyzed} of ${performance.candidatesTotal} researches (${((performance.candidatesAnalyzed / performance.candidatesTotal) * 100).toFixed(1)}%)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONCLUSION:
+
+${topMatch ? 
+  `The highest similarity detected is ${topMatch.percentage}% with "${topMatch.title}".
+This indicates ${topMatch.interpretation.toLowerCase()}.
+
+${topMatch.percentage >= 80 ? 
+  '⚠️  WARNING: Very high similarity detected. This may indicate substantial overlap or potential plagiarism. Please review carefully.' :
+topMatch.percentage >= 60 ?
+  '⚠️  CAUTION: High similarity detected. Significant overlap exists. Consider revising to increase originality.' :
+topMatch.percentage >= 40 ?
+  'ℹ️  MODERATE: Moderate similarity found. Some overlap exists but may be acceptable depending on context.' :
+  '✓ LOW: Low similarity detected. Research appears reasonably distinct.'}`
+  : 
+  'No significant similarity found. This research appears to be unique.'
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Note: This analysis uses state-of-the-art semantic embeddings and AI validation
+for the most accurate similarity detection.`
 }
 
 // Combined Lexical Similarity Calculation (No AI/Embeddings)
@@ -797,17 +1205,45 @@ async function calculateCosineSimilarity(
   const proposedTitleVec = calculateTfIdf(proposedTitle, allTitles)
   const proposedConceptVec = calculateTfIdf(proposedConcept, allAbstracts)
 
-  // Process all researches with lexical similarity only
-  const results = await Promise.all(
-    existingResearches.map(async (research, index) => {
-      // Lexical similarity
-      const existingTitleVec = calculateTfIdf(research.title, allTitles)
-      const existingAbstractVec = calculateTfIdf(research.thesis_brief, allAbstracts)
+  // ===================================================================
+  // FAST TWO-PASS APPROACH: Quick filter → Detailed analysis
+  // ===================================================================
+  console.log('Phase 1: Quick pre-filtering...')
+  
+  // PASS 1: Quick lexical filtering (fast, no heavy algorithms)
+  const quickResults = existingResearches.map((research, index) => {
+    const existingTitleVec = calculateTfIdf(research.title, allTitles)
+    const existingAbstractVec = calculateTfIdf(research.thesis_brief, allAbstracts)
 
-      const titleLexicalSim = cosineSimilarity(proposedTitleVec, existingTitleVec)
-      const abstractLexicalSim = cosineSimilarity(proposedConceptVec, existingAbstractVec)
-      
-      // Word overlap similarity
+    const titleLexicalSim = cosineSimilarity(proposedTitleVec, existingTitleVec)
+    const abstractLexicalSim = cosineSimilarity(proposedConceptVec, existingAbstractVec)
+    
+    // Quick overall score (TF-IDF only)
+    const quickScore = titleLexicalSim * 0.35 + abstractLexicalSim * 0.65
+    
+    return {
+      research,
+      index,
+      quickScore,
+      titleLexicalSim,
+      abstractLexicalSim
+    }
+  })
+  
+  // Sort by quick score and split into tiers
+  // TOP 3: Full detailed analysis (all 7 algorithms)
+  // NEXT 7: Lightweight analysis (faster approximations)
+  const sortedCandidates = quickResults.sort((a, b) => b.quickScore - a.quickScore)
+  
+  const top3Candidates = sortedCandidates.slice(0, 3)
+  const next7Candidates = sortedCandidates.slice(3, 10)
+  
+  console.log(`Phase 1 complete: Selected top 3 for full analysis + 7 for lightweight analysis from ${existingResearches.length} researches`)
+  
+  // PASS 2A: Full detailed analysis on TOP 3 only
+  console.log('Phase 2A: Full multi-algorithm analysis on top 3 candidates...')
+  const top3Results = await Promise.all(
+    top3Candidates.map(async ({ research, index, titleLexicalSim, abstractLexicalSim }) => {
       const titleWords = new Set(preprocess(proposedTitle))
       const abstractWords = new Set(preprocess(proposedConcept))
       const existingTitleWords = new Set(preprocess(research.title))
@@ -824,15 +1260,9 @@ async function calculateCosineSimilarity(
       const enhancedAbstractLexical = abstractLexicalSim * 0.7 + abstractOverlap * 0.3
       const lexicalSim = enhancedTitleLexical * 0.35 + enhancedAbstractLexical * 0.65
 
-      // ============================================================
-      // MULTI-ALGORITHM SIMILARITY DETECTION (Enhanced Security)
-      // ============================================================
-      
-      // Run all advanced algorithms on title comparison
-      const titleMultiAlgo = calculateMultiAlgorithmSimilarity(proposedTitle, research.title)
-      
-      // Run all advanced algorithms on abstract comparison
-      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.thesis_brief)
+      // FULL analysis with all 7 algorithms
+      const titleMultiAlgo = calculateMultiAlgorithmSimilarity(proposedTitle, research.title, false)
+      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.thesis_brief, false)
       
       // Combine multi-algorithm scores
       const multiAlgoTitleScore = titleMultiAlgo.composite
@@ -843,27 +1273,28 @@ async function calculateCosineSimilarity(
       const avgConfidence = (titleMultiAlgo.confidence + abstractMultiAlgo.confidence) / 2
       
       // ============================================================
-      // CONCEPT-BASED SIMILARITY ENHANCEMENT
+      // CONCEPT-BASED SIMILARITY ENHANCEMENT (STRICTER)
       // ============================================================
       // Check if the researches are addressing the same core concept
       const conceptualMatch = abstractMultiAlgo.concept
       
-      // If concept similarity is high, boost overall similarity
-      // This catches cases where different words are used but same idea
+      // STRICTER: Only boost if conceptual match is actually significant
+      // This aligns with AI concept gate logic (different problems = low similarity)
       let conceptBoost = 1.0
-      if (conceptualMatch > 0.6) {
-        // Very high concept match - likely same core idea (lowered from 0.7)
-        conceptBoost = 1.35  // Increased from 1.25
-      } else if (conceptualMatch > 0.4) {
-        // Moderate concept match - related ideas (lowered from 0.5)
-        conceptBoost = 1.25  // Increased from 1.15
+      if (conceptualMatch > 0.50) {
+        // Very high concept match - likely same core idea
+        conceptBoost = 1.30
+      } else if (conceptualMatch > 0.35) {
+        // Moderate-high concept match - related ideas
+        conceptBoost = 1.20
       } else if (conceptualMatch > 0.25) {
-        // Some concept overlap (lowered from 0.3)
-        conceptBoost = 1.15  // Increased from 1.08
+        // Some concept overlap
+        conceptBoost = 1.10
       } else if (conceptualMatch > 0.15) {
-        // Slight concept overlap - still relevant
-        conceptBoost = 1.08
+        // Slight concept overlap
+        conceptBoost = 1.05
       }
+      // If conceptualMatch <= 0.15, no boost (different core problems)
       
       // ============================================================
       // COMPREHENSIVE OVERALL SIMILARITY (7 ALGORITHMS + CONCEPT)
@@ -951,20 +1382,21 @@ async function calculateCosineSimilarity(
         overallSim = Math.min(1, overallSim * 1.08) // 8% boost for some consensus
       }
       
-      // 2. Concept-Based Plagiarism Detection (ENHANCED)
+      // 2. Concept-Based Plagiarism Detection (STRICTER THRESHOLDS)
       // Detect if the core concept is the same even with different wording
       // Skip if already detected as identical
       if (overallSim < 0.95) {
-        if (abstractMultiAlgo.concept > 0.6) {
-          // Very high concept similarity = same core idea (lowered from 0.7)
-          overallSim = Math.min(1, overallSim * 1.30) // 30% boost for conceptual match (increased from 22%)
-        } else if (abstractMultiAlgo.concept > 0.4 && enhancedAbstractLexical < 0.45) {
-          // High concept similarity but low word match = paraphrased plagiarism (lowered from 0.5)
-          overallSim = Math.min(1, overallSim * 1.25) // 25% boost for paraphrased concepts (increased from 18%)
-        } else if (abstractMultiAlgo.concept > 0.3 && enhancedAbstractLexical < 0.35) {
+        if (abstractMultiAlgo.concept > 0.50) {
+          // Very high concept similarity = same core idea (more strict threshold)
+          overallSim = Math.min(1, overallSim * 1.25) // 25% boost for conceptual match
+        } else if (abstractMultiAlgo.concept > 0.35 && enhancedAbstractLexical < 0.45) {
+          // High concept similarity but low word match = paraphrased plagiarism (stricter)
+          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for paraphrased concepts
+        } else if (abstractMultiAlgo.concept > 0.25 && enhancedAbstractLexical < 0.35) {
           // Moderate concept similarity with very low word match = sophisticated paraphrasing
-          overallSim = Math.min(1, overallSim * 1.18) // 18% boost for sophisticated paraphrasing
+          overallSim = Math.min(1, overallSim * 1.12) // 12% boost for sophisticated paraphrasing
         }
+        // If concept < 0.25, no boost (different core problems)
       }
       
       // 3. Structural Similarity Detection (LCS + Fingerprint)
@@ -1052,6 +1484,84 @@ async function calculateCosineSimilarity(
         similarityType = 'Lexical'
       }
 
+      // ============================================================
+      // ACCURATE COSINE SIMILARITY (DISABLED - Too slow)
+      // ============================================================
+      // This embedding-based approach was taking 80+ seconds per comparison
+      // Disabled to improve performance from 40+ minutes to under 1 minute
+      
+      /* DISABLED - Uncomment to re-enable embedding-based analysis
+      let accurateCosineResult: AccurateCosineResult | null = null
+      
+      // Run accurate cosine similarity for cases with moderate to high similarity
+      // This provides the most accurate semantic similarity using Gemini embeddings
+      if (overallSim > 0.25 && process.env.GEMINI_API_KEY) {
+        try {
+          console.log(`[Accurate Cosine] Analyzing: ${research.title.substring(0, 50)}...`)
+          accurateCosineResult = await calculateAccurateCosine(
+            proposedConcept,
+            research.thesis_brief,
+            600, // chunk size (500-800 tokens)
+            100  // overlap (100 tokens)
+          )
+          
+          console.log(`[Accurate Cosine] Result: ${accurateCosineResult.percentage}% (${accurateCosineResult.interpretation})`)
+          
+          // Use accurate cosine as the authoritative semantic score
+          // Formula: (60% avg) + (40% max) with penalties
+          const accurateCosineScore = accurateCosineResult.finalSimilarity
+          
+          // Blend with algorithmic score: 50% algo + 50% accurate cosine
+          // This balances traditional algorithms with semantic embeddings
+          overallSim = (overallSim * 0.50) + (accurateCosineScore * 0.50)
+          
+          console.log(`[Accurate Cosine] Blended overall similarity: ${(overallSim * 100).toFixed(2)}%`)
+        } catch (error) {
+          console.error('[Accurate Cosine] Error:', error)
+          // Fallback to Gemini semantic scoring if accurate cosine fails
+        }
+      }
+      */ // END DISABLED ACCURATE COSINE
+
+      // ============================================================
+      // GEMINI SEMANTIC SIMILARITY SCORING (DISABLED - Too slow)
+      // ============================================================
+      // Also causes rate limits and slow processing
+      // Using pure algorithm-based scoring for speed
+      
+      /* DISABLED - Uncomment to re-enable Gemini scoring
+      let geminiResult: GeminiSimilarityResult | null = null
+      
+      // Run Gemini semantic scoring if accurate cosine wasn't used
+      if (!accurateCosineResult && overallSim > 0.25 && process.env.GEMINI_API_KEY) {
+        try {
+          console.log(`[Gemini Scoring] Analyzing similarity for: ${research.title.substring(0, 50)}...`)
+          geminiResult = await scoreSemanticSimilarity(
+            proposedTitle,
+            proposedConcept,
+            research.title,
+            research.thesis_brief,
+            2 // 2 retries for stability
+          )
+          
+          if (geminiResult.isValid) {
+            console.log(`[Gemini Scoring] Result: ${geminiResult.weightedPercentage}%`, geminiResult.scores)
+            
+            const geminiScore = geminiResult.weightedPercentage / 100
+            
+            // Blend Gemini score with algorithmic score (70% algo, 30% Gemini)
+            overallSim = (overallSim * 0.70) + (geminiScore * 0.30)
+            
+            console.log(`[Gemini Scoring] Adjusted overall similarity: ${(overallSim * 100).toFixed(2)}%`)
+          } else {
+            console.warn(`[Gemini Scoring] Failed: ${geminiResult.error}`)
+          }
+        } catch (error) {
+          console.error('[Gemini Scoring] Unexpected error:', error)
+        }
+      }
+      */ // END DISABLED GEMINI SCORING
+
       // Generate explanation using fallback only (no Gemini API)
       const explanation = generateFallbackExplanation(
         proposedTitle,
@@ -1089,11 +1599,101 @@ async function calculateCosineSimilarity(
           multiAlgoComposite: Math.round(multiAlgoOverallScore * 10000) / 10000,
           confidence: Math.round(avgConfidence * 10000) / 10000
         }
+        // Note: Gemini and Accurate Cosine disabled for performance
       }
     })
   )
+  
+  // PASS 2B: Lightweight analysis on next 7 candidates
+  console.log('Phase 2B: Lightweight analysis on next 7 candidates...')
+  const next7Results = await Promise.all(
+    next7Candidates.map(async ({ research, index, titleLexicalSim, abstractLexicalSim }) => {
+      const enhancedTitleLexical = titleLexicalSim
+      const enhancedAbstractLexical = abstractLexicalSim
+      const lexicalSim = enhancedTitleLexical * 0.35 + enhancedAbstractLexical * 0.65
 
-  return results.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
+      // LIGHTWEIGHT analysis (faster approximations)
+      const titleMultiAlgo = calculateMultiAlgorithmSimilarity(proposedTitle, research.title, true)
+      const abstractMultiAlgo = calculateMultiAlgorithmSimilarity(proposedConcept, research.thesis_brief, true)
+      
+      const multiAlgoTitleScore = titleMultiAlgo.composite
+      const multiAlgoAbstractScore = abstractMultiAlgo.composite
+      const multiAlgoOverallScore = multiAlgoTitleScore * 0.35 + multiAlgoAbstractScore * 0.65
+      
+      const avgConfidence = (titleMultiAlgo.confidence + abstractMultiAlgo.confidence) / 2
+      const combinedTitleSim = multiAlgoTitleScore
+      const combinedAbstractSim = multiAlgoAbstractScore
+      
+      let overallSim = (combinedTitleSim * 0.4 + combinedAbstractSim * 0.6)
+      const similarityType: 'Lexical' | 'Conceptual' | 'Both' = 'Lexical'
+      
+      const explanation = `Lightweight similarity analysis: ${(overallSim * 100).toFixed(1)}% match using fast algorithms`
+
+      return {
+        id: research.id,
+        title: research.title,
+        thesis_brief: research.thesis_brief,
+        year: research.year,
+        course: research.course,
+        researchers: research.researchers,
+        titleSimilarity: Math.round(combinedTitleSim * 10000) / 10000,
+        abstractSimilarity: Math.round(combinedAbstractSim * 10000) / 10000,
+        overallSimilarity: Math.round(overallSim * 10000) / 10000,
+        lexicalSimilarity: Math.round(lexicalSim * 10000) / 10000,
+        semanticSimilarity: Math.round(multiAlgoOverallScore * 10000) / 10000,
+        similarityType,
+        explanation,
+        algorithmScores: {
+          nGram: Math.round(abstractMultiAlgo.nGram * 10000) / 10000,
+          fingerprint: Math.round(abstractMultiAlgo.fingerprint * 10000) / 10000,
+          rabinKarp: Math.round(abstractMultiAlgo.rabinKarp * 10000) / 10000,
+          lcs: Math.round(abstractMultiAlgo.lcs * 10000) / 10000,
+          sentenceSimilarity: Math.round(abstractMultiAlgo.sentence * 10000) / 10000,
+          featureSimilarity: Math.round(abstractMultiAlgo.feature * 10000) / 10000,
+          conceptSimilarity: Math.round(abstractMultiAlgo.concept * 10000) / 10000,
+          multiAlgoComposite: Math.round(multiAlgoOverallScore * 10000) / 10000,
+          confidence: Math.round(avgConfidence * 10000) / 10000
+        }
+      }
+    })
+  )
+  
+  // Add remaining researches with quick scores only (no detailed analysis needed)
+  const detailedIds = new Set([...top3Results.map(r => r.id), ...next7Results.map(r => r.id)])
+  const remainingResults = quickResults
+    .filter(qr => !detailedIds.has(qr.research.id))
+    .map(({ research, quickScore, titleLexicalSim, abstractLexicalSim }) => ({
+      id: research.id,
+      title: research.title,
+      thesis_brief: research.thesis_brief,
+      year: research.year,
+      course: research.course,
+      researchers: research.researchers,
+      titleSimilarity: Math.round(titleLexicalSim * 10000) / 10000,
+      abstractSimilarity: Math.round(abstractLexicalSim * 10000) / 10000,
+      overallSimilarity: Math.round(quickScore * 10000) / 10000,
+      lexicalSimilarity: Math.round(quickScore * 10000) / 10000,
+      semanticSimilarity: Math.round(quickScore * 10000) / 10000,
+      similarityType: 'Lexical' as const,
+      explanation: 'Quick TF-IDF similarity score (detailed analysis not performed for low matches)',
+      algorithmScores: {
+        nGram: 0,
+        fingerprint: 0,
+        rabinKarp: 0,
+        lcs: 0,
+        sentenceSimilarity: 0,
+        featureSimilarity: 0,
+        conceptSimilarity: 0,
+        multiAlgoComposite: Math.round(quickScore * 10000) / 10000,
+        confidence: 0.5
+      }
+    }))
+  
+  // Combine all results: 3 full + 7 lightweight + 22 quick
+  const allResults = [...top3Results, ...next7Results, ...remainingResults]
+  console.log(`Phase 2 complete: ${top3Results.length} full + ${next7Results.length} lightweight + ${remainingResults.length} quick = ${allResults.length} total results`)
+
+  return allResults.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
 }
 
 export async function POST(request: NextRequest) {
@@ -1204,10 +1804,17 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Calculate similarity using algorithms only (no AI)
-    console.log('Calculating similarity using multi-algorithm approach...')
-    console.log('Proposed title:', titleToUse)
-    console.log('Proposed concept length:', proposedConcept.length)
+    // ============================================================
+    // HYBRID PIPELINE: Algorithm Filtering → AI Validation
+    // ============================================================
+    console.log('Starting HYBRID SIMILARITY PIPELINE (Algorithm → AI Validation)...')
+    console.log(`Comparing against ${existingResearches.length} researches`)
+    
+    const startTime = Date.now()
+
+    // STEP 1: Use algorithms to get top 3 candidates
+    console.log('Step 1: Running multi-algorithm similarity calculation...')
+    const algorithmStartTime = Date.now()
     
     const similarities = await calculateCosineSimilarity(
       titleToUse,
@@ -1215,34 +1822,152 @@ export async function POST(request: NextRequest) {
       existingResearches
     )
 
-    console.log(`Similarity calculation complete. Found ${similarities.length} comparisons.`)
+    console.log(`Algorithm calculation complete. Found ${similarities.length} comparisons.`)
     
-    // Log top 3 similarities for debugging
-    if (similarities.length > 0) {
-      console.log('Top 3 similarities:', similarities.slice(0, 3).map(s => ({
-        title: s.title.substring(0, 50),
-        overall: (s.overallSimilarity * 100).toFixed(2) + '%',
-        lexical: (s.lexicalSimilarity * 100).toFixed(2) + '%',
-        semantic: (s.semanticSimilarity * 100).toFixed(2) + '%',
-        type: s.similarityType
-      })))
-    }
+    // Sort by overall similarity and get top 3
+    const top3Candidates = similarities
+      .sort((a, b) => b.overallSimilarity - a.overallSimilarity)
+      .slice(0, 3)
+    
+    const algorithmTime = Date.now() - algorithmStartTime
+    
+    console.log('Top 3 candidates from algorithms:', top3Candidates.map(s => ({
+      title: s.title.substring(0, 50),
+      algorithmScore: (s.overallSimilarity * 100).toFixed(2) + '%'
+    })))
 
-    // Generate report (algorithmic only, no AI)
-    const report = generateFallbackReport(
-      titleToUse,
-      proposedConcept,
-      similarities
-    )
-    console.log('Similarity report generated')
+    // STEP 2: AI Validation DISABLED (too slow with rate limits)
+    // Using algorithm scores only for faster results
+    console.log('Step 2: Skipping AI validation (using algorithm scores only)...')
+    
+    const aiValidatedResults = top3Candidates.map(c => ({ 
+      ...c, 
+      pipelineUsed: 'hybrid-algorithm-only',
+      algorithmSimilarity: c.overallSimilarity,
+      aiSimilarity: c.overallSimilarity, // Use algorithm score as AI score
+      semanticSimilarity: c.overallSimilarity,
+      explanation: c.explanation || 'Analysis based on multi-algorithm calculation (TF-IDF, N-Gram, Cosine Similarity)'
+    }))
+
+    console.log(`✅ Processing complete for ${aiValidatedResults.length} candidates (algorithm-based)`)
+
+    /* AI VALIDATION DISABLED - Uncomment to re-enable
+    const aiStartTime = Date.now()
+    
+    let aiValidatedResults = []
+    let useAI = process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY
+    
+    if (useAI && top3Candidates.length > 0) {
+      try {
+        aiValidatedResults = await Promise.all(
+          top3Candidates.map(async (candidate) => {
+            const gateResult = await runConceptGate(
+              titleToUse,
+              proposedConcept,
+              candidate.title,
+              candidate.thesis_brief
+            )
+            
+            // Combine algorithm score with AI validation
+            const aiSimilarity = gateResult ? gateResult.conceptSimilarityPct / 100 : candidate.overallSimilarity
+            const combinedSimilarity = gateResult 
+              ? (candidate.overallSimilarity * 0.3 + aiSimilarity * 0.7) // 30% algorithm, 70% AI
+              : candidate.overallSimilarity
+            
+            return {
+              ...candidate,
+              overallSimilarity: combinedSimilarity,
+              algorithmSimilarity: candidate.overallSimilarity,
+              aiSimilarity: aiSimilarity,
+              semanticSimilarity: aiSimilarity,
+              conceptGate: gateResult,
+              explanation: gateResult?.reason || candidate.explanation,
+              pipelineUsed: 'hybrid-validated'
+            }
+          })
+        )
+        
+        console.log(`✅ AI validation complete for ${aiValidatedResults.length} candidates`)
+      } catch (error) {
+        console.error('AI validation failed, using algorithm scores only:', error)
+        aiValidatedResults = top3Candidates.map(c => ({ 
+          ...c, 
+          pipelineUsed: 'hybrid-fallback',
+          aiValidationFailed: true
+        }))
+      }
+    } else {
+      console.log('⚠️  No AI provider available, using algorithm scores only')
+      aiValidatedResults = top3Candidates.map(c => ({ 
+        ...c, 
+        pipelineUsed: 'algorithm-only',
+        aiValidationSkipped: true
+      }))
+    }
+    
+    const aiTime = Date.now() - aiStartTime
+    */ // END OF DISABLED AI VALIDATION
+    
+    const totalTime = Date.now() - startTime
+
+    // Sort by final combined similarity
+    const finalResults = aiValidatedResults.sort((a, b) => b.overallSimilarity - a.overallSimilarity)
+
+    // Generate comprehensive report
+    let report = `ALGORITHM-BASED SIMILARITY ANALYSIS (Fast Mode)\n`
+    report += `${'='.repeat(80)}\n\n`
+    report += `Proposed Research:\n`
+    report += `Title: ${titleToUse}\n`
+    report += `Concept: ${proposedConcept.substring(0, 200)}${proposedConcept.length > 200 ? '...' : ''}\n\n`
+    report += `Analysis Method: Multi-Algorithm Pipeline\n`
+    report += `  Algorithms: TF-IDF, Cosine Similarity, N-Gram, Fingerprint, LCS\n`
+    report += `  Note: AI validation disabled for faster processing\n`
+    report += `Total Database Entries: ${existingResearches.length}\n`
+    report += `Candidates Analyzed: ${top3Candidates.length}\n`
+    report += `Processing Time: ${totalTime}ms (Algorithm: ${algorithmTime}ms)\n\n`
+    
+    if (finalResults.length === 0) {
+      report += `No similar research found in database.\n`
+    } else {
+      report += `Top ${finalResults.length} Most Similar Research:\n\n`
+      finalResults.forEach((sim, idx) => {
+        report += `${idx + 1}. ${sim.title}\n`
+        report += `   Overall Similarity: ${(sim.overallSimilarity * 100).toFixed(1)}%\n`
+        report += `   Lexical Similarity: ${(sim.lexicalSimilarity * 100).toFixed(1)}%\n`
+        
+        if ('algorithmScores' in sim && sim.algorithmScores) {
+          report += `   Algorithm Breakdown:\n`
+          report += `     - N-Gram: ${(sim.algorithmScores.nGram * 100).toFixed(1)}%\n`
+          report += `     - Fingerprint: ${(sim.algorithmScores.fingerprint * 100).toFixed(1)}%\n`
+          report += `     - Rabin-Karp: ${(sim.algorithmScores.rabinKarp * 100).toFixed(1)}%\n`
+          report += `     - LCS: ${(sim.algorithmScores.lcs * 100).toFixed(1)}%\n`
+          report += `     - Sentence Sim: ${(sim.algorithmScores.sentenceSimilarity * 100).toFixed(1)}%\n`
+          report += `     - Feature Sim: ${(sim.algorithmScores.featureSimilarity * 100).toFixed(1)}%\n`
+        }
+        
+        report += `   Year: ${sim.year || 'N/A'}\n`
+        report += `   Course: ${sim.course || 'N/A'}\n\n`
+      })
+    }
+    
+    console.log('Hybrid similarity report generated')
 
     return NextResponse.json({
       success: true,
       proposedTitle: titleToUse,
       proposedConcept,
-      similarities: similarities.slice(0, 3), // Return top 3
+      similarities: finalResults,
       report,
       totalComparisons: similarities.length,
+      candidatesEvaluated: top3Candidates.length,
+      aiValidated: false, // AI validation disabled
+      performance: {
+        totalTime,
+        algorithmTime,
+        aiValidationTime: 0, // No AI validation
+        averagePerComparison: similarities.length > 0 ? algorithmTime / similarities.length : 0
+      },
+      pipelineUsed: 'algorithm-only'
     })
   } catch (error) {
     console.error('Similarity check error:', error)
