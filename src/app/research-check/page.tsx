@@ -21,7 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { COURSES } from "@/lib/constants"
-import { Check, ChevronRight, ChevronLeft, Upload, FileText, BarChart3, Home, Eye, Sparkles, AlertTriangle, CheckCircle, BookOpen, Calendar, Users, FileCheck, ScrollText } from "lucide-react"
+import { Check, ChevronRight, ChevronLeft, Upload, FileText, BarChart3, Home, Eye, Sparkles, AlertTriangle, CheckCircle, CheckCircle2, BookOpen, Calendar, Users, FileCheck, ScrollText } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
 import Image from "next/image"
@@ -611,7 +611,7 @@ export default function ResearchCheckPage() {
                       {stepData.analysisResult ? (
                         <div className="space-y-6">
                           {/* Display the top match score as overall similarity */}
-                          {stepData.analysisResult.similarities && stepData.analysisResult.similarities.length > 0 && (
+                          {stepData.analysisResult.similarities && stepData.analysisResult.similarities.length > 0 ? (
                             <>
                               <div className="p-8 bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl border border-blue-200">
                                 <div className="flex items-center justify-between mb-6">
@@ -896,14 +896,81 @@ export default function ResearchCheckPage() {
                                 ))}
                               </div>
                             </>
+                          ) : (
+                            /* No Similarities Found - Congratulations Message */
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ duration: 0.5 }}
+                              className="p-8 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border-2 border-green-200 shadow-lg"
+                            >
+                              <div className="text-center space-y-6">
+                                {/* Success Icon */}
+                                <div className="flex justify-center">
+                                  <div className="relative">
+                                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-green-400 to-emerald-600 flex items-center justify-center shadow-xl">
+                                      <CheckCircle2 className="h-14 w-14 text-white" strokeWidth={2.5} />
+                                    </div>
+                                    <div className="absolute -top-2 -right-2">
+                                      <div className="w-8 h-8 rounded-full bg-yellow-400 flex items-center justify-center shadow-lg animate-bounce">
+                                        <span className="text-xl">🎉</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Congratulations Message */}
+                                <div className="space-y-3">
+                                  <h3 className="text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+                                    Congratulations!
+                                  </h3>
+                                  <p className="text-xl font-semibold text-gray-800">
+                                    Your research is unique! 🌟
+                                  </p>
+                                  <p className="text-base text-gray-600 max-w-md mx-auto">
+                                    Our advanced plagiarism detection system found no significant similarities with existing researches in the database.
+                                  </p>
+                                </div>
+
+                                {/* Success Stats */}
+                                <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto pt-4">
+                                  <div className="p-4 bg-white rounded-lg border border-green-200 shadow-sm">
+                                    <div className="text-2xl font-bold text-green-600">0%</div>
+                                    <div className="text-xs text-gray-600 mt-1">Similarity</div>
+                                  </div>
+                                  <div className="p-4 bg-white rounded-lg border border-blue-200 shadow-sm">
+                                    <div className="text-2xl font-bold text-blue-600">{stepData.analysisResult.totalComparisons || 0}</div>
+                                    <div className="text-xs text-gray-600 mt-1">Checked</div>
+                                  </div>
+                                  <div className="p-4 bg-white rounded-lg border border-purple-200 shadow-sm">
+                                    <div className="text-2xl font-bold text-purple-600">✓</div>
+                                    <div className="text-xs text-gray-600 mt-1">Original</div>
+                                  </div>
+                                </div>
+
+                                {/* Encouragement Message */}
+                                <div className="pt-4">
+                                  <div className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-100 to-emerald-100 border border-green-300 rounded-full">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+                                      <path d="M12 2v20M2 12h20"/>
+                                    </svg>
+                                    <span className="text-sm font-semibold text-green-700">
+                                      Your research demonstrates excellent originality!
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </motion.div>
                           )}
 
-                          <div className="p-5 bg-blue-50 border border-blue-200 rounded-lg">
-                            <p className="text-sm text-blue-800">
-                              <strong>Note:</strong> This analysis is for reference only. Please consult with your advisor 
-                              for guidance on improving the originality of your research.
-                            </p>
-                          </div>
+                          {stepData.analysisResult.similarities && stepData.analysisResult.similarities.length > 0 && (
+                            <div className="p-5 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-sm text-blue-800">
+                                <strong>Note:</strong> This analysis is for reference only. Please consult with your advisor 
+                                for guidance on improving the originality of your research.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="text-center py-16">
