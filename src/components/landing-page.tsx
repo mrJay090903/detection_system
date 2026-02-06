@@ -87,7 +87,7 @@ const LandingPage = () => {
     </Link>
 
     {/* Login Button */}
-    <LoginForm />
+    {/* <LoginForm /> */}
   </motion.nav>
 
   {/* Main Content */}
