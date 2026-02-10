@@ -99,7 +99,7 @@ function AnalysisReportsContent() {
 
   // Parse AI analysis into sections
   const parseAnalysis = (text: string) => {
-    const sections = {
+    const sections: any = {
       proposedResearch: '',
       existingResearch: '',
       problemComparison: '',
@@ -109,6 +109,8 @@ function AnalysisReportsContent() {
       justification: '',
       finalVerdict: '',
       breakdown: '',
+      breakdownTotal: '',
+      breakdownInferredTotal: '',
       problemIdentityCheck: '',
       detailedComparison: '',
       similarityAnalysis: '',
@@ -156,7 +158,29 @@ function AnalysisReportsContent() {
 
     // Extract Breakdown
     const breakdownMatch = text.match(/BREAKDOWN[\s\S]+?(?=\n\nADDITIONAL ANALYSIS:|\nADDITIONAL ANALYSIS:|$)/i)
-    if (breakdownMatch) sections.breakdown = breakdownMatch[0].trim()
+    if (breakdownMatch) {
+      const breakdownText = breakdownMatch[0].trim()
+      sections.breakdown = breakdownText
+
+      // Try to extract an explicit total or overall percentage from the breakdown (e.g., "Total: 12%" or "Overall: 12%")
+      const breakdownTotalMatch = breakdownText.match(/(?:total|overall)(?:\s*[:\-\s]+)?(\d+(?:\.\d+)?)\s*%/i)
+      if (breakdownTotalMatch) {
+        sections.breakdownTotal = breakdownTotalMatch[1] + '%'
+      }
+
+      // If the breakdown contains line items with percentages, attempt a simple sum fallback
+      // (Use caution: this is a naive approach and only used if no explicit total is present)
+      if (!sections.breakdownTotal) {
+        const itemPercents = [...breakdownText.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map(m => parseFloat(m[1]))
+        if (itemPercents.length > 0) {
+          const sum = itemPercents.reduce((a, b) => a + b, 0)
+          // If sum looks reasonable (<= 100), expose it as an inferred total
+          if (sum > 0 && sum <= 100) {
+            sections.breakdownInferredTotal = sum + '%'
+          }
+        }
+      }
+    }
 
     // Extract Problem Identity Check
     const identityMatch = text.match(/Problem Identity Check:[\s\S]+?Core Problem Overlap:\s*\d+\s*%/i)
@@ -255,6 +279,25 @@ function AnalysisReportsContent() {
   }
 
   const sections = analysis ? parseAnalysis(analysis) : null
+
+  // If the breakdown contains an explicit total, prefer it for the displayed overall similarity
+  useEffect(() => {
+    if (!sections) return
+
+    // If the breakdown has an explicit total, use it to set the AI overall similarity
+    const breakdownTotalStr = (sections.breakdownTotal || sections.breakdownInferredTotal || '').toString()
+    if (breakdownTotalStr) {
+      const parsed = parseFloat(breakdownTotalStr.replace('%', ''))
+      if (!isNaN(parsed)) {
+        const parsedNormalized = Math.max(0, Math.min(1, parsed / 100))
+        if (aiOverallSimilarity === null || Math.abs((aiOverallSimilarity || 0) - parsedNormalized) > 0.01) {
+          console.log('Using breakdown total for overall similarity:', parsed + '%')
+          setAiOverallSimilarity(parsedNormalized)
+        }
+      }
+    }
+  }, [sections])
+
   const extractedTitle = userConcept ? extractProposedTitle(userConcept) : null
   const displayTitle = extractedTitle || userTitle || 'Research Document'
 
@@ -958,7 +1001,7 @@ function AnalysisReportsContent() {
                           </div>
                         </div>
                         <div className="p-8 text-slate-700 leading-8 text-base">
-                          {sections.justification.split('\n').map((paragraph, idx) => (
+                          {(sections.justification || '').split('\n').map((paragraph: string, idx: number) => (
                             paragraph.trim() && (
                               <p key={idx} className="mb-4 last:mb-0">
                                 {paragraph}
@@ -1038,7 +1081,7 @@ function AnalysisReportsContent() {
                         </div>
                         <div className="p-8">
                           <div className="space-y-3 font-mono text-sm">
-                            {sections.problemIdentityCheck.split('\n').map((line, idx) => (
+                            {(sections.problemIdentityCheck || '').split('\n').map((line: string, idx: number) => (
                               line.trim() && (
                                 <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
                                   <div className="flex-1 text-slate-700">{line}</div>
@@ -1068,7 +1111,7 @@ function AnalysisReportsContent() {
                       </div>
                       <div className="p-8">
                         <div className="space-y-6">
-                          {sections.similarityAnalysis.split('\n').filter(line => line.trim()).map((line, idx) => {
+                          {(sections.similarityAnalysis || '').split('\n').filter((line: string) => line.trim()).map((line: string, idx: number) => {
                             const isHeading = line.startsWith('-') && line.includes(':')
                             if (isHeading) {
                               const [heading, ...content] = line.substring(1).split(':')
@@ -1107,7 +1150,7 @@ function AnalysisReportsContent() {
                         </div>
                         <div className="p-8">
                           <div className="space-y-6">
-                            {sections.detailedComparison.split('\n').filter(line => line.trim()).map((line, idx) => {
+                            {(sections.detailedComparison || '').split('\n').filter((line: string) => line.trim()).map((line: string, idx: number) => {
                               const isMainHeading = line.includes('Research Focus:')
                               const isSubHeading = line.startsWith('-')
                               
@@ -1144,7 +1187,7 @@ function AnalysisReportsContent() {
                         </div>
                         <div className="p-8">
                           <div className="space-y-3 font-mono text-sm">
-                            {sections.breakdown.split('\n').map((line, idx) => (
+                            {(sections.breakdown || '').split('\n').map((line: string, idx: number) => (
                               line.trim() && (
                                 <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
                                   <div className="flex-1 text-slate-700">{line}</div>
@@ -1173,7 +1216,7 @@ function AnalysisReportsContent() {
                         </div>
                       </div>
                       <div className="p-8 text-slate-700 leading-8 text-base">
-                        {sections.recommendations.split('\n').map((paragraph, idx) => (
+                        {(sections.recommendations || '').split('\n').map((paragraph: string, idx: number) => (
                           paragraph.trim() && (
                             <p key={idx} className="mb-4 last:mb-0">
                               {paragraph}

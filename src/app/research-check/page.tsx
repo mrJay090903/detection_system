@@ -1059,14 +1059,7 @@ export default function ResearchCheckPage() {
               {/* Header */}
               <div className="relative bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-8 py-6 border-b border-white/20">
                 <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent"></div>
-                <button
-                  onClick={() => setShowDetailsDialog(false)}
-                  className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm flex items-center justify-center text-white transition-all hover:scale-110"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+
                 <div className="relative flex flex-col items-center justify-center gap-2 py-2">
                   <div className="flex items-center justify-center gap-3">
                     <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg">
@@ -1075,23 +1068,37 @@ export default function ResearchCheckPage() {
                     <h2 className="text-3xl font-black text-white">Research Details</h2>
                   </div>
                   <p className="text-indigo-100 mt-1 text-center">Comprehensive information about the similar research found</p>
+                  <button
+                    id="researchDetailsClose"
+                    aria-label="close-research-details"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDetailsDialog(false);
+                    }}
+                    className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm flex items-center justify-center text-white transition-all hover:scale-110"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    <span className="sr-only">Close</span>
+                  </button>
+                  
                 </div>
               </div>
-              
-              {/* Scrollable Content */}
-              {selectedResearch && (
-                <div className="overflow-y-auto max-h-[calc(90vh-140px)] px-8 py-6">
-                  <div className="space-y-6">
-                {/* Similarity Score - Enhanced */}
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="relative overflow-hidden p-6 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-2xl shadow-xl"
-                >
-                  <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-                  <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/5 rounded-full blur-2xl"></div>
-                  
-                  <div className="relative flex items-center justify-between">
+                {/* Scrollable Content */}
+                {selectedResearch && (
+                  <div className="overflow-y-auto max-h-[calc(90vh-140px)] px-8 py-6">
+                    <div className="space-y-6">
+                      {/* Similarity Score - Enhanced */}
+                      <motion.div 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="relative overflow-hidden p-6 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 rounded-2xl shadow-xl"
+                      >
+                        <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+                        <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/5 rounded-full blur-2xl"></div>
+                        
+                        <div className="relative flex items-center justify-between">
                     <div className="flex-1">
                       <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                         <BarChart3 className="w-6 h-6" />
