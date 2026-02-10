@@ -712,6 +712,7 @@ function AnalysisReportsContent() {
                           <h2 className="text-xl font-bold text-white">Your Research Document</h2>
                           <span className="px-2 py-0.5 bg-green-500 text-white text-xs font-semibold rounded">ANALYZED</span>
                         </div>
+                        
                         <div className="flex items-center gap-3 mt-1 text-sm text-slate-300">
                           <span className="flex items-center gap-1">
                             <FileText className="w-3.5 h-3.5" />
