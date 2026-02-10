@@ -334,7 +334,7 @@ export async function POST(request: Request) {
     // -------------------------
 const modelPriority = [
   // 1️⃣ Primary (Gemini – fast & lowest cost)
-    { provider: "openai", model: "gpt-5-mini" },
+    { provider: "openai", model: "gpt-5.1" },
   { provider: "openai", model: "gemini-2.5-flash" },
 
   // 2️⃣ Free / low-cost fallback

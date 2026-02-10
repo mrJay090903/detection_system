@@ -145,7 +145,7 @@ const LandingPage = () => {
           <motion.button 
             whileHover={{ scale: 1.05, boxShadow: "0 25px 50px -12px rgba(252, 163, 17, 0.5)" }}
             whileTap={{ scale: 0.95 }}
-            className="bg-[#fca311] hover:bg-[#e59200] text-white px-10 py-4 rounded-lg font-bold shadow-xl transition-all duration-300 inline-flex items-center gap-2 group"
+            className="bg-[#fca311] hover:bg-[#e59200] text-white px-10 py-4 rounded-lg font-bold shadow-xl transition-all duration-300 inline-flex items-center gap-2 group cursor-pointer"
           >
             Try Now 
             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -161,7 +161,7 @@ const LandingPage = () => {
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
             else window.location.hash = '#how-it-works'
           }}
-          className="bg-white/10 hover:bg-white/20 text-white px-10 py-4 rounded-lg font-semibold border-2 border-white/30 hover:border-white transition-all duration-300 backdrop-blur-md"
+          className="bg-white/10 hover:bg-white/20 text-white px-10 py-4 rounded-lg font-semibold border-2 border-white/30 hover:border-white transition-all duration-300 backdrop-blur-md cursor-pointer"
         >
           Learn More
         </motion.button>
@@ -213,7 +213,7 @@ const LandingPage = () => {
             <motion.div 
               variants={scaleIn}
               whileHover={{ y: -10, transition: { duration: 0.2 } }}
-              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group cursor-pointer"
+              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group "
             >
               <motion.div 
                 whileHover={{ rotate: 360, scale: 1.1 }}
@@ -232,7 +232,7 @@ const LandingPage = () => {
             <motion.div 
               variants={scaleIn}
               whileHover={{ y: -10, transition: { duration: 0.2 } }}
-              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group cursor-pointer"
+              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group "
             >
               <motion.div 
                 whileHover={{ rotate: 360, scale: 1.1 }}
@@ -251,7 +251,7 @@ const LandingPage = () => {
             <motion.div 
               variants={scaleIn}
               whileHover={{ y: -10, transition: { duration: 0.2 } }}
-              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group cursor-pointer"
+              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group "
             >
               <motion.div 
                 whileHover={{ rotate: 360, scale: 1.1 }}
@@ -270,7 +270,7 @@ const LandingPage = () => {
             <motion.div 
               variants={scaleIn}
               whileHover={{ y: -10, transition: { duration: 0.2 } }}
-              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group cursor-pointer"
+              className="bg-white p-8 rounded-2xl shadow-lg flex flex-col items-center text-center border border-gray-100 group "
             >
               <motion.div 
                 whileHover={{ rotate: 360, scale: 1.1 }}
@@ -312,7 +312,7 @@ const LandingPage = () => {
               <motion.div 
                 variants={fadeInUp}
                 whileHover={{ scale: 1.05 }}
-                className="flex flex-col items-center text-center group cursor-pointer"
+                className="flex flex-col items-center text-center group  "
               >
                 <motion.div 
                   whileHover={{ rotate: 360 }}
@@ -332,7 +332,7 @@ const LandingPage = () => {
               <motion.div 
                 variants={fadeInUp}
                 whileHover={{ scale: 1.05 }}
-                className="flex flex-col items-center text-center group cursor-pointer"
+                className="flex flex-col items-center text-center group  "
               >
                 <motion.div 
                   whileHover={{ rotate: 360 }}
@@ -352,7 +352,7 @@ const LandingPage = () => {
               <motion.div 
                 variants={fadeInUp}
                 whileHover={{ scale: 1.05 }}
-                className="flex flex-col items-center text-center group cursor-pointer"
+                className="flex flex-col items-center text-center group  "
               >
                 <motion.div 
                   whileHover={{ rotate: 360 }}
@@ -372,7 +372,7 @@ const LandingPage = () => {
               <motion.div 
                 variants={fadeInUp}
                 whileHover={{ scale: 1.05 }}
-                className="flex flex-col items-center text-center group cursor-pointer"
+                className="flex flex-col items-center text-center group  "
               >
                 <motion.div 
                   whileHover={{ rotate: 360 }}
@@ -435,7 +435,7 @@ const LandingPage = () => {
              <motion.div 
                whileHover={{ scale: 1.1, rotate: 5 }}
                transition={{ type: "spring", stiffness: 300 }}
-               className="w-36 h-36 md:w-44 md:h-44 bg-white rounded-full border-4 border-blue-200 flex items-center justify-center overflow-hidden shadow-xl cursor-pointer"
+               className="w-36 h-36 md:w-44 md:h-44 bg-white rounded-full border-4 border-blue-200 flex items-center justify-center overflow-hidden shadow-xl  "
              >
                 <Image src="/assets/bu-logo.png" width={176} height={176} alt="BU Logo" className="object-cover" />
              </motion.div>
