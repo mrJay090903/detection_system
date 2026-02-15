@@ -60,7 +60,7 @@ function removeBoilerplate(text: string): string {
 /**
  * Detect and penalize identical phrases (> N tokens)
  */
-function detectIdenticalPhrases(text1: string, text2: string, minTokens: number = 5): number {
+function detectIdenticalPhrases(text1: string, text2: string, minTokens: number = 3): number {
   const tokens1 = text1.toLowerCase().split(/\s+/);
   const tokens2 = text2.toLowerCase().split(/\s+/);
 
@@ -79,7 +79,7 @@ function detectIdenticalPhrases(text1: string, text2: string, minTokens: number 
   // Calculate penalty factor (0.0 to 0.2)
   // More identical phrases = higher penalty
   const totalPhrases = Math.max(tokens1.length - minTokens + 1, 1);
-  const penaltyFactor = Math.min((identicalPhraseCount / totalPhrases) * 0.2, 0.2);
+  const penaltyFactor = Math.min((identicalPhraseCount / totalPhrases) * 0.1, 0.1);
 
   return penaltyFactor;
 }
@@ -118,7 +118,7 @@ interface TextChunk {
  * @param chunkSize - Tokens per chunk (500-800 recommended)
  * @param overlap - Token overlap between chunks (100 recommended)
  */
-function chunkText(text: string, chunkSize: number = 600, overlap: number = 100): TextChunk[] {
+function chunkText(text: string, chunkSize: number = 400, overlap: number = 150): TextChunk[] {
   const tokens = text.split(/\s+/);
   const chunks: TextChunk[] = [];
 
@@ -286,8 +286,8 @@ function computeDocumentSimilarity(
   const avgSimilarity = chunkSimilarities.reduce((sum, s) => sum + s, 0) / chunkSimilarities.length;
   const maxSimilarity = Math.max(...chunkSimilarities);
 
-  // Final similarity: 60% avg + 40% max
-  const finalSimilarity = 0.6 * avgSimilarity + 0.4 * maxSimilarity;
+  // Final similarity: 40% avg + 60% max (strict: emphasize highest overlap)
+  const finalSimilarity = 0.4 * avgSimilarity + 0.6 * maxSimilarity;
 
   return {
     avgSimilarity,
@@ -321,10 +321,10 @@ function toPercentage(cosine: number, identicalPhrasePenalty: number = 0): numbe
  * Get academic interpretation of cosine similarity
  */
 function interpretSimilarity(cosine: number): string {
-  if (cosine < 0.2) return 'Unrelated';
-  if (cosine < 0.4) return 'Slight similarity';
-  if (cosine < 0.6) return 'Moderate similarity';
-  if (cosine < 0.8) return 'High similarity';
+  if (cosine < 0.15) return 'Unrelated';
+  if (cosine < 0.30) return 'Slight similarity';
+  if (cosine < 0.50) return 'Moderate similarity';
+  if (cosine < 0.70) return 'High similarity';
   return 'Very high similarity';
 }
 
@@ -351,8 +351,8 @@ export interface AccurateCosineResult {
 export async function calculateAccurateCosine(
   text1: string,
   text2: string,
-  chunkSize: number = 600,
-  overlap: number = 100
+  chunkSize: number = 400,
+  overlap: number = 150
 ): Promise<AccurateCosineResult> {
   const startTime = Date.now();
 
@@ -365,7 +365,7 @@ export async function calculateAccurateCosine(
 
   // Step 2: Detect identical phrases for penalty
   console.log('[Accurate Cosine] Detecting identical phrases...');
-  const identicalPhrasePenalty = detectIdenticalPhrases(clean1, clean2, 5);
+  const identicalPhrasePenalty = detectIdenticalPhrases(clean1, clean2, 3);
   console.log(`[Accurate Cosine] Identical phrase penalty: ${(identicalPhrasePenalty * 100).toFixed(2)}%`);
 
   // Step 3: Chunk texts

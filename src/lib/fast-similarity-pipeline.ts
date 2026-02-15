@@ -9,11 +9,11 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // Configuration
 const CONFIG = {
-  CHUNK_SIZE: 600,
-  CHUNK_OVERLAP: 100,
-  EARLY_THRESHOLD: 0.30,        // Skip if cosine < 30%
-  TOP_K_CANDIDATES: 15,         // Only analyze top 15 matches
-  TOP_K_FOR_GEMINI: 5,          // Only use Gemini on top 5
+  CHUNK_SIZE: 400,
+  CHUNK_OVERLAP: 150,
+  EARLY_THRESHOLD: 0.10,        // Skip if cosine < 10% (strict: catch more)
+  TOP_K_CANDIDATES: 20,         // Analyze top 20 matches
+  TOP_K_FOR_GEMINI: 8,          // Use Gemini on top 8
   MAX_PARALLEL: 5,              // Parallel operations limit
 };
 
@@ -327,18 +327,18 @@ async function analyzeCandidate(
     }
   }
   
-  // Aggregate: 60% avg + 40% max
+  // Aggregate: 40% avg + 60% max (strict: emphasize highest overlap)
   const avgSimilarity = similarities.reduce((sum, s) => sum + s, 0) / similarities.length;
   const maxSimilarity = Math.max(...similarities);
-  const finalSimilarity = 0.6 * avgSimilarity + 0.4 * maxSimilarity;
+  const finalSimilarity = 0.4 * avgSimilarity + 0.6 * maxSimilarity;
   
   const percentage = Math.round(finalSimilarity * 100);
   
   let interpretation = 'Unrelated';
-  if (finalSimilarity >= 0.8) interpretation = 'Very high similarity';
-  else if (finalSimilarity >= 0.6) interpretation = 'High similarity';
-  else if (finalSimilarity >= 0.4) interpretation = 'Moderate similarity';
-  else if (finalSimilarity >= 0.2) interpretation = 'Slight similarity';
+  if (finalSimilarity >= 0.70) interpretation = 'Very high similarity';
+  else if (finalSimilarity >= 0.50) interpretation = 'High similarity';
+  else if (finalSimilarity >= 0.30) interpretation = 'Moderate similarity';
+  else if (finalSimilarity >= 0.15) interpretation = 'Slight similarity';
   
   return {
     id: candidate.id,

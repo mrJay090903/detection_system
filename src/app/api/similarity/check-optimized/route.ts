@@ -104,11 +104,11 @@ export async function POST(req: NextRequest) {
     
     // Build TF-IDF index once for all vectorization
     const tfidfIndex = buildTfIdfIndex(corpus, {
-      minTokenLen: 4,
+      minTokenLen: 3,
       useBigrams: true,
-      minDf: 2,
-      maxDfRatio: 0.8,
-      topK: 400
+      minDf: 1,
+      maxDfRatio: 0.85,
+      topK: 600
     })
     
     // Generate TF-IDF vector for proposed research
@@ -211,9 +211,9 @@ function generateReport(
   }>,
   executionTime: number
 ): string {
-  const highSimilarities = similarities.filter(s => s.overallSimilarity >= 0.7)
-  const mediumSimilarities = similarities.filter(s => s.overallSimilarity >= 0.4 && s.overallSimilarity < 0.7)
-  const lowSimilarities = similarities.filter(s => s.overallSimilarity < 0.4)
+  const highSimilarities = similarities.filter(s => s.overallSimilarity >= 0.5)
+  const mediumSimilarities = similarities.filter(s => s.overallSimilarity >= 0.25 && s.overallSimilarity < 0.5)
+  const lowSimilarities = similarities.filter(s => s.overallSimilarity < 0.25)
 
   let report = `RESEARCH SIMILARITY ANALYSIS REPORT\n`
   report += `${'='.repeat(80)}\n\n`
@@ -224,13 +224,13 @@ function generateReport(
   
   report += `ANALYSIS SUMMARY:\n`
   report += `- Total comparisons: ${similarities.length}\n`
-  report += `- High similarity (≥70%): ${highSimilarities.length} ${highSimilarities.length > 0 ? '⚠️' : '✓'}\n`
-  report += `- Medium similarity (40-69%): ${mediumSimilarities.length}\n`
-  report += `- Low similarity (<40%): ${lowSimilarities.length}\n`
+  report += `- High similarity (≥50%): ${highSimilarities.length} ${highSimilarities.length > 0 ? '⚠️' : '✓'}\n`
+  report += `- Medium similarity (25-49%): ${mediumSimilarities.length}\n`
+  report += `- Low similarity (<25%): ${lowSimilarities.length}\n`
   report += `- Execution time: ${executionTime}ms\n\n`
 
   if (highSimilarities.length > 0) {
-    report += `⚠️ HIGH SIMILARITY MATCHES (≥70%):\n`
+    report += `⚠️ HIGH SIMILARITY MATCHES (≥50%):\n`
     report += `${'─'.repeat(80)}\n\n`
     
     highSimilarities.forEach((match, index) => {
@@ -245,7 +245,7 @@ function generateReport(
   }
 
   if (mediumSimilarities.length > 0 && similarities.length <= 5) {
-    report += `MEDIUM SIMILARITY MATCHES (40-69%):\n`
+    report += `MEDIUM SIMILARITY MATCHES (25-49%):\n`
     report += `${'─'.repeat(80)}\n\n`
     
     mediumSimilarities.slice(0, 3).forEach((match, index) => {

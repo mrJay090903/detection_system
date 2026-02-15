@@ -135,11 +135,11 @@ export async function POST(req: NextRequest) {
     
     // Build TF-IDF index once for all vectorization
     const tfidfIndex = buildTfIdfIndex(corpus, {
-      minTokenLen: 4,
+      minTokenLen: 3,
       useBigrams: true,
-      minDf: 2,
-      maxDfRatio: 0.8,
-      topK: 400
+      minDf: 1,
+      maxDfRatio: 0.85,
+      topK: 600
     })
     
     // Generate TF-IDF vector for proposed research
@@ -192,15 +192,15 @@ export async function POST(req: NextRequest) {
 
     // STEP 3: Sort by similarity and get top 3 matches with minimum threshold
     const topMatches = similarities
-      .filter(s => s.overallSimilarity >= 0.1) // Minimum 10% similarity
+      .filter(s => s.overallSimilarity >= 0.05) // Minimum 5% similarity (strict: catch more)
       .sort((a, b) => b.overallSimilarity - a.overallSimilarity)
-      .slice(0, 3) // Get top 3 matches only
+      .slice(0, 5) // Get top 5 matches
     
     const totalTime = Date.now() - startTime
     
     console.log('📊 Results:')
     console.log(`   Total researches compared: ${researches.length}`)
-    console.log(`   Above 10% threshold: ${similarities.filter(s => s.overallSimilarity >= 0.1).length}`)
+    console.log(`   Above 5% threshold: ${similarities.filter(s => s.overallSimilarity >= 0.05).length}`)
     console.log(`   Returning top: ${topMatches.length}`)
     if (topMatches.length > 0) {
       console.log(`   #1 match: ${topMatches[0]?.similarityPercentage}% - ${topMatches[0]?.title.substring(0, 40)}...`)
@@ -258,9 +258,9 @@ function generateReport(
   }>,
   executionTime: number
 ): string {
-  const highSimilarities = similarities.filter(s => s.overallSimilarity >= 0.7)
-  const mediumSimilarities = similarities.filter(s => s.overallSimilarity >= 0.4 && s.overallSimilarity < 0.7)
-  const lowSimilarities = similarities.filter(s => s.overallSimilarity < 0.4)
+  const highSimilarities = similarities.filter(s => s.overallSimilarity >= 0.5)
+  const mediumSimilarities = similarities.filter(s => s.overallSimilarity >= 0.25 && s.overallSimilarity < 0.5)
+  const lowSimilarities = similarities.filter(s => s.overallSimilarity < 0.25)
 
   let report = `RESEARCH SIMILARITY ANALYSIS REPORT\n`
   report += `${'='.repeat(80)}\n\n`
@@ -271,15 +271,15 @@ function generateReport(
   
   report += `ANALYSIS SUMMARY:\n`
   report += `- Total comparisons: ${similarities.length} researches analyzed\n`
-  report += `- Showing: Top 3 matches only\n`
-  report += `- High similarity (≥70%): ${highSimilarities.length} ${highSimilarities.length > 0 ? '⚠️' : '✓'}\n`
-  report += `- Medium similarity (40-69%): ${mediumSimilarities.length}\n`
-  report += `- Low similarity (<40%): ${lowSimilarities.length}\n`
+  report += `- Showing: Top 5 matches only\n`
+  report += `- High similarity (≥50%): ${highSimilarities.length} ${highSimilarities.length > 0 ? '⚠️' : '✓'}\n`
+  report += `- Medium similarity (25-49%): ${mediumSimilarities.length}\n`
+  report += `- Low similarity (<25%): ${lowSimilarities.length}\n`
   report += `- Execution time: ${executionTime}ms\n`
   report += `- Algorithm: TF-IDF Cosine Similarity (focuses on key terms)\n\n`
 
   if (highSimilarities.length > 0) {
-    report += `⚠️ HIGH SIMILARITY MATCHES (≥70%):\n`
+    report += `⚠️ HIGH SIMILARITY MATCHES (≥50%):\n`
     report += `${'─'.repeat(80)}\n\n`
     
     highSimilarities.forEach((match, index) => {
@@ -294,7 +294,7 @@ function generateReport(
   }
 
   if (mediumSimilarities.length > 0 && similarities.length <= 5) {
-    report += `MEDIUM SIMILARITY MATCHES (40-69%):\n`
+    report += `MEDIUM SIMILARITY MATCHES (25-49%):\n`
     report += `${'─'.repeat(80)}\n\n`
     
     mediumSimilarities.slice(0, 3).forEach((match, index) => {

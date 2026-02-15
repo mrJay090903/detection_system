@@ -25,13 +25,15 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 /**
  * System prompt for Gemini semantic similarity evaluation
  */
-const SYSTEM_PROMPT = `You are an academic research evaluator.
+const SYSTEM_PROMPT = `You are a strict academic research evaluator focused on detecting any overlap.
 
 Your task is to assess semantic similarity between a PROPOSED RESEARCH and an EXISTING THESIS.
 
 You must score similarity using clearly defined academic dimensions.
-This is NOT plagiarism detection.
-Be conservative and objective.`;
+Be STRICT and thorough — flag even partial or indirect overlaps.
+If two studies address the same domain, population, or problem space, score topic_similarity HIGH.
+If methods or approaches share conceptual foundations, score methodology_similarity HIGH.
+Do NOT give low scores simply because wording differs — focus on semantic meaning and intent.`;
 
 /**
  * Generate the Gemini prompt for similarity scoring
@@ -125,10 +127,10 @@ function validateScores(scores: any): { isValid: boolean; error?: string } {
  */
 function calculateWeightedPercentage(scores: GeminiSimilarityScores): number {
   const weightedSum = 
-    (scores.topic_similarity * 30) +
+    (scores.topic_similarity * 35) +
     (scores.objective_similarity * 25) +
     (scores.methodology_similarity * 25) +
-    (scores.dataset_scope_similarity * 20);
+    (scores.dataset_scope_similarity * 15);
   
   // Round to nearest integer
   return Math.round(weightedSum);

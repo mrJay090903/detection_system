@@ -216,117 +216,155 @@ export async function POST(request: Request) {
     // -----------------------------
     const cosineSimilarity = semanticSimilarity * 100; // Use the algorithmic cosine similarity
     
-    const prompt = [
-      "You are an academic research concept evaluator.",
-      "",
-      "CONTEXT:",
-      "Two research studies have already been compared using cosine similarity.",
-      "The cosine similarity score represents TEXTUAL / SEMANTIC similarity only.",
-      "",
-      "IMPORTANT RULES (STRICT):",
-      "1. Cosine similarity DOES NOT determine conceptual similarity.",
-      "2. The PRIMARY criterion is the CORE PROBLEM being solved.",
-      "3. Similarity assessment can range from 0% to 100%.",
-      "4. ACCEPTANCE CRITERIA:",
-      "   - Research is ACCEPTABLE if concept similarity is NOT MORE THAN 15% (≤15%)",
-      "   - Similarity >15% = REJECTED (too similar, potential plagiarism)",
-      "   - Similarity ≤15% = ACCEPTABLE (0-15% range is approved)",
-      "5. If the two studies do NOT solve the same real-world problem,",
-      "   conceptual similarity typically falls in the 0-15% acceptable range.",
-      "6. Ignore similarities in:",
-      "   - Tools and technologies",
-      "   - Methodology (Agile, RAD, ISO 25010)",
-      "   - Writing structure or academic format",
-      "7. High concept similarity (>15%) exists ONLY if BOTH studies:",
-      "   - Solve the same problem",
-      "   - Serve the same primary users",
-      "   - Operate in the same domain",
-      "   - Have the same intent and scope",
-      "",
-      "INPUT:",
-      "",
-      "PROPOSED RESEARCH (Submitted for Review)",
-      `Title: "${safeUserTitle}"`,
-      `Content: "${safeUserConcept}"`,
-      "",
-      "EXISTING RESEARCH (From Database)",
-      `Title: "${safeExistingTitle}"`,
-      `Content: "${safeExistingThesisBrief}"`,
-      "",
-      `Cosine Similarity Score (Pre-calculated): ${cosineSimilarity.toFixed(1)}%`,
-      "",
-      "EVALUATION STEPS:",
-      "A. Identify the core problem of the Proposed Research in ONE sentence.",
-      "B. Identify the core problem of the Existing Research in ONE sentence.",
-      "C. Decide if the problems are the SAME or DIFFERENT.",
-      "D. Assess actual conceptual similarity (0-100%).",
-      "E. Apply ACCEPTANCE CRITERIA:",
-      "   - ≤15% = ACCEPTABLE (not more than 15% is approved)",
-      "   - >15% = REJECTED (too similar, potential plagiarism)",
-      "",
-      "OUTPUT FORMAT (MUST FOLLOW EXACTLY):",
-      "",
-      "Proposed Research:",
-      "[ONE sentence describing the core problem of the proposed research]",
-      "",
-      "Existing Research:",
-      "[ONE sentence describing the core problem of the existing research]",
-      "",
-      "Problem Comparison Result: [SAME or DIFFERENT]",
-      "",
-      "Cosine Similarity (Textual): [the pre-calculated score provided above]%",
-      "",
-      "Final Conceptual Similarity: [X% - rate honestly from 0-100%]",
-      "",
-      "Acceptance Status:",
-      "[ACCEPTABLE (≤15%) / REJECTED (>15%)]",
-      "",
-      "Justification:",
-      "[Provide detailed academic explanation - 2-3 paragraphs explaining your decision, the nature of the problems, and why they are same or different]",
-      "",
-      "Final Verdict:",
-      "[Either 'Not the same research concept' OR 'Same research concept']",
-      "",
-      "BREAKDOWN (for different problems only):",
-      "- Generic system characteristics: [X%]",
-      "- Shared methodology/framework: [X%]",
-      "- Academic structure: [X%]",
-      "- Total: [sum, max 15%]",
-      "",
-      "ADDITIONAL ANALYSIS:",
-      "",
-      "Problem Identity Check:",
-      "Same problem being solved? [YES/NO]",
-      "Same target users? [YES/NO]",
-      "Same domain/area? [YES/NO]",
-      "Same research intent? [YES/NO]",
-      "Core Problem Overlap: [0%, 25%, 50%, 75%, or 100%]",
-      "",
-      "Detailed Comparison:",
-      "",
-      "Proposed Research Focus:",
-      "- Problem: [describe in detail]",
-      "- Users: [who benefits - be specific]",
-      "- Domain: [field/area - be specific]",
-      "- Intent: [purpose - be specific]",
-      "",
-      "Existing Research Focus:",
-      "- Problem: [describe in detail]",
-      "- Users: [who benefits - be specific]",
-      "- Domain: [field/area - be specific]",
-      "- Intent: [purpose - be specific]",
-      "",
-      "Similarity Analysis:",
-      "- Text Similarity Explanation: [explain why cosine is high/low - provide comprehensive analysis]",
-      "- Concept Similarity Explanation: [explain why concept is different/same - provide comprehensive analysis]",
-      "- Key Differences: [list and explain major differences if problems differ]",
-      "- Key Similarities: [list generic overlaps if problems differ, or real overlaps if same]",
-      "",
-      "Recommendations:",
-      "[Provide comprehensive, specific suggestions based on whether problems are same or different. Do not limit your response - provide thorough guidance.]",
-      "",
-      "Write your complete evaluation following the format above. Write in plain text only, no markdown symbols. Provide comprehensive, detailed analysis without restricting response length."
-    ].join('\n');
+const prompt = [
+"You are a STRICT academic research concept evaluator.",
+"You must detect ALL conceptual overlaps and evaluate similarity conservatively.",
+"",
+"CONTEXT:",
+"Two research studies have already been compared using cosine similarity.",
+"The cosine similarity score represents TEXTUAL / SEMANTIC similarity only.",
+"Your job is to evaluate CONCEPTUAL similarity - whether the research IDEAS overlap.",
+"",
+"IMPORTANT PRINCIPLES:",
+"1. Different technologies solving the SAME SPECIFIC problem are still conceptually similar.",
+"2. However, sharing a BROAD CATEGORY (e.g., 'educational technology', 'mobile app', 'web-based system') does NOT mean same problem.",
+"3. You MUST compare the SPECIFIC problem, not the generic domain.",
+"   Example: 'AR for visualizing anatomy' vs 'gamified quiz for SQL' = DIFFERENT problems (both are educational tech, but solve different specific needs)",
+"   Example: 'AR for visualizing anatomy' vs 'VR for visualizing anatomy' = SAME problem (different tech, same specific need)",
+"4. Cosine similarity is only supporting evidence - not the final determinant.",
+"5. Do NOT inflate scores just because both studies involve technology, education, mobile apps, or student engagement.",
+"",
+"=== 4-FIELD EVALUATION CRITERIA ===",
+"",
+"You MUST evaluate these 4 fields and provide ACCURATE integer percentages (0-100%) for each:",
+"",
+"1) PROBLEM/NEED (what issue is being solved)",
+" - What SPECIFIC real-world problem or need does the research address?",
+" - Compare the SPECIFIC underlying issue, not the broad category",
+" - 'Student engagement' alone is too generic - ask: engagement in WHAT? For WHOM? WHY?",
+" - Score HIGH (70-100%) ONLY if both address the EXACT SAME specific problem",
+" - Score MEDIUM (40-69%) if problems share the same specific domain AND similar gap",
+" - Score LOW (0-39%) if problems are in different specific domains or address different gaps",
+" - Score VERY LOW (0-20%) if they only share a broad generic category like 'education' or 'mobile app'",
+"",
+"2) OBJECTIVES (what the study will do/produce)",
+" - What are the SPECIFIC goals, deliverables, or outcomes?",
+" - Compare what each study specifically aims to produce",
+" - Generic goals like 'improve learning' do NOT count as overlap",
+" - Score HIGH (70-100%) ONLY if both produce the SAME type of system/output for the SAME purpose",
+" - Score MEDIUM (40-69%) if objectives share some specific deliverables",
+" - Score LOW (0-39%) if the deliverables and system types are fundamentally different",
+"",
+"3) SCOPE/CONTEXT (where/who it applies to)",
+" - Target institution, environment, users, or domain",
+" - Score HIGH (70-100%) if same institution/environment/users",
+" - Score MEDIUM (40-69%) if related but different departments/communities",
+" - Score LOW (0-39%) if completely different context",
+"",
+"4) INPUTS/OUTPUTS (data in, results out)",
+" - Compare input data types and produced outputs",
+" - Score HIGH (70-100%) if same data model or output pattern",
+" - Score MEDIUM (40-69%) if partially overlapping inputs/outputs",
+" - Score LOW (0-39%) if data types are different",
+"",
+"NOTE: Do NOT evaluate Method/Approach (algorithms, frameworks, methodologies). These are implementation details and should NOT affect the conceptual similarity score.",
+"",
+"=== SCORING RULES ===",
+"- Final Conceptual Similarity = AVERAGE of the 4 field scores",
+"- Round to nearest whole number",
+"- SCORING GUIDELINES:",
+"  * Below 15% = Safe & Acceptable (clearly different research)",
+"  * 15-20% = Borderline (minor overlaps, needs review)",
+"  * Above 20% = Requires Revision (significant overlap detected)",
+"  * Above 30% = Often Rejected (strong conceptual similarity)",
+"- Do NOT inflate: sharing broad categories (education, mobile, web) without specific overlap = LOW scores",
+"- Be HONEST: if the specific problems are different, score LOW even if they sound vaguely related",
+"- If PROBLEM and OBJECTIVES are both >=70%, final similarity MUST NOT be below 60%",
+"- If 3 or more fields are >=70%, final similarity MUST NOT be below 70%",
+"- If PROBLEM is below 20%, final similarity SHOULD NOT exceed 25% regardless of other fields",
+"",
+"INPUT:",
+"",
+"PROPOSED RESEARCH (Submitted for Review)",
+`Title: "${safeUserTitle}"`,
+`Content: "${safeUserConcept}"`,
+"",
+"EXISTING RESEARCH (From Database)",
+`Title: "${safeExistingTitle}"`,
+`Content: "${safeExistingThesisBrief}"`,
+"",
+`Cosine Similarity Score (Pre-calculated): ${cosineSimilarity.toFixed(1)}%`,
+"",
+"OUTPUT FORMAT (PLAIN TEXT ONLY - FOLLOW EXACTLY):",
+"",
+"Proposed Research:",
+"[ONE sentence summarizing core problem]",
+"",
+"Existing Research:",
+"[ONE sentence summarizing core problem]",
+"",
+"Problem Comparison Result: [SAME / SIMILAR / DIFFERENT]",
+"",
+"Cosine Similarity (Textual): [use provided score]%",
+"",
+"=== FIELD SCORES ===",
+"Problem/Need: [X%]",
+"Rationale: [1-2 sentence explanation of why this score was given]",
+"Objectives: [X%]",
+"Rationale: [1-2 sentence explanation of why this score was given]",
+"Scope/Context: [X%]",
+"Rationale: [1-2 sentence explanation of why this score was given]",
+"Inputs/Outputs: [X%]",
+"Rationale: [1-2 sentence explanation of why this score was given]",
+"",
+"Final Conceptual Similarity: [X%]",
+"",
+"Acceptance Status:",
+"[SAFE (<15%) / BORDERLINE (15-20%) / REQUIRES REVISION (>20%) / REJECTED (>30%)]",
+"",
+"Justification:",
+"[2-3 detailed academic paragraphs explaining overlaps and differences across all 4 fields. Explain how cosine similarity aligns or misleads.]",
+"",
+"Final Verdict:",
+"[Either 'Not the same research concept' OR 'Same research concept']",
+"",
+"Detailed Comparison:",
+"",
+"Proposed Research Focus:",
+"- Problem:",
+"- Objectives:",
+"- Scope/Context:",
+"- Inputs/Outputs:",
+"",
+"Existing Research Focus:",
+"- Problem:",
+"- Objectives:",
+"- Scope/Context:",
+"- Inputs/Outputs:",
+"",
+"Similarity Analysis:",
+"- Text Similarity Explanation:",
+"  [Explain what the cosine/textual similarity score means in context. Does high text similarity reflect actual concept overlap or just shared vocabulary?]",
+"- Concept Similarity Explanation:",
+"  [Explain the overall conceptual similarity. Are the research IDEAS fundamentally the same or different? Reference the 4-field scores.]",
+"- Problem Domain Overlap:",
+"  [Specifically compare the problem domains. Are they in the same field? Same sub-field? Same specific niche?]",
+"- Methodology Comparison:",
+"  [Compare the technical approaches, tools, frameworks, and development methodologies used.]",
+"- Target Audience & Scope Overlap:",
+"  [Compare who benefits from each research, where it applies, and the scope boundaries.]",
+"- Key Similarities:",
+"  [List 2-4 specific similarities found between the two researches]",
+"- Key Differences:",
+"  [List 2-4 specific differences that distinguish the two researches]",
+"- Novelty Assessment:",
+"  [What makes the proposed research unique or novel compared to the existing one? What new contribution does it offer?]",
+"",
+"Recommendations:",
+"[Provide specific guidance. If REJECTED, suggest concrete ways to change problem, users, scope, or objectives to reduce overlap. If ACCEPTABLE, suggest how to strengthen novelty.]",
+"",
+"Write your complete evaluation following the format above."
+].join("\n");
 
 
     // -------------------------
@@ -334,11 +372,14 @@ export async function POST(request: Request) {
     // -------------------------
 const modelPriority = [
   // 1️⃣ Primary (Gemini – fast & lowest cost)
-    { provider: "openai", model: "gpt-5.1" },
+    { provider: "openai", model: "gpt-5.2" },
   { provider: "openai", model: "gemini-2.5-flash" },
 
   // 2️⃣ Free / low-cost fallback
+  { provider: "openai", model: "o4-mini-deep-research" },
+  { provider: "openai", model: "o3-deep-research" },
   { provider: "openai", model: "gpt-4.1-mini" },
+    
 
 
   // 3️⃣ Paid / high-capability fallback
@@ -371,6 +412,11 @@ const modelPriority = [
         // Wrap API calls with retry logic
         const apiCall = async () => {
           if (provider === 'openai') {
+            // Determine which token parameter to use based on model
+            const usesMaxCompletionTokens = modelName.startsWith('gpt-5') || 
+                                           modelName.startsWith('o3') || 
+                                           modelName.startsWith('o4');
+            
             // OpenAI API call
             const completion = await openai.chat.completions.create({
               model: modelName,
@@ -385,7 +431,9 @@ const modelPriority = [
                 }
               ],
               temperature: 0.3,
-              max_tokens: 4000
+              ...(usesMaxCompletionTokens 
+                ? { max_completion_tokens: 4000 }
+                : { max_tokens: 4000 })
             });
             
             return completion.choices[0]?.message?.content || null;
@@ -465,6 +513,103 @@ const modelPriority = [
       );
     }
 
+    // ============================================================================
+    // EXTRACT 4-FIELD SCORES from AI response
+    // ============================================================================
+    const fieldScorePatterns = {
+      problemNeed: analysis.match(/Problem\/Need:\s*\[?(\d+(?:\.\d+)?)%?\]?/i),
+      objectives: analysis.match(/Objectives:\s*\[?(\d+(?:\.\d+)?)%?\]?/i),
+      scopeContext: analysis.match(/Scope\/Context:\s*\[?(\d+(?:\.\d+)?)%?\]?/i),
+      inputsOutputs: analysis.match(/Inputs\/Outputs:\s*\[?(\d+(?:\.\d+)?)%?\]?/i),
+    };
+
+    const fieldScores = {
+      problemNeed: fieldScorePatterns.problemNeed ? parseFloat(fieldScorePatterns.problemNeed[1]) : null,
+      objectives: fieldScorePatterns.objectives ? parseFloat(fieldScorePatterns.objectives[1]) : null,
+      scopeContext: fieldScorePatterns.scopeContext ? parseFloat(fieldScorePatterns.scopeContext[1]) : null,
+      inputsOutputs: fieldScorePatterns.inputsOutputs ? parseFloat(fieldScorePatterns.inputsOutputs[1]) : null
+    };
+
+    // Extract score rationales for each field
+    const extractRationale = (fieldPattern: string) => {
+      const regex = new RegExp(fieldPattern + '\\s*\\[?\\d+(?:\\.\\d+)?%?\\]?\\s*\n\\s*Rationale:\\s*(.+)', 'i');
+      const match = analysis.match(regex);
+      return match ? match[1].trim() : null;
+    };
+
+    const fieldRationales = {
+      problemNeed: extractRationale('Problem\\/Need:'),
+      objectives: extractRationale('Objectives:'),
+      scopeContext: extractRationale('Scope\\/Context:'),
+      inputsOutputs: extractRationale('Inputs\\/Outputs:'),
+    };
+
+    // Extract detailed comparison for each field
+    const extractFieldDetail = (fieldName: string, nextFieldName: string) => {
+      const pattern = new RegExp(
+        `${fieldName.replace('/', '\\/')}[:\s]*[\\[\\(]?\\d+(?:\\.\\d+)?%?[\\]\\)]?\\s*([\\s\\S]*?)(?=${nextFieldName.replace('/', '\\/')}|Final Conceptual|Acceptance Status|$)`,
+        'i'
+      );
+      const match = analysis.match(pattern);
+      return match ? match[1].trim().split('\n').filter((l: string) => l.trim()).map((l: string) => l.trim().replace(/^[-•]\s*/, '')) : [];
+    };
+
+    // Extract detailed field comparison sections
+    const proposedFocusMatch = analysis.match(/Proposed Research Focus:\s*([\s\S]*?)(?=Existing Research Focus:|$)/i);
+    const existingFocusMatch = analysis.match(/Existing Research Focus:\s*([\s\S]*?)(?=Similarity Analysis:|$)/i);
+    
+    const proposedFocus = {
+      problem: '', objectives: '', scopeContext: '', inputsOutputs: ''
+    };
+    const existingFocus = {
+      problem: '', objectives: '', scopeContext: '', inputsOutputs: ''
+    };
+
+    if (proposedFocusMatch) {
+      const text = proposedFocusMatch[1];
+      const pMatch = text.match(/Problem:\s*([^\n]+)/i);
+      const oMatch = text.match(/Objectives:\s*([^\n]+)/i);
+      const sMatch = text.match(/Scope\/Context:\s*([^\n]+)/i);
+      const iMatch = text.match(/Inputs\/Outputs:\s*([^\n]+)/i);
+      if (pMatch) proposedFocus.problem = pMatch[1].trim();
+      if (oMatch) proposedFocus.objectives = oMatch[1].trim();
+      if (sMatch) proposedFocus.scopeContext = sMatch[1].trim();
+      if (iMatch) proposedFocus.inputsOutputs = iMatch[1].trim();
+    }
+
+    if (existingFocusMatch) {
+      const text = existingFocusMatch[1];
+      const pMatch = text.match(/Problem:\s*([^\n]+)/i);
+      const oMatch = text.match(/Objectives:\s*([^\n]+)/i);
+      const sMatch = text.match(/Scope\/Context:\s*([^\n]+)/i);
+      const iMatch = text.match(/Inputs\/Outputs:\s*([^\n]+)/i);
+      if (pMatch) existingFocus.problem = pMatch[1].trim();
+      if (oMatch) existingFocus.objectives = oMatch[1].trim();
+      if (sMatch) existingFocus.scopeContext = sMatch[1].trim();
+      if (iMatch) existingFocus.inputsOutputs = iMatch[1].trim();
+    }
+
+    const fieldAssessment = {
+      scores: fieldScores,
+      rationales: fieldRationales,
+      proposed: proposedFocus,
+      existing: existingFocus,
+      average: null as number | null
+    };
+
+    // Calculate average of available field scores
+    const availableScores = Object.values(fieldScores).filter((v): v is number => v !== null);
+    if (availableScores.length > 0) {
+      fieldAssessment.average = Math.round(availableScores.reduce((a, b) => a + b, 0) / availableScores.length);
+    }
+
+    console.log('[4-Field Assessment]');
+    console.log(`  Problem/Need: ${fieldScores.problemNeed ?? 'N/A'}%`);
+    console.log(`  Objectives: ${fieldScores.objectives ?? 'N/A'}%`);
+    console.log(`  Scope/Context: ${fieldScores.scopeContext ?? 'N/A'}%`);
+    console.log(`  Inputs/Outputs: ${fieldScores.inputsOutputs ?? 'N/A'}%`);
+    console.log(`  Average: ${fieldAssessment.average ?? 'N/A'}%`);
+
     // Parse AI-calculated similarity percentages from new structured format
     const proposedResearchMatch = analysis.match(/Proposed Research:\s*([\s\S]+?)(?=\n\nExisting Research:|\nExisting Research:)/);
     const existingResearchMatch = analysis.match(/Existing Research:\s*([\s\S]+?)(?=\n\nProblem Comparison Result:|\nProblem Comparison Result:)/);
@@ -525,59 +670,59 @@ const modelPriority = [
     let acceptanceStatus: string;
     let similarityRationale: string;
     
-    // Use AI's concept similarity (allow full 0-100% range)
+    // Use AI's concept similarity honestly - no artificial capping
     if (completelyDifferent) {
       conceptSimilarity = 0;
       acceptanceStatus = 'ACCEPTABLE';
-      similarityRationale = `Problems are completely different with no overlap. Concept similarity is 0%. Status: ACCEPTABLE (≤15%).`;
+      similarityRationale = `Problems are completely different with no overlap. Concept similarity is 0%. Status: ACCEPTABLE (<40%).`;
     }
-    // Use AI's concept similarity if it provided one (no capping)
+    // Use AI's concept similarity directly if provided (STRICT: no deflation)
     else if (aiConceptSim !== null) {
       conceptSimilarity = aiConceptSim;
       
-      // Determine acceptance status: ACCEPTABLE if ≤15%, REJECTED if >15%
-      if (conceptSimilarity <= 0.15) {
+      // STRICT enforcement: if problems are SAME but AI scored low, override with minimum floor
+      if (problemsAreSame && conceptSimilarity < 0.50) {
+        console.log(`[STRICT] AI scored concept at ${(conceptSimilarity * 100).toFixed(1)}% but problems are SAME. Applying floor of 50%.`);
+        conceptSimilarity = Math.max(conceptSimilarity, 0.50);
+      }
+      
+      // Determine acceptance status: ACCEPTABLE if <40%, REJECTED if ≥40%
+      if (conceptSimilarity < 0.40) {
         acceptanceStatus = 'ACCEPTABLE';
-        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (not more than 15%).`;
+        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (below 40% threshold).`;
       } else {
         acceptanceStatus = 'REJECTED';
-        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (exceeds 15% threshold).`;
+        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40% threshold exceeded).`;
       }
     } else {
       // Calculate using formula if AI didn't provide one
       if (problemsAreDifferent) {
-        conceptSimilarity = Math.min(0.15, 0.2 * textSimilarity);
-        // Determine acceptance status: ≤15% is ACCEPTABLE
-        if (conceptSimilarity <= 0.15) {
+        // Different problems: scale with text similarity but allow up to 35%
+        conceptSimilarity = Math.min(0.35, 0.5 * textSimilarity);
+        if (conceptSimilarity < 0.40) {
           acceptanceStatus = 'ACCEPTABLE';
-          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (≤15%).`;
+          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (<40%).`;
         } else {
           acceptanceStatus = 'REJECTED';
-          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (>15%).`;
+          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
         }
       } else if (problemsAreSame) {
-        conceptSimilarity = Math.min(1.0, Math.max(0, 0.30 + 0.70 * textSimilarity));
-        // Determine acceptance status: ≤15% is ACCEPTABLE
-        if (conceptSimilarity > 0.15) {
-          acceptanceStatus = 'REJECTED';
-          similarityRationale = `Problems are the same (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (>15%).`;
-        } else {
-          acceptanceStatus = 'ACCEPTABLE';
-          similarityRationale = `Problems are the same (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (≤15%).`;
-        }
+        // Same problems: STRICT minimum of 50%, scales up with text similarity
+        conceptSimilarity = Math.min(1.0, Math.max(0.50, 0.40 + 0.60 * textSimilarity));
+        acceptanceStatus = 'REJECTED';
+        similarityRationale = `Problems are the same (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
       } else {
         // Interpolate for partially related
         const overlapRatio = problemIdentity.coreOverlap / 100;
-        const differentFormula = Math.min(0.15, 0.2 * textSimilarity);
-        const sameFormula = Math.min(1.0, 0.30 + 0.70 * textSimilarity);
+        const differentFormula = Math.min(0.35, 0.5 * textSimilarity);
+        const sameFormula = Math.min(1.0, Math.max(0.50, 0.40 + 0.60 * textSimilarity));
         conceptSimilarity = differentFormula * (1 - overlapRatio) + sameFormula * overlapRatio;
-        // Determine acceptance status: ≤15% is ACCEPTABLE
-        if (conceptSimilarity <= 0.15) {
+        if (conceptSimilarity < 0.40) {
           acceptanceStatus = 'ACCEPTABLE';
-          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (≤15%).`;
+          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (<40%).`;
         } else {
           acceptanceStatus = 'REJECTED';
-          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (>15%).`;
+          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
         }
       }
     }
@@ -591,8 +736,8 @@ const modelPriority = [
     
     // Calculate overall similarity: blend text similarity with weighted concept similarity
     // Text similarity shows lexical overlap, concept similarity shows problem-based similarity
-    // Overall = 30% text similarity + 70% concept similarity (concept is more important)
-    const adjustedOverall = Math.min((textSimilarity * 0.3) + (conceptSimilarity * 0.7), 1.0);
+    // Overall = 40% text similarity + 60% concept similarity (strict: both matter significantly)
+    const adjustedOverall = Math.min((textSimilarity * 0.4) + (conceptSimilarity * 0.6), 1.0);
 
     const aiSimilarities = {
       // Stage 1: Text Similarity (cosine/TF-IDF based)
@@ -633,13 +778,16 @@ const modelPriority = [
       acceptanceStatus: aiSimilarities.acceptanceStatus,
       similarityRationale: aiSimilarities.similarityRationale,
       
+      // 5-Field Assessment
+      fieldAssessment,
+      
       // Explanation
       pipelineExplanation: {
         stage1: `Text Similarity / Lexical (${(aiSimilarities.textSimilarity * 100).toFixed(1)}%): Measures word/phrase overlap using cosine similarity and TF-IDF. This includes ALL text: generic terms, academic structure, methodology terms, and technology stack.`,
         stage2: `Concept Similarity / Semantic (${(aiSimilarities.conceptSimilarity * 100).toFixed(1)}%): AI evaluation of whether the CORE RESEARCH PROBLEM is the same. ${aiSimilarities.similarityRationale}`,
         overall: `Overall Assessment (${(aiSimilarities.overall * 100).toFixed(1)}%): Weighted blend of 30% text similarity + 70% concept similarity. Prioritizes concept similarity as it's more important for plagiarism detection.`,
-        acceptance: `Acceptance Status: ${aiSimilarities.acceptanceStatus}. Research is ACCEPTABLE if concept similarity is NOT MORE THAN 15% (≤15%). Similarity above 15% indicates potential plagiarism (REJECTED).`,
-        note: 'IMPORTANT: High text similarity (70%) does NOT mean high concept similarity. Two researches solving DIFFERENT PROBLEMS but using similar technology/methodology will have HIGH text similarity but LOW concept similarity (0-15%). The concept similarity reflects academic plagiarism standards.'
+        acceptance: `Acceptance Status: ${aiSimilarities.acceptanceStatus}. Research is ACCEPTABLE if concept similarity is below 40% (<40%). Similarity ≥40% indicates the research is too similar to existing work (REJECTED).`,
+        note: 'IMPORTANT: Concept similarity reflects whether two researches address the same core problem, users, domain, and intent. Even with different tools/technologies, if the core problem is the same, concept similarity will be HIGH. The system is strict to prevent duplicate research efforts.'
       },
       
       timestamp: new Date().toISOString()

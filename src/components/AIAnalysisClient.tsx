@@ -62,15 +62,15 @@ export default function AIAnalysisClient() {
       score: displayConcept * 100, 
       label: 'Concept Similarity (AI Semantic)', 
       description: 'AI evaluation of core research problem similarity',
-      status: (displayConcept * 100) < 15 ? 'low' : (displayConcept * 100) < 30 ? 'medium' : 'high',
-      color: (displayConcept * 100) < 15 ? 'bg-green-500' : (displayConcept * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      status: (displayConcept * 100) < 40 ? 'low' : (displayConcept * 100) < 60 ? 'medium' : 'high',
+      color: (displayConcept * 100) < 40 ? 'bg-green-500' : (displayConcept * 100) < 60 ? 'bg-amber-500' : 'bg-red-500'
     },
     overall: { 
       score: displayOverall * 100, 
       label: 'Overall Assessment', 
       description: 'Reflects concept similarity per academic standards',
-      status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
-      color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
+      status: (displayOverall * 100) < 40 ? 'low' : (displayOverall * 100) < 60 ? 'medium' : 'high',
+      color: (displayOverall * 100) < 40 ? 'bg-blue-600' : (displayOverall * 100) < 60 ? 'bg-amber-500' : 'bg-red-600'
     }
   }
 

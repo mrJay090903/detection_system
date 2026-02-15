@@ -32,6 +32,7 @@ function AnalysisReportsContent() {
   const [aiLexicalSimilarity, setAiLexicalSimilarity] = useState<number | null>(null)
   const [aiSemanticSimilarity, setAiSemanticSimilarity] = useState<number | null>(null)
   const [aiOverallSimilarity, setAiOverallSimilarity] = useState<number | null>(null)
+  const [fieldAssessment, setFieldAssessment] = useState<any>(null)
   const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
   const [retryCount, setRetryCount] = useState(0)
 
@@ -155,6 +156,21 @@ function AnalysisReportsContent() {
     // Extract Final Verdict
     const verdictMatch = text.match(/Final Verdict:\s*(.+?)(?=\n\n|BREAKDOWN|$)/i)
     if (verdictMatch) sections.finalVerdict = verdictMatch[1].trim()
+
+    // Extract Field Scores from === FIELD SCORES === section
+    const fieldScoresMatch = text.match(/=== FIELD SCORES ===[\s\S]*?Problem\/Need:\s*\[?(\d+(?:\.\d+)?)%/i)
+    if (fieldScoresMatch) {
+      const pn = text.match(/Problem\/Need:\s*\[?(\d+(?:\.\d+)?)%/i)
+      const ob = text.match(/Objectives:\s*\[?(\d+(?:\.\d+)?)%/i)
+      const sc = text.match(/Scope\/Context:\s*\[?(\d+(?:\.\d+)?)%/i)
+      const io = text.match(/Inputs\/Outputs:\s*\[?(\d+(?:\.\d+)?)%/i)
+      sections.fieldScores = {
+        problemNeed: pn ? parseFloat(pn[1]) : null,
+        objectives: ob ? parseFloat(ob[1]) : null,
+        scopeContext: sc ? parseFloat(sc[1]) : null,
+        inputsOutputs: io ? parseFloat(io[1]) : null
+      }
+    }
 
     // Extract Breakdown
     const breakdownMatch = text.match(/BREAKDOWN[\s\S]+?(?=\n\nADDITIONAL ANALYSIS:|\nADDITIONAL ANALYSIS:|$)/i)
@@ -471,6 +487,11 @@ function AnalysisReportsContent() {
           if (data.aiSimilarities.lexical !== null) setAiLexicalSimilarity(data.aiSimilarities.lexical)
           if (data.aiSimilarities.semantic !== null) setAiSemanticSimilarity(data.aiSimilarities.semantic)
           if (data.aiSimilarities.overall !== null) setAiOverallSimilarity(data.aiSimilarities.overall)
+        }
+        
+        // Set 4-field assessment if available
+        if (data.fieldAssessment) {
+          setFieldAssessment(data.fieldAssessment)
         }
         
         // Complete progress
@@ -865,6 +886,16 @@ function AnalysisReportsContent() {
                       <BarChart3 className="w-4 h-4" /> Similarity Analysis
                     </button>
                     <button 
+                      onClick={() => setActiveTab('fields')}
+                      className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
+                        activeTab === 'fields' 
+                          ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg' 
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <BarChart3 className="w-4 h-4" /> 4-Field Assessment
+                    </button>
+                    <button 
                       onClick={() => setActiveTab('detailed')}
                       className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
                         activeTab === 'detailed' 
@@ -1107,26 +1138,273 @@ function AnalysisReportsContent() {
                       <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-5">
                         <div className="flex items-center gap-3 text-white">
                           <BarChart3 className="w-6 h-6" />
-                          <h3 className="text-xl font-bold">Similarity Analysis</h3>
+                          <div>
+                            <h3 className="text-xl font-bold">Similarity Analysis</h3>
+                            <p className="text-purple-200 text-sm mt-1">Detailed breakdown of textual and conceptual similarity</p>
+                          </div>
                         </div>
                       </div>
-                      <div className="p-8">
-                        <div className="space-y-6">
-                          {(sections.similarityAnalysis || '').split('\n').filter((line: string) => line.trim()).map((line: string, idx: number) => {
-                            const isHeading = line.startsWith('-') && line.includes(':')
-                            if (isHeading) {
-                              const [heading, ...content] = line.substring(1).split(':')
-                              return (
-                                <div key={idx} className="space-y-2">
-                                  <h4 className="font-bold text-purple-900 text-lg">{heading.trim()}</h4>
-                                  <p className="text-slate-700 leading-7 pl-4">{content.join(':').trim()}</p>
-                                </div>
-                              )
-                            }
+                      <div className="p-6 space-y-4">
+                        {(() => {
+                          const analysisText = sections.similarityAnalysis || '';
+                          const subSections = [
+                            { key: 'textSim', label: 'Text Similarity Explanation', icon: '📝', color: 'blue', regex: /Text Similarity Explanation:\s*([\s\S]*?)(?=-\s*(?:Concept|Problem|Methodology|Target|Key\s|Novelty)|$)/i },
+                            { key: 'conceptSim', label: 'Concept Similarity Explanation', icon: '🧠', color: 'purple', regex: /Concept Similarity Explanation:\s*([\s\S]*?)(?=-\s*(?:Problem|Methodology|Target|Key\s|Novelty)|$)/i },
+                            { key: 'problemDomain', label: 'Problem Domain Overlap', icon: '🎯', color: 'indigo', regex: /Problem Domain Overlap:\s*([\s\S]*?)(?=-\s*(?:Methodology|Target|Key\s|Novelty)|$)/i },
+                            { key: 'methodology', label: 'Methodology Comparison', icon: '⚙️', color: 'slate', regex: /Methodology Comparison:\s*([\s\S]*?)(?=-\s*(?:Target|Key\s|Novelty)|$)/i },
+                            { key: 'targetAudience', label: 'Target Audience & Scope Overlap', icon: '👥', color: 'teal', regex: /Target Audience.*?Scope Overlap:\s*([\s\S]*?)(?=-\s*(?:Key\s|Novelty)|$)/i },
+                            { key: 'keySimilarities', label: 'Key Similarities', icon: '🔗', color: 'amber', regex: /Key Similarities:\s*([\s\S]*?)(?=-\s*(?:Key Diff|Novelty)|$)/i },
+                            { key: 'keyDifferences', label: 'Key Differences', icon: '🔀', color: 'green', regex: /Key Differences:\s*([\s\S]*?)(?=-\s*Novelty|$)/i },
+                            { key: 'novelty', label: 'Novelty Assessment', icon: '💡', color: 'yellow', regex: /Novelty Assessment:\s*([\s\S]*?)$/i }
+                          ];
+
+                          const colorMap: Record<string, { border: string; bg: string; text: string; iconBg: string }> = {
+                            blue: { border: 'border-blue-200', bg: 'bg-blue-50', text: 'text-blue-700', iconBg: 'bg-blue-100' },
+                            purple: { border: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-700', iconBg: 'bg-purple-100' },
+                            indigo: { border: 'border-indigo-200', bg: 'bg-indigo-50', text: 'text-indigo-700', iconBg: 'bg-indigo-100' },
+                            slate: { border: 'border-slate-200', bg: 'bg-slate-50', text: 'text-slate-700', iconBg: 'bg-slate-100' },
+                            teal: { border: 'border-teal-200', bg: 'bg-teal-50', text: 'text-teal-700', iconBg: 'bg-teal-100' },
+                            amber: { border: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-700', iconBg: 'bg-amber-100' },
+                            green: { border: 'border-green-200', bg: 'bg-green-50', text: 'text-green-700', iconBg: 'bg-green-100' },
+                            yellow: { border: 'border-yellow-200', bg: 'bg-yellow-50', text: 'text-yellow-700', iconBg: 'bg-yellow-100' }
+                          };
+
+                          const parsed = subSections.map(s => {
+                            const match = analysisText.match(s.regex);
+                            return { ...s, content: match ? match[1].trim().replace(/^\s*-\s*/gm, '').split('\n').filter((l: string) => l.trim()).map((l: string) => l.trim()) : [] };
+                          }).filter(s => s.content.length > 0);
+
+                          if (parsed.length === 0) {
+                            // Fallback: render raw lines
+                            return (sections.similarityAnalysis || '').split('\n').filter((line: string) => line.trim()).map((line: string, idx: number) => {
+                              const isHeading = line.startsWith('-') && line.includes(':')
+                              if (isHeading) {
+                                const [heading, ...content] = line.substring(1).split(':')
+                                return (
+                                  <div key={idx} className="space-y-2">
+                                    <h4 className="font-bold text-purple-900 text-lg">{heading.trim()}</h4>
+                                    <p className="text-slate-700 leading-7 pl-4">{content.join(':').trim()}</p>
+                                  </div>
+                                )
+                              }
+                              return <p key={idx} className="text-slate-700 leading-7 pl-4">{line}</p>
+                            });
+                          }
+
+                          return parsed.map((section, idx) => {
+                            const colors = colorMap[section.color] || colorMap.slate;
+                            const isList = section.key === 'keySimilarities' || section.key === 'keyDifferences';
                             return (
-                              <p key={idx} className="text-slate-700 leading-7 pl-4">{line}</p>
-                            )
-                          })}
+                              <div key={section.key} className={`rounded-xl border ${colors.border} ${colors.bg} overflow-hidden`}>
+                                <div className="p-5">
+                                  <div className="flex items-center gap-3 mb-3">
+                                    <span className={`text-xl w-9 h-9 flex items-center justify-center rounded-lg ${colors.iconBg}`}>{section.icon}</span>
+                                    <h4 className={`font-bold text-lg ${colors.text}`}>{section.label}</h4>
+                                  </div>
+                                  {isList ? (
+                                    <ul className="space-y-2 pl-4">
+                                      {section.content.map((line: string, i: number) => (
+                                        <li key={i} className="flex items-start gap-2 text-slate-700 leading-relaxed">
+                                          <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${section.key === 'keySimilarities' ? 'bg-amber-400' : 'bg-green-400'}`}></span>
+                                          {line}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div className="space-y-2 pl-1">
+                                      {section.content.map((line: string, i: number) => (
+                                        <p key={i} className="text-slate-700 leading-relaxed">{line}</p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* TAB: 4-FIELD ASSESSMENT */}
+                {sections && activeTab === 'fields' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                  >
+                    {/* 5-Field Scores Overview */}
+                    <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
+                      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 text-white">
+                            <BarChart3 className="w-6 h-6" />
+                            <div>
+                              <h3 className="text-xl font-bold">4-Field Conceptual Assessment</h3>
+                              <p className="text-indigo-200 text-sm mt-1">Each field scored 0-100% based on conceptual overlap</p>
+                            </div>
+                          </div>
+                          {(fieldAssessment?.average ?? (sections.fieldScores ? Math.round(Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).reduce((a: number, b: number) => a + b, 0) / Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).length) : null)) !== null && (
+                            <div className="text-right">
+                              <div className="text-3xl font-bold text-white">
+                                {fieldAssessment?.average ?? Math.round(Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).reduce((a: number, b: number) => a + b, 0) / Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).length)}%
+                              </div>
+                              <div className="text-indigo-200 text-sm">Average Score</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="p-6 space-y-4">
+                        {(() => {
+                          const scores = fieldAssessment?.scores || sections.fieldScores || {};
+                          const proposed = fieldAssessment?.proposed || {};
+                          const existing = fieldAssessment?.existing || {};
+                          const rationales = fieldAssessment?.rationales || {};
+                          
+                          const fields = [
+                            { 
+                              key: 'problemNeed', 
+                              label: 'Problem/Need', 
+                              icon: '🎯',
+                              description: 'What real-world problem or need does the research address?',
+                              proposedDetail: proposed.problem || '',
+                              existingDetail: existing.problem || '',
+                              rationale: rationales.problemNeed || '',
+                              scoring: { high: '70-100%: Same core problem', medium: '40-69%: Related but different domains', low: '0-39%: Clearly different problems' }
+                            },
+                            { 
+                              key: 'objectives', 
+                              label: 'Objectives', 
+                              icon: '🎯',
+                              description: 'What are the goals, deliverables, or outcomes?',
+                              proposedDetail: proposed.objectives || '',
+                              existingDetail: existing.objectives || '',
+                              rationale: rationales.objectives || '',
+                              scoring: { high: '70-100%: Same system goals', medium: '40-69%: Partially overlapping', low: '0-39%: Completely different' }
+                            },
+                            { 
+                              key: 'scopeContext', 
+                              label: 'Scope/Context', 
+                              icon: '🏛️',
+                              description: 'Target institution, environment, users, or domain',
+                              proposedDetail: proposed.scopeContext || '',
+                              existingDetail: existing.scopeContext || '',
+                              rationale: rationales.scopeContext || '',
+                              scoring: { high: '70-100%: Same institution/users', medium: '40-69%: Related departments', low: '0-39%: Completely different context' }
+                            },
+                            { 
+                              key: 'inputsOutputs', 
+                              label: 'Inputs/Outputs', 
+                              icon: '📊',
+                              description: 'Compare input data types and produced outputs',
+                              proposedDetail: proposed.inputsOutputs || '',
+                              existingDetail: existing.inputsOutputs || '',
+                              rationale: rationales.inputsOutputs || '',
+                              scoring: { high: '70-100%: Same data model', medium: '40-69%: Partially overlapping', low: '0-39%: Different data types' }
+                            },
+                          ];
+                          
+                          return fields.map((field, idx) => {
+                            const score = scores[field.key] as number | null;
+                            const scoreLevel = score === null ? 'unknown' : score > 30 ? 'rejected' : score > 20 ? 'revision' : score >= 15 ? 'borderline' : 'safe';
+                            const barColor = scoreLevel === 'rejected' ? 'bg-red-500' : scoreLevel === 'revision' ? 'bg-orange-500' : scoreLevel === 'borderline' ? 'bg-amber-500' : scoreLevel === 'safe' ? 'bg-green-500' : 'bg-slate-300';
+                            const bgColor = scoreLevel === 'rejected' ? 'bg-red-50 border-red-200' : scoreLevel === 'revision' ? 'bg-orange-50 border-orange-200' : scoreLevel === 'borderline' ? 'bg-amber-50 border-amber-200' : scoreLevel === 'safe' ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200';
+                            const textColor = scoreLevel === 'rejected' ? 'text-red-700' : scoreLevel === 'revision' ? 'text-orange-700' : scoreLevel === 'borderline' ? 'text-amber-700' : scoreLevel === 'safe' ? 'text-green-700' : 'text-slate-500';
+                            const badgeColor = scoreLevel === 'rejected' ? 'bg-red-100 text-red-800' : scoreLevel === 'revision' ? 'bg-orange-100 text-orange-800' : scoreLevel === 'borderline' ? 'bg-amber-100 text-amber-800' : scoreLevel === 'safe' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600';
+                            const badgeText = scoreLevel === 'rejected' ? 'OFTEN REJECTED' : scoreLevel === 'revision' ? 'REQUIRES REVISION' : scoreLevel === 'borderline' ? 'BORDERLINE' : scoreLevel === 'safe' ? 'SAFE & ACCEPTABLE' : 'N/A';
+                            
+                            return (
+                              <div key={field.key} className={`rounded-xl border overflow-hidden ${bgColor}`}>
+                                <div className="p-5">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-2xl">{field.icon}</span>
+                                      <div>
+                                        <h4 className="font-bold text-slate-900 text-lg">{idx + 1}. {field.label}</h4>
+                                        <p className="text-sm text-slate-500">{field.description}</p>
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className={`text-3xl font-bold ${textColor}`}>
+                                        {score !== null ? `${score}%` : 'N/A'}
+                                      </div>
+                                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeColor}`}>
+                                        {badgeText}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Progress Bar */}
+                                  {score !== null && (
+                                    <div className="w-full bg-white/60 rounded-full h-3 overflow-hidden mb-4">
+                                      <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${Math.min(score, 100)}%` }}
+                                        transition={{ duration: 0.8, delay: 0.1 * idx }}
+                                        className={`h-3 rounded-full ${barColor}`}
+                                      />
+                                    </div>
+                                  )}
+
+                                  {/* Score Rationale */}
+                                  {field.rationale && (
+                                    <div className="bg-white/80 rounded-lg p-3 border border-indigo-100 mb-3">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                        <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Score Rationale</span>
+                                      </div>
+                                      <p className="text-sm text-slate-700 leading-relaxed">{field.rationale}</p>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Proposed vs Existing Details */}
+                                  {(field.proposedDetail || field.existingDetail) && (
+                                    <div className="grid md:grid-cols-2 gap-3 mt-3">
+                                      {field.proposedDetail && (
+                                        <div className="bg-white/70 rounded-lg p-3 border border-slate-200">
+                                          <div className="text-xs font-semibold text-blue-600 mb-1 uppercase">Proposed</div>
+                                          <p className="text-sm text-slate-700">{field.proposedDetail}</p>
+                                        </div>
+                                      )}
+                                      {field.existingDetail && (
+                                        <div className="bg-white/70 rounded-lg p-3 border border-slate-200">
+                                          <div className="text-xs font-semibold text-purple-600 mb-1 uppercase">Existing</div>
+                                          <p className="text-sm text-slate-700">{field.existingDetail}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                      
+                      {/* Scoring Legend */}
+                      <div className="px-6 pb-6">
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                          <h4 className="font-semibold text-slate-700 mb-3 text-sm uppercase tracking-wide">Similarity Score Guidelines</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                              <span className="text-slate-600"><strong>Below 15%:</strong> Safe & Acceptable</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                              <span className="text-slate-600"><strong>15-20%:</strong> Borderline</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                              <span className="text-slate-600"><strong>Above 20%:</strong> Requires Revision</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                              <span className="text-slate-600"><strong>Above 30%:</strong> Often Rejected</span>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-3">Final Conceptual Similarity = Average of all 4 fields. Below 15% = Safe, 15-20% = Borderline, Above 20% = Requires Revision, Above 30% = Often Rejected.</p>
                         </div>
                       </div>
                     </div>

@@ -16,12 +16,9 @@ const STOP_WORDS = new Set([
   'about','into','through','during','including','against','among','throughout','despite',
   'towards','upon','concerning',
 
-  // academic boilerplate (remove to reduce false positives)
-  'system','application','app','web','based','using','use','users','user',
-  'development','study','research','analysis','design','implementation',
-  'project','thesis','paper','work','data','information','process',
-  'method','approach','technique','result','results','conclusion',
-  'proposed','provide','provides','help','helps','improve','improves',
+  // academic boilerplate (only remove the most generic ones)
+  'study','research','thesis','paper','work',
+  'proposed','provide','provides','help','helps',
   'develop','developed','create','created','build','built','make','makes'
 ])
 
@@ -75,9 +72,9 @@ export function buildTfIdfIndex(corpus: string[], opts: TfIdfIndexOptions = {}):
   const options: Required<TfIdfIndexOptions> = {
     minTokenLen: opts.minTokenLen ?? 3,
     useBigrams: opts.useBigrams ?? true,
-    minDf: opts.minDf ?? 2,
-    maxDfRatio: opts.maxDfRatio ?? 0.8,
-    topK: opts.topK ?? 400
+    minDf: opts.minDf ?? 1,
+    maxDfRatio: opts.maxDfRatio ?? 0.85,
+    topK: opts.topK ?? 600
   }
 
   const totalDocs = Math.max(corpus.length, 1)

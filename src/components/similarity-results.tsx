@@ -599,12 +599,12 @@ export function SimilarityResults() {
 
                   {/* Risk Distribution */}
                   {result.similarities.length > 0 && (() => {
-                    const highRisk = result.similarities.filter(s => s.overallSimilarity * 100 >= 70).length
+                    const highRisk = result.similarities.filter(s => s.overallSimilarity * 100 >= 50).length
                     const mediumRisk = result.similarities.filter(s => {
                       const pct = s.overallSimilarity * 100
-                      return pct >= 40 && pct < 70
+                      return pct >= 25 && pct < 50
                     }).length
-                    const lowRisk = result.similarities.filter(s => s.overallSimilarity * 100 < 40).length
+                    const lowRisk = result.similarities.filter(s => s.overallSimilarity * 100 < 25).length
 
                     return (
                       <div className="space-y-3">
