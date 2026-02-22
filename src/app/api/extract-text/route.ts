@@ -324,71 +324,103 @@ function parseResearchProposal(text: string): { title: string; concept: string }
   
   let title = ''
   let concept = ''
-  
-  // Split by periods or newlines to get potential title
-  const sentences = normalized.split(/[.\n]+/).map(s => s.trim()).filter(s => s.length > 0)
-  
-  if (sentences.length === 0) {
-    return { title: '', concept: normalized }
-  }
-  
-  // Strategy 1: Look for explicit title markers
-  const titleMatch = normalized.match(/(?:proposed\s+title|research\s+title|title)\s*:\s*([^\n.]+)/i)
-  if (titleMatch && titleMatch[1]) {
-    title = titleMatch[1].trim()
-    // Everything after the title marker is the concept
-    const titleEndIndex = normalized.indexOf(titleMatch[0]) + titleMatch[0].length
-    concept = normalized.substring(titleEndIndex).trim()
+
+  // ── PRIMARY STRATEGY: "BU Thematic Area:" is the boundary marker ──────────
+  // The research title ends immediately BEFORE "BU Thematic Area:", and the
+  // research concept starts FROM "BU Thematic Area:" (inclusive).
+  const buThematicPattern = /bu\s+thematic\s+area\s*:/i
+  const buThematicMatch = normalized.match(buThematicPattern)
+
+  if (buThematicMatch && buThematicMatch.index !== undefined) {
+    const buIndex = buThematicMatch.index
+
+    // Everything from "BU Thematic Area:" onward becomes the concept
+    concept = normalized.substring(buIndex).trim()
+
+    // Extract title from the text that precedes "BU Thematic Area:"
+    const beforeBU = normalized.substring(0, buIndex).trim()
+
+    // Look for an explicit title label first (e.g. "Proposed Title: ...")
+    const labeledTitleMatch = beforeBU.match(
+      /(?:proposed\s+title|research\s+title|title)\s*:\s*(.+)/i
+    )
+    if (labeledTitleMatch && labeledTitleMatch[1]) {
+      title = labeledTitleMatch[1].replace(/\s+/g, ' ').trim()
+    } else if (beforeBU.length > 0) {
+      // Fall back: last non-trivial segment before BU Thematic Area is the title
+      const parts = beforeBU
+        .split(/[\n.]+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 5)
+      title = (parts[parts.length - 1] || beforeBU).replace(/\s+/g, ' ').trim()
+    }
+
+    console.log('[Parse] BU Thematic Area boundary detected:', {
+      title,
+      conceptPreview: concept.substring(0, 200)
+    })
   } else {
-    // Strategy 2: First substantial sentence/line is the title, rest is thesis brief
-    // Skip common boilerplate patterns
-    let titleIndex = -1
-    for (let i = 0; i < sentences.length; i++) {
-      const sentence = sentences[i].trim()
-      
-      // Skip boilerplate
-      if (
-        sentence.length < 10 ||
-        sentence.length > 300 || // Title shouldn't be too long
-        /^(University|College|Department|Bicol|Submitted|Prepared|Research\s+Proposal|Thesis\s+Proposal|Capstone|Concept\s+Paper|\d+)$/i.test(sentence)
-      ) {
-        continue
-      }
-      
-      // Found the title
-      title = sentence
-      titleIndex = i
-      break
+    // ── FALLBACK: no "BU Thematic Area:" found — use original strategies ─────
+    // Split by periods or newlines to get potential title
+    const sentences = normalized.split(/[.\n]+/).map(s => s.trim()).filter(s => s.length > 0)
+
+    if (sentences.length === 0) {
+      return { title: '', concept: normalized }
     }
-    
-    // Everything after the title is the thesis brief/concept
-    if (titleIndex >= 0 && titleIndex < sentences.length - 1) {
-      concept = sentences.slice(titleIndex + 1).join('. ').trim()
-    } else if (titleIndex >= 0) {
-      // If only one sentence, use the full text as concept
-      concept = normalized
+
+    // Strategy 1: Look for explicit title markers
+    const titleMatch = normalized.match(/(?:proposed\s+title|research\s+title|title)\s*:\s*([^\n.]+)/i)
+    if (titleMatch && titleMatch[1]) {
+      title = titleMatch[1].trim()
+      // Everything after the title marker is the concept
+      const titleEndIndex = normalized.indexOf(titleMatch[0]) + titleMatch[0].length
+      concept = normalized.substring(titleEndIndex).trim()
     } else {
-      // If no title found, use first sentence as title and rest as concept
-      title = sentences[0]
-      concept = sentences.slice(1).join('. ').trim()
+      // Strategy 2: First substantial sentence/line is the title, rest is thesis brief
+      let titleIndex = -1
+      for (let i = 0; i < sentences.length; i++) {
+        const sentence = sentences[i].trim()
+
+        // Skip boilerplate
+        if (
+          sentence.length < 10 ||
+          sentence.length > 300 ||
+          /^(University|College|Department|Bicol|Submitted|Prepared|Research\s+Proposal|Thesis\s+Proposal|Capstone|Concept\s+Paper|\d+)$/i.test(sentence)
+        ) {
+          continue
+        }
+
+        title = sentence
+        titleIndex = i
+        break
+      }
+
+      if (titleIndex >= 0 && titleIndex < sentences.length - 1) {
+        concept = sentences.slice(titleIndex + 1).join('. ').trim()
+      } else if (titleIndex >= 0) {
+        concept = normalized
+      } else {
+        title = sentences[0]
+        concept = sentences.slice(1).join('. ').trim()
+      }
     }
   }
-  
-  // If concept is empty, use the full text
+
+  // If concept is still empty, fall back to the full text
   if (!concept || concept.length < 10) {
     concept = normalized
   }
-  
+
   // Clean up title (remove extra whitespace)
   title = title.replace(/\s+/g, ' ').trim()
-  
+
   console.log('[Parse] Final extraction:', {
     title: title,
     titleLength: title.length,
     conceptLength: concept.length,
     conceptPreview: concept.substring(0, 200)
   })
-  
+
   return {
     title: title || 'Untitled Research',
     concept: concept
