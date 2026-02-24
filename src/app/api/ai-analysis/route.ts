@@ -217,8 +217,7 @@ export async function POST(request: Request) {
     const cosineSimilarity = semanticSimilarity * 100; // Use the algorithmic cosine similarity
     
 const prompt = [
-"You are a STRICT academic research concept evaluator.",
-"You must detect ALL conceptual overlaps and evaluate similarity conservatively.",
+"ROLE: You are a web-based research comparison checker.",
 "",
 "CONTEXT:",
 "Two research studies have already been compared using cosine similarity.",
@@ -328,40 +327,94 @@ const prompt = [
 "Final Verdict:",
 "[Either 'Not the same research concept' OR 'Same research concept']",
 "",
-"Detailed Comparison:",
+"=== MATCH BREAKDOWN & SOURCE LIST ===",
 "",
-"Proposed Research Focus:",
-"- Problem:",
-"- Objectives:",
-"- Scope/Context:",
-"- Inputs/Outputs:",
+"You are also a STRICT academic research novelty evaluator.",
+"Using your training knowledge, find existing research papers, theses, journal articles, GitHub projects, and commercial apps that are conceptually similar to the PROPOSED STUDY above.",
+"Compare the proposal with the closest matches and compute a concept-level similarity score for each.",
+"Provide citations/references for every match.",
 "",
-"Existing Research Focus:",
-"- Problem:",
-"- Objectives:",
-"- Scope/Context:",
-"- Inputs/Outputs:",
+"SEARCH RULES:",
+"- Find ALL relevant sources you can identify (academic papers, theses, apps, GitHub projects, articles). Do NOT limit the number.",
+"- Include sources from ANY year — old or new. Do not restrict by publication date.",
+"- Ignore keyword-only matches; prioritize SAME PROBLEM + SAME OUTPUT + SAME WORKFLOW.",
 "",
-"Similarity Analysis:",
-"- Text Similarity Explanation:",
-"  [Explain what the cosine/textual similarity score means in context. Does high text similarity reflect actual concept overlap or just shared vocabulary?]",
-"- Concept Similarity Explanation:",
-"  [Explain the overall conceptual similarity. Are the research IDEAS fundamentally the same or different? Reference the 4-field scores.]",
-"- Problem Domain Overlap:",
-"  [Specifically compare the problem domains. Are they in the same field? Same sub-field? Same specific niche?]",
-"- Methodology Comparison:",
-"  [Compare the technical approaches, tools, frameworks, and development methodologies used.]",
-"- Target Audience & Scope Overlap:",
-"  [Compare who benefits from each research, where it applies, and the scope boundaries.]",
-"- Key Similarities:",
-"  [List 2-4 specific similarities found between the two researches]",
-"- Key Differences:",
-"  [List 2-4 specific differences that distinguish the two researches]",
-"- Novelty Assessment:",
-"  [What makes the proposed research unique or novel compared to the existing one? What new contribution does it offer?]",
+"For each match, output EXACTLY this format:",
+"",
+"MATCH [number]:",
+"Name/Title: [title of the matching source]",
+"Type: [Paper / Thesis / App / GitHub / Article]",
+"Year: [year if available, otherwise N/A]",
+"Link: [URL or citation reference]",
+"Why It Matches:",
+"- [bullet 1]",
+"- [bullet 2]",
+"- [bullet 3]",
+"Similarity Rubric:",
+"  Problem/Need: [X%]",
+"  Objectives/Outputs: [X%]",
+"  Inputs: [X%]",
+"  Method/Tech: [X%]",
+"  Users/Scope: [X%]",
+"  Overall: [X%] (weighted: Problem 25%, Objectives 25%, Inputs 15%, Method 25%, Users 10%)",
+"What Is Different:",
+"- [bullet 1]",
+"- [bullet 2]",
+"",
+"After listing ALL matches, provide:",
+"",
+"=== SIMILARITY CONCLUSION ===",
+"[One paragraph summarizing overall similarity findings across all matches]",
 "",
 "Recommendations:",
-"[Provide specific guidance. If REJECTED, suggest concrete ways to change problem, users, scope, or objectives to reduce overlap. If ACCEPTABLE, suggest how to strengthen novelty.]",
+"Write your recommendations using EXACTLY these four labeled sections. Use bullet points (-) for each item:",
+"",
+"MAIN ISSUES",
+"List the biggest problems found (if any). If none, write: No major issues found.",
+"- ...",
+"- ...",
+"- ...",
+"",
+"REQUIRED CHANGES",
+"List the specific changes the researcher must make. If APPROVED, write: No required changes.",
+"- ...",
+"- ...",
+"- ...",
+"",
+"SUGGESTED IMPROVEMENTS",
+"Optional improvements to make the study stronger.",
+"- ...",
+"- ...",
+"",
+"STRENGTHS",
+"What is already good and should be kept?",
+"- ...",
+"- ...",
+"",
+"=== TEXT MATCH HIGHLIGHTS ===",
+"",
+"IMPORTANT: You MUST use your web search / internet browsing capability to find REAL sources from the internet.",
+"Search the web for phrases and sentences from the PROPOSED STUDY text below.",
+"For each phrase or sentence (minimum 5 words), search the internet to check if similar or identical content exists on any website, published paper, thesis repository, journal, blog, or online resource.",
+"",
+"Rules for searching:",
+"- Copy key phrases from the proposed text and search them on the web.",
+"- Look for matches on Google Scholar, ResearchGate, academia.edu, university repositories, Semantic Scholar, journals, and general web pages.",
+"- You MUST provide the ACTUAL URL of the source where you found the matching content. Do NOT guess or fabricate URLs.",
+"- If you cannot find a real URL for a match, set Source URL to N/A.",
+"- Identify ALL matching passages — do not limit the count.",
+"",
+"For each matching passage found on the internet, output EXACTLY this format:",
+"",
+"HIGHLIGHT [number]:",
+"Matched Text: \"[exact quote from the PROPOSED STUDY text that matches]\"",
+"Source: [name/title of the actual source found on the web]",
+"Source URL: [the REAL, ACTUAL URL where you found this content — must be a valid link]",
+"Match Type: [Exact Copy / Close Paraphrase / Patchwriting / Structural Copy / Common Knowledge]",
+"Similarity: [percentage 0-100%]",
+"",
+"List ALL highlights you find from real internet sources. If no matching passages are found on the web, write:",
+"No highlighted matches found — the text appears to be original.",
 "",
 "Write your complete evaluation following the format above."
 ].join("\n");
@@ -412,35 +465,45 @@ const modelPriority = [
         // Wrap API calls with retry logic
         const apiCall = async () => {
           if (provider === 'openai') {
-            // Determine which token parameter to use based on model
-            const usesMaxCompletionTokens = modelName.startsWith('gpt-5') || 
-                                           modelName.startsWith('o3') || 
-                                           modelName.startsWith('o4');
+            // Use Responses API with web search for real internet source finding
+            console.log(`[OpenAI] Using Responses API with web_search_preview for model: ${modelName}`);
             
-            // OpenAI API call
-            const completion = await openai.chat.completions.create({
+            const response = await openai.responses.create({
               model: modelName,
-              messages: [
-                {
-                  role: 'system',
-                  content: 'You are an expert academic research evaluator specializing in similarity analysis and plagiarism detection.'
-                },
-                {
-                  role: 'user',
-                  content: prompt
-                }
-              ],
-              temperature: 0.3,
-              ...(usesMaxCompletionTokens 
-                ? { max_completion_tokens: 4000 }
-                : { max_tokens: 4000 })
+              tools: [{ type: "web_search_preview" as const }],
+              instructions: 'You are an expert academic research evaluator specializing in similarity analysis and plagiarism detection. You MUST use web search to find real sources from the internet when checking for text matches.',
+              input: prompt,
+              max_output_tokens: 8000,
             });
             
-            return completion.choices[0]?.message?.content || null;
+            // Extract text content from Responses API output
+            const textParts: string[] = [];
+            for (const item of response.output) {
+              if (item.type === 'message' && item.content) {
+                for (const block of item.content) {
+                  if (block.type === 'output_text') {
+                    textParts.push(block.text);
+                  }
+                }
+              }
+            }
+            
+            return textParts.join('') || null;
             
           } else if (provider === 'gemini') {
-            // Gemini API call
-            const model = genAI.getGenerativeModel({ model: modelName });
+            // Gemini API call with Google Search grounding for real web sources
+            console.log(`[Gemini] Using Google Search grounding for model: ${modelName}`);
+            const model = genAI.getGenerativeModel({
+              model: modelName,
+              tools: [{
+                googleSearchRetrieval: {
+                  dynamicRetrievalConfig: {
+                    mode: 'MODE_DYNAMIC' as any,
+                    dynamicThreshold: 0.3,
+                  },
+                },
+              } as any],
+            });
             const result = await model.generateContent(prompt);
             const response = result.response;
             
@@ -554,47 +617,151 @@ const modelPriority = [
       return match ? match[1].trim().split('\n').filter((l: string) => l.trim()).map((l: string) => l.trim().replace(/^[-•]\s*/, '')) : [];
     };
 
-    // Extract detailed field comparison sections
-    const proposedFocusMatch = analysis.match(/Proposed Research Focus:\s*([\s\S]*?)(?=Existing Research Focus:|$)/i);
-    const existingFocusMatch = analysis.match(/Existing Research Focus:\s*([\s\S]*?)(?=Similarity Analysis:|$)/i);
+    // ============================================================================
+    // EXTRACT MATCH BREAKDOWN & SOURCE LIST from AI response
+    // ============================================================================
+    const matchBreakdownFullSection = analysis.match(/=== MATCH BREAKDOWN & SOURCE LIST ===([\s\S]*?)(?==== SIMILARITY CONCLUSION ===|$)/i)
+      || analysis.match(/MATCH BREAKDOWN & SOURCE LIST[:\s]*([\s\S]*?)(?=SIMILARITY CONCLUSION|Recommendations:|$)/i);
     
-    const proposedFocus = {
-      problem: '', objectives: '', scopeContext: '', inputsOutputs: ''
-    };
-    const existingFocus = {
-      problem: '', objectives: '', scopeContext: '', inputsOutputs: ''
-    };
+    // Parse individual match cards
+    const matchEntries: Array<{
+      name: string;
+      type: string;
+      year: string;
+      link: string;
+      whyMatches: string[];
+      rubric: {
+        problem: number | null;
+        objectives: number | null;
+        inputs: number | null;
+        method: number | null;
+        users: number | null;
+        overall: number | null;
+      };
+      whatsDifferent: string[];
+    }> = [];
+    
+    if (matchBreakdownFullSection) {
+      // Split into individual match blocks
+      const matchBlocks = matchBreakdownFullSection[1].split(/MATCH\s*\d+\s*:/i).filter(b => b.trim());
+      
+      for (const block of matchBlocks) {
+        const nameMatch = block.match(/Name\/Title:\s*([^\n]+)/i);
+        const typeMatch = block.match(/Type:\s*([^\n]+)/i);
+        const yearMatch = block.match(/Year:\s*([^\n]+)/i);
+        const linkMatch = block.match(/Link:\s*([^\n]+)/i);
+        
+        // Extract "Why It Matches" bullets
+        const whySection = block.match(/Why It Matches:[\s\S]*?(?=Similarity Rubric:|What Is Different:|MATCH\s*\d+:|$)/i);
+        const whyBullets: string[] = [];
+        if (whySection) {
+          const bullets = whySection[0].match(/[-•]\s*([^\n]+)/g);
+          if (bullets) bullets.forEach(b => whyBullets.push(b.replace(/^[-•]\s*/, '').trim()));
+        }
+        
+        // Extract similarity rubric scores
+        const problemScore = block.match(/Problem\/Need:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        const objectivesScore = block.match(/Objectives\/Outputs:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        const inputsScore = block.match(/Inputs:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        const methodScore = block.match(/Method\/Tech:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        const usersScore = block.match(/Users\/Scope:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        const overallScore = block.match(/Overall:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
+        
+        // Extract "What Is Different" bullets
+        const diffSection = block.match(/What Is Different:[\s\S]*?(?=MATCH\s*\d+:|=== |$)/i);
+        const diffBullets: string[] = [];
+        if (diffSection) {
+          const bullets = diffSection[0].match(/[-•]\s*([^\n]+)/g);
+          if (bullets) bullets.forEach(b => diffBullets.push(b.replace(/^[-•]\s*/, '').trim()));
+        }
+        
+        if (nameMatch) {
+          matchEntries.push({
+            name: nameMatch[1].trim(),
+            type: typeMatch ? typeMatch[1].trim() : 'Unknown',
+            year: yearMatch ? yearMatch[1].trim() : 'N/A',
+            link: linkMatch ? linkMatch[1].trim() : '',
+            whyMatches: whyBullets,
+            rubric: {
+              problem: problemScore ? parseFloat(problemScore[1]) : null,
+              objectives: objectivesScore ? parseFloat(objectivesScore[1]) : null,
+              inputs: inputsScore ? parseFloat(inputsScore[1]) : null,
+              method: methodScore ? parseFloat(methodScore[1]) : null,
+              users: usersScore ? parseFloat(usersScore[1]) : null,
+              overall: overallScore ? parseFloat(overallScore[1]) : null,
+            },
+            whatsDifferent: diffBullets,
+          });
+        }
+      }
+    }
+    
+    // Sort matches by overall similarity (highest first)
+    matchEntries.sort((a, b) => (b.rubric.overall ?? 0) - (a.rubric.overall ?? 0));
+    
+    // Extract Similarity Conclusion
+    const similarityConclusionMatch = analysis.match(/=== SIMILARITY CONCLUSION ===\s*([\s\S]*?)(?=Recommendations:|$)/i)
+      || analysis.match(/SIMILARITY CONCLUSION[:\s]*([\s\S]*?)(?=Recommendations:|$)/i);
+    const similarityConclusion = similarityConclusionMatch ? similarityConclusionMatch[1].trim() : '';
+    
+    // ============================================================================
+    // EXTRACT TEXT MATCH HIGHLIGHTS from AI response
+    // ============================================================================
+    const textHighlights: Array<{
+      matchedText: string;
+      source: string;
+      sourceUrl: string;
+      matchType: string;
+      similarity: number;
+    }> = [];
 
-    if (proposedFocusMatch) {
-      const text = proposedFocusMatch[1];
-      const pMatch = text.match(/Problem:\s*([^\n]+)/i);
-      const oMatch = text.match(/Objectives:\s*([^\n]+)/i);
-      const sMatch = text.match(/Scope\/Context:\s*([^\n]+)/i);
-      const iMatch = text.match(/Inputs\/Outputs:\s*([^\n]+)/i);
-      if (pMatch) proposedFocus.problem = pMatch[1].trim();
-      if (oMatch) proposedFocus.objectives = oMatch[1].trim();
-      if (sMatch) proposedFocus.scopeContext = sMatch[1].trim();
-      if (iMatch) proposedFocus.inputsOutputs = iMatch[1].trim();
+    const highlightsSection = analysis.match(/=== TEXT MATCH HIGHLIGHTS ===([\s\S]*?)$/i)
+      || analysis.match(/TEXT MATCH HIGHLIGHTS[:\s]*([\s\S]*?)$/i);
+
+    if (highlightsSection) {
+      const highlightBlocks = highlightsSection[1].split(/HIGHLIGHT\s*(?:\[?\d+\]?)\s*:/i).filter(b => b.trim());
+
+      for (const block of highlightBlocks) {
+        // Accept any quote style: ", ", “, ”, ', or no quotes at all
+        let matchedTextMatch = block.match(/Matched Text:\s*["\u201c\u201d\u2018\u2019'`]([\s\S]*?)["\u201c\u201d\u2018\u2019'`]/i);
+        if (!matchedTextMatch) {
+          // Fallback: grab everything after "Matched Text:" until next field
+          matchedTextMatch = block.match(/Matched Text:\s*(.+?)(?=\n\s*Source:|$)/i);
+        }
+        const sourceMatch = block.match(/Source:\s*(?!URL)([^\n]+)/i);
+        const sourceUrlMatch = block.match(/Source URL:\s*([^\n]+)/i);
+        const matchTypeMatch = block.match(/Match Type:\s*([^\n]+)/i);
+        const similarityMatch = block.match(/Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
+
+        if (matchedTextMatch && matchedTextMatch[1].trim().length >= 4) {
+          // Clean the matched text - remove leading/trailing quotes and whitespace
+          const cleanedText = matchedTextMatch[1].trim().replace(/^["\u201c\u201d'`]+|["\u201c\u201d'`]+$/g, '').trim();
+          
+          textHighlights.push({
+            matchedText: cleanedText,
+            source: sourceMatch ? sourceMatch[1].trim() : 'Unknown Source',
+            sourceUrl: sourceUrlMatch ? sourceUrlMatch[1].trim() : 'N/A',
+            matchType: matchTypeMatch ? matchTypeMatch[1].trim() : 'Unknown',
+            similarity: similarityMatch ? parseFloat(similarityMatch[1]) : 0,
+          });
+        }
+      }
     }
 
-    if (existingFocusMatch) {
-      const text = existingFocusMatch[1];
-      const pMatch = text.match(/Problem:\s*([^\n]+)/i);
-      const oMatch = text.match(/Objectives:\s*([^\n]+)/i);
-      const sMatch = text.match(/Scope\/Context:\s*([^\n]+)/i);
-      const iMatch = text.match(/Inputs\/Outputs:\s*([^\n]+)/i);
-      if (pMatch) existingFocus.problem = pMatch[1].trim();
-      if (oMatch) existingFocus.objectives = oMatch[1].trim();
-      if (sMatch) existingFocus.scopeContext = sMatch[1].trim();
-      if (iMatch) existingFocus.inputsOutputs = iMatch[1].trim();
+    console.log(`[Text Highlights] Found ${textHighlights.length} highlighted passages`);
+    if (textHighlights.length > 0) {
+      console.log(`[Text Highlights] First 3:`, textHighlights.slice(0, 3).map(h => ({ text: h.matchedText.substring(0, 50), type: h.matchType, source: h.source.substring(0, 40) })));
     }
 
     const fieldAssessment = {
       scores: fieldScores,
       rationales: fieldRationales,
-      proposed: proposedFocus,
-      existing: existingFocus,
       average: null as number | null
+    };
+    
+    const matchBreakdown = {
+      matches: matchEntries,
+      conclusion: similarityConclusion,
     };
 
     // Calculate average of available field scores
@@ -734,10 +901,11 @@ const modelPriority = [
     console.log(`  Acceptance Status: ${acceptanceStatus}`);
     console.log(`  Final Verdict: ${problemIdentity.finalVerdict}`);
     
-    // Calculate overall similarity: blend text similarity with weighted concept similarity
-    // Text similarity shows lexical overlap, concept similarity shows problem-based similarity
-    // Overall = 40% text similarity + 60% concept similarity (strict: both matter significantly)
-    const adjustedOverall = Math.min((textSimilarity * 0.4) + (conceptSimilarity * 0.6), 1.0);
+    // Calculate overall similarity: equal-weight average of text and concept similarity
+    // Text similarity (TF-IDF cosine) shows lexical/surface overlap
+    // Concept similarity (AI-assessed) shows problem/research overlap
+    // Overall = 50% text + 50% concept so neither inflates the final score on its own
+    const adjustedOverall = Math.min((textSimilarity * 0.5) + (conceptSimilarity * 0.5), 1.0);
 
     const aiSimilarities = {
       // Stage 1: Text Similarity (cosine/TF-IDF based)
@@ -778,8 +946,14 @@ const modelPriority = [
       acceptanceStatus: aiSimilarities.acceptanceStatus,
       similarityRationale: aiSimilarities.similarityRationale,
       
-      // 5-Field Assessment
+      // 4-Field Assessment
       fieldAssessment,
+      
+      // Match Breakdown & Source List
+      matchBreakdown,
+      
+      // Text Match Highlights
+      textHighlights,
       
       // Explanation
       pipelineExplanation: {
