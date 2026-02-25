@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { getJson } from 'serpapi';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import fs from 'fs';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const openai = new OpenAI({
@@ -55,7 +56,7 @@ async function retryWithBackoff<T>(
   throw lastError;
 }
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // ============================================================================
 // SERPAPI WEB SEARCH HELPERS
@@ -75,14 +76,11 @@ async function serpSearchGoogle(query: string, numResults: number = 5): Promise<
   if (!apiKey) return [];
 
   try {
-    const response = await getJson({
-      engine: 'google',
-      q: query,
-      api_key: apiKey,
-      num: numResults,
-      hl: 'en',
-    });
-    const organic = response.organic_results || [];
+    const response = await Promise.race([
+      getJson({ engine: 'google', q: query, api_key: apiKey, num: numResults, hl: 'en' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('SerpAPI timeout')), 8000)),
+    ]);
+    const organic = (response as any).organic_results || [];
     return organic.map((r: any, i: number) => ({
       position: i + 1,
       title: r.title || '',
@@ -102,14 +100,11 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
   if (!apiKey) return [];
 
   try {
-    const response = await getJson({
-      engine: 'google_scholar',
-      q: query,
-      api_key: apiKey,
-      num: numResults,
-      hl: 'en',
-    });
-    const organic = response.organic_results || [];
+    const response = await Promise.race([
+      getJson({ engine: 'google_scholar', q: query, api_key: apiKey, num: numResults, hl: 'en' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('SerpAPI timeout')), 8000)),
+    ]);
+    const organic = (response as any).organic_results || [];
     return organic.map((r: any, i: number) => ({
       position: i + 1,
       title: r.title || '',
@@ -304,7 +299,7 @@ async function verifySerpResults(
       })
     );
     verifiedMatches.push(...batchResults);
-    if (i + MATCH_BATCH < matchEntries.length) await new Promise(r => setTimeout(r, 400));
+    // no inter-batch sleep — per-call timeout already guards against hangs
   }
 
   // 3. Verify text highlights (search by matched text phrases)
@@ -341,15 +336,15 @@ async function verifySerpResults(
       })
     );
     verifiedHighlights.push(...batchResults);
-    if (i + HIGHLIGHT_BATCH < textHighlights.length) await new Promise(r => setTimeout(r, 400));
+    // no inter-batch sleep — per-call timeout already guards against hangs
   }
 
   console.log(`[SerpAPI] Verification complete. Found ${allCitations.length} unique web citations`);
   console.log(`[SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
   console.log(`[SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
 
-  // 4. Key Phrase Internet Search — extract 5–15 phrases and search each on Google + Scholar
-  const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept);
+  // 4. Key Phrase Internet Search — extract up to 10 phrases and search each on Google + Scholar
+  const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept).slice(0, 10);
   const cleanTitle = proposedTitle.replace(/^bu thematic area:\s*/i, '').trim();
   console.log(`[SerpAPI] Searching ${keyPhrases.length} key phrases on the web`);
 
@@ -364,7 +359,7 @@ async function verifySerpResults(
     bestSnippet: string;
   }> = [];
 
-  const PHRASE_BATCH = 3;
+  const PHRASE_BATCH = 5;
   for (let i = 0; i < keyPhrases.length; i += PHRASE_BATCH) {
     const batch = keyPhrases.slice(i, i + PHRASE_BATCH);
     const batchResults = await Promise.all(
@@ -390,7 +385,7 @@ async function verifySerpResults(
       })
     );
     phraseHighlights.push(...batchResults);
-    if (i + PHRASE_BATCH < keyPhrases.length) await new Promise(r => setTimeout(r, 400));
+    // no sleep — per-call 8 s timeout already guards against hangs
   }
 
   const phraseFound = phraseHighlights.filter(p => p.foundOnWeb).length;
@@ -436,26 +431,69 @@ interface WebScanResult {
 }
 
 /**
- * Batch-extract clean article text from URLs using trafilatura (Python).
- * Returns a map of url -> clean text.
+ * Fetch clean article text from a list of URLs.
+ * On environments where Python/.venv is available (local dev), uses trafilatura for
+ * best-quality extraction.  On Vercel / any environment without Python, falls back
+ * to a fast Node.js fetch + HTML-strip, which runs entirely in the same process.
  */
-function fetchPagesWithTrafilatura(urls: string[]): Record<string, string> {
+async function fetchPagesText(urls: string[]): Promise<Record<string, string>> {
   if (urls.length === 0) return {};
-  try {
-    const pythonPath = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
-    const scriptPath = path.join(process.cwd(), 'scripts', 'trafilatura_extract.py');
-    const output = execFileSync(pythonPath, [scriptPath], {
-      input: JSON.stringify(urls),
-      encoding: 'utf-8',
-      timeout: 40_000,
-      maxBuffer: 20 * 1024 * 1024,
-      env: { ...process.env, PYTHONUTF8: '1' },
-    });
-    return JSON.parse(output);
-  } catch (e) {
-    console.error('[Trafilatura] Python extraction failed:', e);
-    return {};
+
+  // ── Try Python/trafilatura if the venv exists locally ────────────────────
+  const pythonPath = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
+  const scriptPath = path.join(process.cwd(), 'scripts', 'trafilatura_extract.py');
+  if (fs.existsSync(pythonPath) && fs.existsSync(scriptPath)) {
+    try {
+      const output = execFileSync(pythonPath, [scriptPath], {
+        input: JSON.stringify(urls),
+        encoding: 'utf-8',
+        timeout: 30_000,
+        maxBuffer: 20 * 1024 * 1024,
+        env: { ...process.env, PYTHONUTF8: '1' },
+      });
+      const parsed = JSON.parse(output);
+      if (parsed && typeof parsed === 'object') {
+        console.log('[PageFetch] trafilatura OK for', urls.length, 'URLs');
+        return parsed;
+      }
+    } catch (e) {
+      console.warn('[PageFetch] trafilatura failed, falling back to Node fetch:', (e as Error).message?.slice(0, 80));
+    }
   }
+
+  // ── Pure-Node fallback (works on Vercel) ─────────────────────────────────
+  console.log('[PageFetch] Using Node.js fetch for', urls.length, 'URLs');
+  const result: Record<string, string> = {};
+  const fetchOne = async (url: string): Promise<[string, string]> => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 7000);
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AcademicBot/1.0)' },
+      });
+      clearTimeout(timer);
+      if (!res.ok) return [url, ''];
+      const html = await res.text();
+      // Strip tags, scripts, styles → plain text
+      const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&#?\w+;/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, 50_000);
+      return [url, text];
+    } catch {
+      return [url, ''];
+    }
+  };
+
+  const pairs = await Promise.all(urls.map(fetchOne));
+  for (const [url, text] of pairs) result[url] = text;
+  return result;
 }
 
 /** Split text into sentences AND record their char start/end positions */
@@ -528,9 +566,9 @@ async function performWebSimilarityScan(
   const proposedShingles  = getShinglesSet(proposedText, 10);
   const proposedLen       = proposedText.length;
 
-  // Batch-fetch page texts via trafilatura (Python subprocess)
+  // Batch-fetch page texts (trafilatura locally, Node fetch on Vercel)
   const urlList = urlEntries.map(([url]) => url);
-  const extractedTexts = fetchPagesWithTrafilatura(urlList);
+  const extractedTexts = await fetchPagesText(urlList);
   const pageTexts = urlEntries.map(([url, meta]) => ({
     url, title: meta.title, snippet: meta.snippet,
     text: extractedTexts[url] || '',
