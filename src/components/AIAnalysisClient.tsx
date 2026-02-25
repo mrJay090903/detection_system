@@ -19,44 +19,60 @@ import Image from "next/image"
 import { toast } from "sonner"
 
 // ── Inline highlight utilities ────────────────────────────────────────────────
+type HlColor = 'yellow' | 'orange' | 'rose' | 'blue';
 type HlSpan = {
   start: number; end: number;
   matchType: string; source: string; url: string;
-  color: 'red' | 'orange' | 'yellow' | 'blue';
+  color: HlColor;
 };
 type TextSegment =
   | { text: string; highlighted: false }
   | { text: string; highlighted: true; span: HlSpan };
 
+/** Merge all highlight sources into one sorted, deduplicated list of segments */
 function getHighlightedSegments(
   text: string,
   textHighlights: any[],
-  phraseHighlights: any[]
+  phraseHighlights: any[],
+  webHighlights: Array<{ start: number; end: number; matchType: string; sourceUrl: string; sourceTitle: string; sourceSnippet: string; confidence: number }> = []
 ): TextSegment[] {
   if (!text?.trim()) return [];
   const spans: HlSpan[] = [];
   const lo = text.toLowerCase();
 
-  // Strong matches from AI text highlights
+  // 1) Pre-positioned web scan spans (exact start/end from backend)
+  for (const h of webHighlights) {
+    if (h.start < 0 || h.end > text.length || h.end <= h.start) continue;
+    spans.push({
+      start: h.start, end: h.end,
+      matchType: h.matchType === 'exact' ? 'Exact Copy' : h.matchType === 'near' ? 'Near Match' : 'Paraphrase',
+      source: h.sourceTitle || '',
+      url: h.sourceUrl || '',
+      color: h.matchType === 'exact' ? 'yellow' : h.matchType === 'near' ? 'orange' : 'rose',
+    });
+  }
+
+  // 2) AI text highlights – find by substring
   for (const h of textHighlights) {
     const needle = (h.matchedText || '').trim();
     if (needle.length < 10) continue;
     const idx = lo.indexOf(needle.toLowerCase());
     if (idx === -1) continue;
+    const alreadyCovered = spans.some(s => idx >= s.start && idx + needle.length <= s.end);
+    if (alreadyCovered) continue;
     spans.push({
       start: idx, end: idx + needle.length,
       matchType: h.matchType || 'Unknown',
       source: h.source || '',
-      url: (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') ||
-            h.serpResults?.[0]?.link || '',
+      url: (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '',
       color:
-        h.matchType === 'Exact Copy' ? 'red' :
+        h.matchType === 'Exact Copy' ? 'yellow' :
         (h.matchType === 'Close Paraphrase' || (h.matchType || '').includes('Structural')) ? 'orange' :
-        h.matchType === 'Patchwriting' ? 'yellow' : 'blue',
+        h.matchType === 'Patchwriting' ? 'rose' : 'blue',
     });
   }
 
-  // Lighter phrase matches (found on internet)
+  // 3) Phrase matches (lightest)
   for (const ph of phraseHighlights) {
     if (!ph.foundOnWeb) continue;
     const needle = (ph.phrase || '').trim();
@@ -67,28 +83,22 @@ function getHighlightedSegments(
     if (covered) continue;
     spans.push({
       start: idx, end: idx + needle.length,
-      matchType: 'Phrase Match',
-      source: ph.bestSource || '',
-      url: ph.bestUrl || '',
+      matchType: 'Phrase Match', source: ph.bestSource || '', url: ph.bestUrl || '',
       color: 'blue',
     });
   }
 
   if (spans.length === 0) return [{ text, highlighted: false }];
 
-  // Sort & merge overlapping spans
+  // Sort & merge
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
   const merged: HlSpan[] = [];
   for (const s of spans) {
     const prev = merged[merged.length - 1];
-    if (prev && s.start < prev.end) {
-      if (s.end > prev.end) prev.end = s.end;
-    } else {
-      merged.push({ ...s });
-    }
+    if (prev && s.start < prev.end) { if (s.end > prev.end) prev.end = s.end; }
+    else merged.push({ ...s });
   }
 
-  // Build output segments
   const result: TextSegment[] = [];
   let pos = 0;
   for (const span of merged) {
@@ -134,6 +144,7 @@ export default function AIAnalysisClient() {
   const [expandedPhrase, setExpandedPhrase] = useState<number | null>(null)
   const [proposedText, setProposedText] = useState<string>('')
   const [selectedSpanIdx, setSelectedSpanIdx] = useState<number | null>(null)
+  const [webScan, setWebScan] = useState<any>(null)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -461,6 +472,9 @@ export default function AIAnalysisClient() {
         }
         if (data.proposedText) {
           setProposedText(data.proposedText)
+        }
+        if (data.webScan) {
+          setWebScan(data.webScan)
         }
 
         setProgress(100)
@@ -946,94 +960,195 @@ export default function AIAnalysisClient() {
             {activeResultTab === 'highlights' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
 
-                {/* ── SECTION 0: Inline Document Scan ── */}
+                {/* ── SECTION 0: Turnitin-Style Document Scan ── */}
                 {proposedText && (() => {
-                  const segments = getHighlightedSegments(proposedText, textHighlights, phraseHighlights);
-                  const matchCount = segments.filter(s => s.highlighted).length;
+                  const wsHighlights: any[] = webScan?.highlights || [];
+                  const segments = getHighlightedSegments(proposedText, textHighlights, phraseHighlights, wsHighlights);
+                  const flagged   = segments.filter(s => s.highlighted);
+                  const overall   = webScan?.overallSimilarity ?? 0;
+                  const sources   = webScan?.sources ?? [];
+
+                  const overallColor =
+                    overall >= 51 ? 'text-red-600' :
+                    overall >= 26 ? 'text-orange-500' :
+                    overall >= 11 ? 'text-amber-500' : 'text-emerald-600';
+
+                  const overallBg =
+                    overall >= 51 ? 'from-red-50 to-rose-50' :
+                    overall >= 26 ? 'from-orange-50 to-amber-50' :
+                    overall >= 11 ? 'from-yellow-50 to-amber-50' : 'from-emerald-50 to-green-50';
+
+                  const bgClass = (color: string) =>
+                    color === 'yellow' ? 'bg-yellow-200 text-yellow-900 border-b-2 border-yellow-400' :
+                    color === 'orange' ? 'bg-orange-200 text-orange-900 border-b-2 border-orange-400' :
+                    color === 'rose'   ? 'bg-rose-200 text-rose-900 border-b-2 border-rose-300' :
+                                        'bg-blue-100 text-blue-900 border-b border-blue-300';
+
+                  const badgeClass = (color: string) =>
+                    color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                    color === 'orange' ? 'bg-orange-100 text-orange-800' :
+                    color === 'rose'   ? 'bg-rose-100 text-rose-700' :
+                                        'bg-blue-100 text-blue-700';
+
                   return (
-                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                      {/* Header */}
-                      <div className="px-6 py-4 bg-gradient-to-r from-red-50 to-rose-50 border-b flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                            Inline Document Scan
-                          </h3>
-                          <p className="text-xs text-gray-500 mt-0.5">Every word and sentence scanned — flagged content highlighted inline. Click any highlight to see its internet source.</p>
+                    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+
+                      {/* ── Header ── */}
+                      <div className={`px-6 py-4 bg-gradient-to-r ${overallBg} border-b`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                              Document Scan — Turnitin Style
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Every sentence scanned with shingle matching + TF-IDF cosine against real web pages.
+                              Click any highlight to view its source.
+                            </p>
+                          </div>
+                          <div className="shrink-0 text-center">
+                            <div className={`text-3xl font-extrabold leading-none ${overallColor}`}>{overall}%</div>
+                            <div className="text-[10px] text-gray-500 mt-0.5">
+                              {overall >= 51 ? 'High Similarity' : overall >= 26 ? 'Moderate' : overall >= 11 ? 'Minor Overlap' : 'Likely Original'}
+                            </div>
+                            {webScan?.scannedUrls > 0 && (
+                              <div className="text-[9px] text-gray-400 mt-0.5">{webScan.scannedUrls} page{webScan.scannedUrls !== 1 ? 's' : ''} scanned</div>
+                            )}
+                          </div>
                         </div>
-                        {matchCount > 0 ? (
-                          <span className="shrink-0 text-xs px-2.5 py-1 bg-red-100 text-red-700 rounded-full font-semibold">
-                            {matchCount} passage{matchCount !== 1 ? 's' : ''} flagged
-                          </span>
-                        ) : (
-                          <span className="shrink-0 text-xs px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full font-semibold">✓ No matches detected</span>
-                        )}
+
+                        {/* overall bar */}
+                        <div className="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all duration-700 ${
+                            overall >= 51 ? 'bg-red-500' : overall >= 26 ? 'bg-orange-400' : overall >= 11 ? 'bg-yellow-400' : 'bg-emerald-400'
+                          }`} style={{ width: `${overall}%` }} />
+                        </div>
                       </div>
 
-                      <div className="p-5">
-                        {/* Legend */}
-                        <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b">
-                          <span className="text-[11px] font-semibold text-gray-600 mr-1">Legend:</span>
+                      <div className="p-5 space-y-5">
+                        {/* ── Legend ── */}
+                        <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                          <span className="font-semibold text-gray-600 mr-1">Legend:</span>
                           {[
-                            { label: 'Exact Copy', bg: 'bg-red-200 text-red-800' },
-                            { label: 'Close Paraphrase / Structural Copy', bg: 'bg-orange-200 text-orange-800' },
-                            { label: 'Patchwriting', bg: 'bg-yellow-200 text-yellow-800' },
-                            { label: 'Common Knowledge / Phrase Match', bg: 'bg-blue-100 text-blue-800' },
+                            { label: 'Exact Copy',   bg: 'bg-yellow-200 text-yellow-800' },
+                            { label: 'Near Match',   bg: 'bg-orange-200 text-orange-800' },
+                            { label: 'Paraphrase',   bg: 'bg-rose-200 text-rose-800' },
+                            { label: 'Phrase Match', bg: 'bg-blue-100 text-blue-700' },
                           ].map(l => (
-                            <span key={l.label} className={`text-[10px] font-medium px-2 py-0.5 rounded ${l.bg}`}>{l.label}</span>
+                            <span key={l.label} className={`px-2 py-0.5 rounded font-medium ${l.bg}`}>{l.label}</span>
                           ))}
+                          <span className="ml-auto text-gray-400">{flagged.length} passage{flagged.length !== 1 ? 's' : ''} flagged</span>
                         </div>
 
-                        {/* Rendered text with inline highlights */}
+                        {/* ── Highlighted text body ── */}
                         <div className="text-sm text-gray-800 leading-loose bg-gray-50 rounded-xl p-4 border select-text whitespace-pre-wrap">
                           {segments.map((seg, si) => {
-                            if (!seg.highlighted) {
-                              return <span key={si}>{seg.text}</span>;
-                            }
+                            if (!seg.highlighted) return <span key={si}>{seg.text}</span>;
                             const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
                             const isOpen = selectedSpanIdx === si;
-                            const bgClass =
-                              sp.color === 'red'    ? 'bg-red-200 text-red-900 border-b-2 border-red-400' :
-                              sp.color === 'orange' ? 'bg-orange-200 text-orange-900 border-b-2 border-orange-400' :
-                              sp.color === 'yellow' ? 'bg-yellow-200 text-yellow-900 border-b-2 border-yellow-400' :
-                                                      'bg-blue-100 text-blue-900 border-b-2 border-blue-300';
                             return (
                               <span key={si} className="relative inline">
                                 <button
                                   onClick={() => setSelectedSpanIdx(isOpen ? null : si)}
-                                  className={`${bgClass} rounded px-0.5 cursor-pointer hover:brightness-90 transition-all ${isOpen ? 'ring-2 ring-offset-1 ring-purple-500' : ''}`}
+                                  className={`${bgClass(sp.color)} rounded px-0.5 cursor-pointer hover:brightness-90 transition-all ${isOpen ? 'ring-2 ring-offset-1 ring-purple-500' : ''}`}
                                   title={`${sp.matchType} — click for source`}
                                 >
                                   {seg.text}
                                 </button>
                                 {isOpen && (
-                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
+                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-80 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
                                     <div className="flex items-center justify-between mb-2">
-                                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${
-                                        sp.color === 'red' ? 'bg-red-100 text-red-700' :
-                                        sp.color === 'orange' ? 'bg-orange-100 text-orange-700' :
-                                        sp.color === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
-                                        'bg-blue-100 text-blue-700'
-                                      }`}>{sp.matchType}</span>
-                                      <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-sm">✕</button>
+                                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${badgeClass(sp.color)}`}>{sp.matchType}</span>
+                                      <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-base leading-none">✕</button>
                                     </div>
-                                    {sp.source && (
-                                      <p className="mb-1 text-gray-600"><span className="font-semibold text-gray-700">Source:</span> {sp.source}</p>
-                                    )}
+                                    {sp.source && <p className="mb-1.5 text-gray-600"><span className="font-semibold text-gray-700">Source: </span>{sp.source}</p>}
                                     {sp.url ? (
-                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium mt-0.5">
+                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium">
                                         View on internet
                                         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                                       </a>
-                                    ) : (
-                                      <p className="text-gray-400 italic text-[10px] mt-0.5">No URL available</p>
-                                    )}
+                                    ) : <p className="text-gray-400 italic text-[10px]">No URL available</p>}
                                   </span>
                                 )}
                               </span>
                             );
                           })}
                         </div>
+
+                        {/* ── Similarity interpretation table ── */}
+                        <div className="rounded-xl border overflow-hidden">
+                          <div className="px-4 py-2.5 bg-gray-50 border-b">
+                            <span className="text-xs font-semibold text-gray-700">Similarity Interpretation</span>
+                          </div>
+                          <div className="grid grid-cols-4 divide-x text-center text-[11px]">
+                            {[
+                              { range: '0–10%',  label: 'Likely Original',   color: 'text-emerald-600', active: overall <= 10 },
+                              { range: '11–25%', label: 'Minor Overlap',      color: 'text-amber-600',   active: overall >= 11 && overall <= 25 },
+                              { range: '26–50%', label: 'Moderate Similarity',color: 'text-orange-600',  active: overall >= 26 && overall <= 50 },
+                              { range: '51%+',   label: 'High Overlap',       color: 'text-red-600',     active: overall >= 51 },
+                            ].map(t => (
+                              <div key={t.range} className={`px-2 py-3 ${t.active ? 'bg-gray-100 font-semibold' : ''}`}>
+                                <div className={`font-bold ${t.color}`}>{t.range}</div>
+                                <div className="text-gray-500 mt-0.5 leading-tight">{t.label}</div>
+                                {t.active && <div className="mt-1 text-[9px] font-bold text-gray-600">← You are here</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* ── Source Breakdown Panel ── */}
+                        {sources.length > 0 && (
+                          <div>
+                            <div className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                              Source Breakdown ({sources.length} source{sources.length !== 1 ? 's' : ''})
+                            </div>
+                            <div className="space-y-2">
+                              {sources.map((src: any, si: number) => (
+                                <div key={si} className="rounded-xl border bg-gray-50 p-3">
+                                  <div className="flex items-center justify-between gap-3 mb-2">
+                                    <a href={src.url} target="_blank" rel="noopener noreferrer"
+                                       className="text-xs font-semibold text-blue-700 hover:underline line-clamp-1 flex-1">
+                                      {src.title || src.url}
+                                    </a>
+                                    <span className={`shrink-0 text-sm font-extrabold ${
+                                      src.matchPercentage >= 51 ? 'text-red-600' :
+                                      src.matchPercentage >= 26 ? 'text-orange-500' :
+                                      src.matchPercentage >= 11 ? 'text-amber-500' : 'text-emerald-600'
+                                    }`}>{src.matchPercentage}%</span>
+                                  </div>
+                                  <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden mb-2">
+                                    <div className={`h-full rounded-full ${
+                                      src.matchPercentage >= 51 ? 'bg-red-500' :
+                                      src.matchPercentage >= 26 ? 'bg-orange-400' :
+                                      src.matchPercentage >= 11 ? 'bg-yellow-400' : 'bg-emerald-400'
+                                    }`} style={{ width: `${src.matchPercentage}%` }} />
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 flex items-center gap-3">
+                                    <span>{src.highlights?.length ?? 0} matched passage{(src.highlights?.length ?? 0) !== 1 ? 's' : ''}</span>
+                                    <a href={src.url} target="_blank" rel="noopener noreferrer"
+                                       className="ml-auto text-blue-500 hover:underline truncate max-w-[200px]">{src.url}</a>
+                                  </div>
+                                  {src.matchedSentences?.length > 0 && (
+                                    <div className="mt-2 space-y-1">
+                                      {src.matchedSentences.slice(0, 3).map((sent: string, mi: number) => (
+                                        <div key={mi} className="text-[10px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 italic line-clamp-2">
+                                          &ldquo;{sent}&rdquo;
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {flagged.length === 0 && sources.length === 0 && (
+                          <p className="text-center text-sm text-emerald-600 font-medium py-4">
+                            ✓ No similar content found on the internet. Text appears to be original.
+                          </p>
+                        )}
                       </div>
                     </div>
                   );

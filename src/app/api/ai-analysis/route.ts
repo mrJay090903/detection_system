@@ -398,7 +398,221 @@ async function verifySerpResults(
 }
 
 // ============================================================================
-// SECURITY CONFIGURATION
+// WEB SIMILARITY SCAN ENGINE  (Turnitin-style)
+// Fetches real web pages found via SerpAPI and runs three matching layers:
+//   1. Exact copy   – 8-word shingle overlap ≥ 50%
+//   2. Near match   – TF-IDF cosine similarity ≥ 0.85
+//   3. Paraphrase   – TF-IDF cosine similarity 0.65–0.84
+// ============================================================================
+
+interface WebHighlightSpan {
+  start: number;
+  end: number;
+  matchType: 'exact' | 'near' | 'paraphrase';
+  confidence: number;
+  sourceUrl: string;
+  sourceTitle: string;
+  sourceSnippet: string;
+}
+
+interface WebSourceMatch {
+  url: string;
+  title: string;
+  matchPercentage: number;
+  matchedSentences: string[];
+  highlights: WebHighlightSpan[];
+}
+
+interface WebScanResult {
+  overallSimilarity: number;
+  sources: WebSourceMatch[];
+  highlights: WebHighlightSpan[];
+  scannedUrls: number;
+}
+
+/** Strip HTML/CSS/JS from a raw HTML string */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** Fetch a URL and return extracted plain text (4 s timeout) */
+async function fetchPageText(url: string, timeoutMs = 4000): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AcademicBot/1.0)' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return '';
+    const html = await res.text();
+    return stripHtml(html);
+  } catch {
+    return '';
+  }
+}
+
+/** Split text into sentences AND record their char start/end positions */
+function getSentencesWithPositions(text: string): Array<{ text: string; start: number; end: number }> {
+  const result: Array<{ text: string; start: number; end: number }> = [];
+  const re = /[^.!?\n]{20,}[.!?\n]+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const s = m[0].trim();
+    if (s.split(/\s+/).length >= 5) result.push({ text: s, start: m.index, end: m.index + m[0].length });
+  }
+  return result;
+}
+
+/** Lowercase word-only tokens, stop-words removed */
+function tokenize(text: string): string[] {
+  return (text.toLowerCase().match(/\b[a-z][a-z'-]*[a-z]\b/g) || [])
+    .filter(w => !STOP_WORDS.has(w) && w.length > 2);
+}
+
+/** TF-only cosine similarity between two token arrays */
+function cosineSim(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+  const fa: Record<string, number> = {};
+  const fb: Record<string, number> = {};
+  for (const t of a) fa[t] = (fa[t] || 0) + 1;
+  for (const t of b) fb[t] = (fb[t] || 0) + 1;
+  let dot = 0, ma = 0, mb = 0;
+  const all = new Set([...Object.keys(fa), ...Object.keys(fb)]);
+  for (const t of all) {
+    const av = fa[t] || 0, bv = fb[t] || 0;
+    dot += av * bv; ma += av * av; mb += bv * bv;
+  }
+  return ma && mb ? dot / (Math.sqrt(ma) * Math.sqrt(mb)) : 0;
+}
+
+/** N-word shingle set from text */
+function getShinglesSet(text: string, n = 8): Set<string> {
+  const words = text.toLowerCase().match(/\b[a-z][a-z'-]*\b/g) || [];
+  const s = new Set<string>();
+  for (let i = 0; i <= words.length - n; i++) s.add(words.slice(i, i + n).join(' '));
+  return s;
+}
+
+async function performWebSimilarityScan(
+  proposedText: string,
+  phraseHighlights: Array<{ serpResults?: any[]; scholarResults?: any[]; foundOnWeb?: boolean }>
+): Promise<WebScanResult> {
+  // Collect unique candidate URLs from SerpAPI phrase results
+  const urlMap = new Map<string, { title: string; snippet: string }>();
+  for (const ph of phraseHighlights) {
+    for (const r of [...(ph.serpResults || []), ...(ph.scholarResults || [])]) {
+      if (r?.link && !urlMap.has(r.link) && urlMap.size < 8) {
+        urlMap.set(r.link, { title: r.title || '', snippet: r.snippet || '' });
+      }
+    }
+    if (urlMap.size >= 8) break;
+  }
+
+  const urlEntries = Array.from(urlMap.entries()).slice(0, 5);
+  if (urlEntries.length === 0) return { overallSimilarity: 0, sources: [], highlights: [], scannedUrls: 0 };
+
+  const proposedSentences = getSentencesWithPositions(proposedText);
+  const proposedShingles  = getShinglesSet(proposedText, 8);
+  const proposedLen       = proposedText.length;
+
+  // Fetch all pages in parallel
+  const pageTexts = await Promise.all(
+    urlEntries.map(async ([url, meta]) => ({
+      url, title: meta.title, snippet: meta.snippet,
+      text: await fetchPageText(url),
+    }))
+  );
+
+  const allHighlights: WebHighlightSpan[] = [];
+  const sources: WebSourceMatch[] = [];
+
+  for (const { url, title, snippet, text } of pageTexts) {
+    if (text.length < 100) continue;
+
+    const sourceShingles   = getShinglesSet(text, 8);
+    const sourceSentences  = getSentencesWithPositions(text).slice(0, 150);
+    const matchedSpans: WebHighlightSpan[] = [];
+    const matchedTexts: string[] = [];
+    let   matchedChars = 0;
+
+    for (const ps of proposedSentences) {
+      const pTokens = tokenize(ps.text);
+      if (pTokens.length < 4) continue;
+
+      // ── A: Exact copy via shingle overlap ─────────────────────────────
+      const sentShingles = getShinglesSet(ps.text, 8);
+      let shinHits = 0;
+      for (const sh of sentShingles) if (sourceShingles.has(sh)) shinHits++;
+      const exactRatio = sentShingles.size > 0 ? shinHits / sentShingles.size : 0;
+
+      if (exactRatio >= 0.5) {
+        matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'exact',
+          confidence: Math.round(exactRatio * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+        matchedChars += ps.end - ps.start;
+        matchedTexts.push(ps.text);
+        continue;
+      }
+
+      // ── B: Near-exact via TF-IDF cosine ───────────────────────────────
+      let bestCos = 0;
+      for (const ss of sourceSentences) {
+        const s = cosineSim(pTokens, tokenize(ss.text));
+        if (s > bestCos) bestCos = s;
+        if (bestCos >= 0.92) break;
+      }
+
+      if (bestCos >= 0.85) {
+        matchedSpans.push({ start: ps.start, end: ps.end,
+          matchType: bestCos >= 0.92 ? 'exact' : 'near',
+          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+        matchedChars += ps.end - ps.start;
+        matchedTexts.push(ps.text);
+      } else if (bestCos >= 0.65) {
+        // ── C: Paraphrase ─────────────────────────────────────────────
+        matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'paraphrase',
+          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+        matchedChars += Math.round((ps.end - ps.start) * 0.5);
+        matchedTexts.push(ps.text);
+      }
+    }
+
+    if (matchedSpans.length === 0) continue;
+
+    const matchPct = proposedLen > 0 ? Math.min(Math.round((matchedChars / proposedLen) * 100), 100) : 0;
+    allHighlights.push(...matchedSpans);
+    sources.push({ url, title, matchPercentage: matchPct, matchedSentences: matchedTexts.slice(0, 10), highlights: matchedSpans });
+  }
+
+  // Sort sources by match%
+  sources.sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+  // Merge overlapping global highlights (keep highest confidence)
+  allHighlights.sort((a, b) => a.start - b.start || b.confidence - a.confidence);
+  const merged: WebHighlightSpan[] = [];
+  for (const h of allHighlights) {
+    const prev = merged[merged.length - 1];
+    if (prev && h.start < prev.end) {
+      if (h.end > prev.end) prev.end = h.end;
+      if (h.confidence > prev.confidence) { prev.matchType = h.matchType; prev.confidence = h.confidence; }
+    } else merged.push({ ...h });
+  }
+
+  const totalChars = merged.reduce((s, h) => s + (h.end - h.start), 0);
+  const overall    = proposedLen > 0 ? Math.min(Math.round((totalChars / proposedLen) * 100), 100) : 0;
+  const scanned    = pageTexts.filter(p => p.text.length >= 100).length;
+
+  console.log(`[WebScan] Scanned ${scanned}/${urlEntries.length} pages | ${merged.length} spans | ${overall}% similarity`);
+  return { overallSimilarity: overall, sources, highlights: merged, scannedUrls: scanned };
+}
 // ============================================================================
 
 // Input limits
@@ -1152,7 +1366,14 @@ const modelPriority = [
     // ============================================================================
     console.log('[SerpAPI] Starting web verification of AI-generated matches and highlights...');
     const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
-    
+
+    // ============================================================================
+    // WEB SIMILARITY SCAN — fetch real pages + run shingle / cosine matching
+    // ============================================================================
+    console.log('[WebScan] Starting full document scan against real web pages...');
+    const webScan = await performWebSimilarityScan(safeUserConcept, serpVerification.phraseHighlights);
+    console.log(`[WebScan] Done: ${webScan.scannedUrls} pages scanned, ${webScan.highlights.length} spans, overall ${webScan.overallSimilarity}%`);
+
     const matchBreakdown = {
       matches: serpVerification.verifiedMatches,
       conclusion: similarityConclusion,
@@ -1345,6 +1566,9 @@ const modelPriority = [
 
       // Full proposed text — used by the frontend for inline word/sentence highlighting
       proposedText: safeUserConcept,
+
+      // Turnitin-style web scan results: highlight spans + per-source breakdown
+      webScan,
 
       // Match Breakdown & Source List (now SerpAPI-verified)
       matchBreakdown,
