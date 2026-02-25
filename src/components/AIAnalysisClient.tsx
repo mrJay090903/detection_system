@@ -24,21 +24,106 @@ type HlSpan = {
   start: number; end: number;
   matchType: string; source: string; url: string;
   color: HlColor;
+  /** The actual sentence from the source page that matched this span */
+  matchedSourceText?: string;
 };
 type TextSegment =
   | { text: string; highlighted: false }
   | { text: string; highlighted: true; span: HlSpan };
+
+/**
+ * Fuzzy-find needle in text. First tries exact case-insensitive indexOf,
+ * then normalized whitespace, then first-words anchor, then a
+ * token-overlap sliding window scan.
+ * Returns { start, end } in the ORIGINAL text, or null if no match.
+ */
+function fuzzyFindInText(
+  text: string,
+  needle: string
+): { start: number; end: number } | null {
+  if (!needle || needle.length < 8) return null;
+  const lo = text.toLowerCase();
+  const loN = needle.toLowerCase().trim();
+
+  // 1. Exact match
+  const exact = lo.indexOf(loN);
+  if (exact !== -1) return { start: exact, end: exact + loN.length };
+
+  // 2. Collapsed-whitespace match
+  const collapseWS = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const loNC = collapseWS(loN);
+  const loC  = collapseWS(lo);
+  const normIdx = loC.indexOf(loNC);
+  if (normIdx !== -1) {
+    // Map collapsed position back: walk original text counting non-redundant chars
+    let origPos = 0, collPos = 0;
+    while (collPos < normIdx && origPos < text.length) {
+      if (!(text[origPos] === ' ' && origPos > 0 && text[origPos - 1] === ' ')) collPos++;
+      origPos++;
+    }
+    const approxStart = origPos;
+    return { start: approxStart, end: Math.min(approxStart + needle.length + 10, text.length) };
+  }
+
+  // 3. Anchor on first 6 words of needle then extend
+  const needleFirstWords = loN.split(/\s+/).slice(0, 6).join(' ');
+  if (needleFirstWords.length >= 12) {
+    const anchorIdx = lo.indexOf(needleFirstWords);
+    if (anchorIdx !== -1) {
+      return { start: anchorIdx, end: Math.min(anchorIdx + needle.length + 20, text.length) };
+    }
+  }
+
+  // 4. Token-overlap sliding window (content words ≥ 4 chars)
+  const contentWords = (s: string): string[] =>
+    (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || []);
+  const needleTokens = contentWords(needle);
+  const needleSet = new Set(needleTokens);
+  if (needleSet.size < 3) return null;
+
+  // Build word-positions index for the text
+  const wordRe = /\b[a-z]{4,}\b/gi;
+  const textWords: Array<{ w: string; pos: number }> = [];
+  let wm: RegExpExecArray | null;
+  wordRe.lastIndex = 0;
+  while ((wm = wordRe.exec(text)) !== null)
+    textWords.push({ w: wm[0].toLowerCase(), pos: wm.index });
+
+  if (textWords.length < 3) return null;
+
+  // Window = needle content-word count + buffer
+  const winSize = Math.min(needleTokens.length + 8, 30);
+  let bestScore = 0;
+  let bestStart = -1, bestEnd = -1;
+
+  for (let i = 0; i <= textWords.length - 3; i++) {
+    const winEnd = Math.min(i + winSize - 1, textWords.length - 1);
+    let hits = 0;
+    for (let j = i; j <= winEnd; j++)
+      if (needleSet.has(textWords[j].w)) hits++;
+    const score = hits / needleSet.size;
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = textWords[i].pos;
+      bestEnd   = textWords[winEnd].pos + textWords[winEnd].w.length;
+    }
+    if (bestScore >= 0.95) break; // good enough
+  }
+
+  if (bestScore >= 0.55 && bestStart !== -1)
+    return { start: bestStart, end: bestEnd };
+  return null;
+}
 
 /** Merge all highlight sources into one sorted, deduplicated list of segments */
 function getHighlightedSegments(
   text: string,
   textHighlights: any[],
   phraseHighlights: any[],
-  webHighlights: Array<{ start: number; end: number; matchType: string; sourceUrl: string; sourceTitle: string; sourceSnippet: string; confidence: number }> = []
+  webHighlights: Array<{ start: number; end: number; matchType: string; sourceUrl: string; sourceTitle: string; sourceSnippet: string; confidence: number; matchedSourceText?: string }> = []
 ): TextSegment[] {
   if (!text?.trim()) return [];
   const spans: HlSpan[] = [];
-  const lo = text.toLowerCase();
 
   // 1) Pre-positioned web scan spans (exact start/end from backend)
   for (const h of webHighlights) {
@@ -49,19 +134,20 @@ function getHighlightedSegments(
       source: h.sourceTitle || '',
       url: h.sourceUrl || '',
       color: h.matchType === 'exact' ? 'yellow' : h.matchType === 'near' ? 'orange' : 'rose',
+      matchedSourceText: h.matchedSourceText || '',
     });
   }
 
-  // 2) AI text highlights – find by substring
+  // 2) AI text highlights – fuzzy substring search
   for (const h of textHighlights) {
     const needle = (h.matchedText || '').trim();
     if (needle.length < 10) continue;
-    const idx = lo.indexOf(needle.toLowerCase());
-    if (idx === -1) continue;
-    const alreadyCovered = spans.some(s => idx >= s.start && idx + needle.length <= s.end);
+    const found = fuzzyFindInText(text, needle);
+    if (!found) continue;
+    const alreadyCovered = spans.some(s => found.start >= s.start && found.end <= s.end);
     if (alreadyCovered) continue;
     spans.push({
-      start: idx, end: idx + needle.length,
+      start: found.start, end: found.end,
       matchType: h.matchType || 'Unknown',
       source: h.source || '',
       url: (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '',
@@ -72,17 +158,17 @@ function getHighlightedSegments(
     });
   }
 
-  // 3) Phrase matches (lightest)
+  // 3) Phrase matches (lightest) – fuzzy search
   for (const ph of phraseHighlights) {
     if (!ph.foundOnWeb) continue;
     const needle = (ph.phrase || '').trim();
     if (needle.length < 8) continue;
-    const idx = lo.indexOf(needle.toLowerCase());
-    if (idx === -1) continue;
-    const covered = spans.some(s => idx >= s.start && idx + needle.length <= s.end);
+    const found = fuzzyFindInText(text, needle);
+    if (!found) continue;
+    const covered = spans.some(s => found.start >= s.start && found.end <= s.end);
     if (covered) continue;
     spans.push({
-      start: idx, end: idx + needle.length,
+      start: found.start, end: found.end,
       matchType: 'Phrase Match', source: ph.bestSource || '', url: ph.bestUrl || '',
       color: 'blue',
     });
@@ -1056,14 +1142,27 @@ export default function AIAnalysisClient() {
                                   {seg.text}
                                 </button>
                                 {isOpen && (
-                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-80 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
+                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-[26rem] bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
                                     <div className="flex items-center justify-between mb-2">
                                       <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${badgeClass(sp.color)}`}>{sp.matchType}</span>
                                       <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-base leading-none">✕</button>
                                     </div>
-                                    {sp.source && <p className="mb-1.5 text-gray-600"><span className="font-semibold text-gray-700">Source: </span>{sp.source}</p>}
+                                    {/* Side-by-side comparison */}
+                                    <div className="grid grid-cols-2 gap-2 mb-2">
+                                      <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-2">
+                                        <div className="text-[9px] font-bold text-yellow-700 uppercase tracking-wider mb-1">Your Research</div>
+                                        <p className="text-[11px] text-gray-800 leading-snug line-clamp-4">{seg.text}</p>
+                                      </div>
+                                      <div className="rounded-lg bg-red-50 border border-red-200 p-2">
+                                        <div className="text-[9px] font-bold text-red-700 uppercase tracking-wider mb-1">Matched in Source</div>
+                                        <p className="text-[11px] text-gray-800 leading-snug line-clamp-4">
+                                          {sp.matchedSourceText ? sp.matchedSourceText : <span className="italic text-gray-400">See source page</span>}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    {sp.source && <p className="mb-1.5 text-gray-600 text-[10px]"><span className="font-semibold text-gray-700">Source: </span>{sp.source}</p>}
                                     {sp.url ? (
-                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium">
+                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium text-[11px]">
                                         View on internet
                                         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                                       </a>
@@ -1130,10 +1229,35 @@ export default function AIAnalysisClient() {
                                        className="ml-auto text-blue-500 hover:underline truncate max-w-[200px]">{src.url}</a>
                                   </div>
                                   {src.matchedSentences?.length > 0 && (
-                                    <div className="mt-2 space-y-1">
-                                      {src.matchedSentences.slice(0, 3).map((sent: string, mi: number) => (
-                                        <div key={mi} className="text-[10px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 italic line-clamp-2">
-                                          &ldquo;{sent}&rdquo;
+                                    <div className="mt-2 space-y-2">
+                                      {src.matchedSentences.slice(0, 4).map((pair: any, mi: number) => (
+                                        <div key={mi} className="rounded-lg border overflow-hidden">
+                                          <div className="grid grid-cols-2 divide-x text-[10px]">
+                                            <div className="bg-yellow-50 p-2">
+                                              <div className="font-bold text-yellow-700 text-[9px] uppercase tracking-wider mb-1">Your Research</div>
+                                              <p className="text-gray-800 leading-snug line-clamp-3 italic">&ldquo;{typeof pair === 'string' ? pair : pair.proposedText}&rdquo;</p>
+                                            </div>
+                                            <div className="bg-red-50 p-2">
+                                              <div className="font-bold text-red-700 text-[9px] uppercase tracking-wider mb-1 flex items-center justify-between">
+                                                <span>Matched Source</span>
+                                                {typeof pair !== 'string' && (
+                                                  <span className={`px-1 rounded text-[8px] font-bold ${
+                                                    pair.matchType === 'exact' ? 'bg-yellow-200 text-yellow-800' :
+                                                    pair.matchType === 'near' ? 'bg-orange-200 text-orange-800' :
+                                                    'bg-rose-200 text-rose-700'
+                                                  }`}>{pair.confidence}%</span>
+                                                )}
+                                              </div>
+                                              <p className="text-gray-800 leading-snug line-clamp-3 italic">
+                                                {typeof pair === 'string'
+                                                  ? <span className="text-gray-400">See source page</span>
+                                                  : pair.sourceText
+                                                  ? <>&ldquo;{pair.sourceText}&rdquo;</>  
+                                                  : <span className="text-gray-400 not-italic">See source page</span>
+                                                }
+                                              </p>
+                                            </div>
+                                          </div>
                                         </div>
                                       ))}
                                     </div>

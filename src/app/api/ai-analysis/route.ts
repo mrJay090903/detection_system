@@ -2,6 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
 import { getJson } from 'serpapi';
+import path from 'path';
+import { execFileSync } from 'child_process';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const openai = new OpenAI({
@@ -413,13 +415,16 @@ interface WebHighlightSpan {
   sourceUrl: string;
   sourceTitle: string;
   sourceSnippet: string;
+  /** The actual sentence/passage from the source page that matched */
+  matchedSourceText: string;
 }
 
 interface WebSourceMatch {
   url: string;
   title: string;
   matchPercentage: number;
-  matchedSentences: string[];
+  /** Pairs of { proposedText, sourceText } for side-by-side display */
+  matchedSentences: Array<{ proposedText: string; sourceText: string; confidence: number; matchType: string }>;
   highlights: WebHighlightSpan[];
 }
 
@@ -430,33 +435,26 @@ interface WebScanResult {
   scannedUrls: number;
 }
 
-/** Strip HTML/CSS/JS from a raw HTML string */
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-/** Fetch a URL and return extracted plain text (4 s timeout) */
-async function fetchPageText(url: string, timeoutMs = 4000): Promise<string> {
+/**
+ * Batch-extract clean article text from URLs using trafilatura (Python).
+ * Returns a map of url -> clean text.
+ */
+function fetchPagesWithTrafilatura(urls: string[]): Record<string, string> {
+  if (urls.length === 0) return {};
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AcademicBot/1.0)' },
+    const pythonPath = path.join(process.cwd(), '.venv', 'Scripts', 'python.exe');
+    const scriptPath = path.join(process.cwd(), 'scripts', 'trafilatura_extract.py');
+    const output = execFileSync(pythonPath, [scriptPath], {
+      input: JSON.stringify(urls),
+      encoding: 'utf-8',
+      timeout: 40_000,
+      maxBuffer: 20 * 1024 * 1024,
+      env: { ...process.env, PYTHONUTF8: '1' },
     });
-    clearTimeout(timer);
-    if (!res.ok) return '';
-    const html = await res.text();
-    return stripHtml(html);
-  } catch {
-    return '';
+    return JSON.parse(output);
+  } catch (e) {
+    console.error('[Trafilatura] Python extraction failed:', e);
+    return {};
   }
 }
 
@@ -466,8 +464,14 @@ function getSentencesWithPositions(text: string): Array<{ text: string; start: n
   const re = /[^.!?\n]{20,}[.!?\n]+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const s = m[0].trim();
-    if (s.split(/\s+/).length >= 5) result.push({ text: s, start: m.index, end: m.index + m[0].length });
+    const raw = m[0];
+    const s = raw.trim();
+    if (s.split(/\s+/).length < 5) continue;
+    // Adjust start to skip any leading whitespace that trim() removed
+    const leadWS = raw.length - raw.trimStart().length;
+    const start = m.index + leadWS;
+    const end = start + s.length;
+    if (end <= text.length) result.push({ text: s, start, end });
   }
   return result;
 }
@@ -495,7 +499,7 @@ function cosineSim(a: string[], b: string[]): number {
 }
 
 /** N-word shingle set from text */
-function getShinglesSet(text: string, n = 8): Set<string> {
+function getShinglesSet(text: string, n = 10): Set<string> {
   const words = text.toLowerCase().match(/\b[a-z][a-z'-]*\b/g) || [];
   const s = new Set<string>();
   for (let i = 0; i <= words.length - n; i++) s.add(words.slice(i, i + n).join(' '));
@@ -521,16 +525,16 @@ async function performWebSimilarityScan(
   if (urlEntries.length === 0) return { overallSimilarity: 0, sources: [], highlights: [], scannedUrls: 0 };
 
   const proposedSentences = getSentencesWithPositions(proposedText);
-  const proposedShingles  = getShinglesSet(proposedText, 8);
+  const proposedShingles  = getShinglesSet(proposedText, 10);
   const proposedLen       = proposedText.length;
 
-  // Fetch all pages in parallel
-  const pageTexts = await Promise.all(
-    urlEntries.map(async ([url, meta]) => ({
-      url, title: meta.title, snippet: meta.snippet,
-      text: await fetchPageText(url),
-    }))
-  );
+  // Batch-fetch page texts via trafilatura (Python subprocess)
+  const urlList = urlEntries.map(([url]) => url);
+  const extractedTexts = fetchPagesWithTrafilatura(urlList);
+  const pageTexts = urlEntries.map(([url, meta]) => ({
+    url, title: meta.title, snippet: meta.snippet,
+    text: extractedTexts[url] || '',
+  }));
 
   const allHighlights: WebHighlightSpan[] = [];
   const sources: WebSourceMatch[] = [];
@@ -538,50 +542,58 @@ async function performWebSimilarityScan(
   for (const { url, title, snippet, text } of pageTexts) {
     if (text.length < 100) continue;
 
-    const sourceShingles   = getShinglesSet(text, 8);
+    const sourceShingles   = getShinglesSet(text, 10);
     const sourceSentences  = getSentencesWithPositions(text).slice(0, 150);
     const matchedSpans: WebHighlightSpan[] = [];
-    const matchedTexts: string[] = [];
+    const matchedPairs: Array<{ proposedText: string; sourceText: string; confidence: number; matchType: string }> = [];
     let   matchedChars = 0;
 
     for (const ps of proposedSentences) {
       const pTokens = tokenize(ps.text);
       if (pTokens.length < 4) continue;
 
+      // Find the best-matching source sentence (used for both A and B/C display)
+      let bestCos = 0;
+      let bestSourceSentText = '';
+      for (const ss of sourceSentences) {
+        const s = cosineSim(pTokens, tokenize(ss.text));
+        if (s > bestCos) { bestCos = s; bestSourceSentText = ss.text; }
+        if (bestCos >= 0.98) break;
+      }
+
       // ── A: Exact copy via shingle overlap ─────────────────────────────
-      const sentShingles = getShinglesSet(ps.text, 8);
+      const sentShingles = getShinglesSet(ps.text, 10);
       let shinHits = 0;
       for (const sh of sentShingles) if (sourceShingles.has(sh)) shinHits++;
       const exactRatio = sentShingles.size > 0 ? shinHits / sentShingles.size : 0;
 
       if (exactRatio >= 0.5) {
+        const srcText = bestSourceSentText || snippet;
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'exact',
-          confidence: Math.round(exactRatio * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+          confidence: Math.round(exactRatio * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
+          matchedSourceText: srcText });
         matchedChars += ps.end - ps.start;
-        matchedTexts.push(ps.text);
+        matchedPairs.push({ proposedText: ps.text, sourceText: srcText,
+          confidence: Math.round(exactRatio * 100), matchType: 'exact' });
         continue;
       }
 
-      // ── B: Near-exact via TF-IDF cosine ───────────────────────────────
-      let bestCos = 0;
-      for (const ss of sourceSentences) {
-        const s = cosineSim(pTokens, tokenize(ss.text));
-        if (s > bestCos) bestCos = s;
-        if (bestCos >= 0.92) break;
-      }
-
+      // ── B: Near-exact / C: Paraphrase via TF-IDF cosine ──────────────
       if (bestCos >= 0.85) {
-        matchedSpans.push({ start: ps.start, end: ps.end,
-          matchType: bestCos >= 0.92 ? 'exact' : 'near',
-          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+        const mType = bestCos >= 0.92 ? 'exact' : 'near';
+        matchedSpans.push({ start: ps.start, end: ps.end, matchType: mType,
+          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
+          matchedSourceText: bestSourceSentText });
         matchedChars += ps.end - ps.start;
-        matchedTexts.push(ps.text);
+        matchedPairs.push({ proposedText: ps.text, sourceText: bestSourceSentText,
+          confidence: Math.round(bestCos * 100), matchType: mType });
       } else if (bestCos >= 0.65) {
-        // ── C: Paraphrase ─────────────────────────────────────────────
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'paraphrase',
-          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet });
+          confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
+          matchedSourceText: bestSourceSentText });
         matchedChars += Math.round((ps.end - ps.start) * 0.5);
-        matchedTexts.push(ps.text);
+        matchedPairs.push({ proposedText: ps.text, sourceText: bestSourceSentText,
+          confidence: Math.round(bestCos * 100), matchType: 'paraphrase' });
       }
     }
 
@@ -589,7 +601,7 @@ async function performWebSimilarityScan(
 
     const matchPct = proposedLen > 0 ? Math.min(Math.round((matchedChars / proposedLen) * 100), 100) : 0;
     allHighlights.push(...matchedSpans);
-    sources.push({ url, title, matchPercentage: matchPct, matchedSentences: matchedTexts.slice(0, 10), highlights: matchedSpans });
+    sources.push({ url, title, matchPercentage: matchPct, matchedSentences: matchedPairs.slice(0, 10), highlights: matchedSpans });
   }
 
   // Sort sources by match%
@@ -602,7 +614,11 @@ async function performWebSimilarityScan(
     const prev = merged[merged.length - 1];
     if (prev && h.start < prev.end) {
       if (h.end > prev.end) prev.end = h.end;
-      if (h.confidence > prev.confidence) { prev.matchType = h.matchType; prev.confidence = h.confidence; }
+      if (h.confidence > prev.confidence) {
+        prev.matchType = h.matchType;
+        prev.confidence = h.confidence;
+        prev.matchedSourceText = h.matchedSourceText;
+      }
     } else merged.push({ ...h });
   }
 
