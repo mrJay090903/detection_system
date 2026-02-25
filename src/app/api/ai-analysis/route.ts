@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
+import { getJson } from 'serpapi';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const openai = new OpenAI({
@@ -53,6 +54,184 @@ async function retryWithBackoff<T>(
 }
 
 export const maxDuration = 60;
+
+// ============================================================================
+// SERPAPI WEB SEARCH HELPERS
+// ============================================================================
+
+interface SerpWebResult {
+  position: number;
+  title: string;
+  link: string;
+  snippet: string;
+  source: string;
+  date?: string;
+}
+
+async function serpSearchGoogle(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  const apiKey = process.env.SERPAPI_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const response = await getJson({
+      engine: 'google',
+      q: query,
+      api_key: apiKey,
+      num: numResults,
+      hl: 'en',
+    });
+    const organic = response.organic_results || [];
+    return organic.map((r: any, i: number) => ({
+      position: i + 1,
+      title: r.title || '',
+      link: r.link || '',
+      snippet: r.snippet || '',
+      source: r.displayed_link || r.source || '',
+      date: r.date || undefined,
+    }));
+  } catch (err) {
+    console.error('[SerpAPI Google]', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+async function serpSearchScholar(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  const apiKey = process.env.SERPAPI_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    const response = await getJson({
+      engine: 'google_scholar',
+      q: query,
+      api_key: apiKey,
+      num: numResults,
+      hl: 'en',
+    });
+    const organic = response.organic_results || [];
+    return organic.map((r: any, i: number) => ({
+      position: i + 1,
+      title: r.title || '',
+      link: r.link || '',
+      snippet: r.snippet || '',
+      source: r.publication_info?.summary || r.displayed_link || '',
+      date: r.publication_info?.summary?.match(/\d{4}/)?.[0] || undefined,
+    }));
+  } catch (err) {
+    console.error('[SerpAPI Scholar]', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+// Verify match breakdown entries and text highlights using SerpAPI
+async function verifySerpResults(
+  matchEntries: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[] }>,
+  textHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number }>,
+  proposedTitle: string
+): Promise<{
+  verifiedMatches: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[]; serpVerified: boolean; serpResults: SerpWebResult[] }>;
+  verifiedHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number; serpVerified: boolean; serpResults: SerpWebResult[]; scholarResults: SerpWebResult[] }>;
+  webCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title'; date?: string }>;
+}> {
+  const hasSerpApi = !!process.env.SERPAPI_API_KEY;
+  
+  if (!hasSerpApi) {
+    console.log('[SerpAPI] No SERPAPI_API_KEY configured, skipping web verification');
+    return {
+      verifiedMatches: matchEntries.map(m => ({ ...m, serpVerified: false, serpResults: [] })),
+      verifiedHighlights: textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] })),
+      webCitations: [],
+    };
+  }
+
+  console.log(`[SerpAPI] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
+  const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title'; date?: string }> = [];
+  const seenUrls = new Set<string>();
+
+  const addCitation = (result: SerpWebResult, via: 'breakdown' | 'highlight' | 'title') => {
+    if (result.link && !seenUrls.has(result.link)) {
+      seenUrls.add(result.link);
+      allCitations.push({ title: result.title, url: result.link, snippet: result.snippet, source: result.source, foundVia: via, date: result.date });
+    }
+  };
+
+  // 1. Search for the proposed title itself
+  const titleResults = await serpSearchScholar(proposedTitle, 5).catch(() => []);
+  titleResults.forEach(r => addCitation(r, 'title'));
+
+  // 2. Verify match breakdown entries (search by name/title of each match)
+  const MATCH_BATCH = 3;
+  const verifiedMatches = [];
+  for (let i = 0; i < matchEntries.length; i += MATCH_BATCH) {
+    const batch = matchEntries.slice(i, i + MATCH_BATCH);
+    const batchResults = await Promise.all(
+      batch.map(async (entry) => {
+        const query = entry.name.substring(0, 200);
+        const [googleRes, scholarRes] = await Promise.all([
+          serpSearchGoogle(`"${query}"`, 3).catch(() => [] as SerpWebResult[]),
+          serpSearchScholar(query, 3).catch(() => [] as SerpWebResult[]),
+        ]);
+        const allResults = [...googleRes, ...scholarRes];
+        allResults.forEach(r => addCitation(r, 'breakdown'));
+        
+        // Check if we found the exact source — update the link if the AI provided "N/A" or a broken link
+        const bestResult = allResults[0];
+        const verifiedLink = bestResult?.link || entry.link;
+        
+        return {
+          ...entry,
+          link: verifiedLink,
+          serpVerified: allResults.length > 0,
+          serpResults: allResults.slice(0, 5),
+        };
+      })
+    );
+    verifiedMatches.push(...batchResults);
+    if (i + MATCH_BATCH < matchEntries.length) await new Promise(r => setTimeout(r, 400));
+  }
+
+  // 3. Verify text highlights (search by matched text phrases)
+  const HIGHLIGHT_BATCH = 3;
+  const verifiedHighlights = [];
+  for (let i = 0; i < textHighlights.length; i += HIGHLIGHT_BATCH) {
+    const batch = textHighlights.slice(i, i + HIGHLIGHT_BATCH);
+    const batchResults = await Promise.all(
+      batch.map(async (highlight) => {
+        const searchText = highlight.matchedText.substring(0, 256);
+        if (searchText.length < 10) {
+          return { ...highlight, serpVerified: false, serpResults: [] as SerpWebResult[], scholarResults: [] as SerpWebResult[] };
+        }
+        const [googleRes, scholarRes] = await Promise.all([
+          serpSearchGoogle(`"${searchText}"`, 3).catch(() => [] as SerpWebResult[]),
+          serpSearchScholar(searchText, 3).catch(() => [] as SerpWebResult[]),
+        ]);
+        const allResults = [...googleRes, ...scholarRes];
+        allResults.forEach(r => addCitation(r, 'highlight'));
+        
+        // Update sourceUrl if SerpAPI found a real one
+        const bestResult = allResults[0];
+        const verifiedUrl = bestResult?.link || highlight.sourceUrl;
+        const verifiedSource = bestResult?.title || highlight.source;
+        
+        return {
+          ...highlight,
+          sourceUrl: verifiedUrl,
+          source: highlight.source === 'Unknown Source' ? verifiedSource : highlight.source,
+          serpVerified: allResults.length > 0,
+          serpResults: googleRes.slice(0, 3),
+          scholarResults: scholarRes.slice(0, 3),
+        };
+      })
+    );
+    verifiedHighlights.push(...batchResults);
+    if (i + HIGHLIGHT_BATCH < textHighlights.length) await new Promise(r => setTimeout(r, 400));
+  }
+
+  console.log(`[SerpAPI] Verification complete. Found ${allCitations.length} unique web citations`);
+  console.log(`[SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
+  console.log(`[SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
+
+  return { verifiedMatches, verifiedHighlights, webCitations: allCitations };
+}
 
 // ============================================================================
 // SECURITY CONFIGURATION
@@ -759,8 +938,14 @@ const modelPriority = [
       average: null as number | null
     };
     
+    // ============================================================================
+    // SERPAPI WEB VERIFICATION - Verify matches and highlights with real internet data
+    // ============================================================================
+    console.log('[SerpAPI] Starting web verification of AI-generated matches and highlights...');
+    const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle);
+    
     const matchBreakdown = {
-      matches: matchEntries,
+      matches: serpVerification.verifiedMatches,
       conclusion: similarityConclusion,
     };
 
@@ -949,11 +1134,24 @@ const modelPriority = [
       // 4-Field Assessment
       fieldAssessment,
       
-      // Match Breakdown & Source List
+      // Match Breakdown & Source List (now SerpAPI-verified)
       matchBreakdown,
       
-      // Text Match Highlights
-      textHighlights,
+      // Text Match Highlights (now SerpAPI-verified)
+      textHighlights: serpVerification.verifiedHighlights,
+      
+      // Web Citations from SerpAPI (real internet sources)
+      webCitations: serpVerification.webCitations,
+      
+      // SerpAPI verification summary
+      serpVerification: {
+        enabled: !!process.env.SERPAPI_API_KEY,
+        matchesVerified: serpVerification.verifiedMatches.filter(m => m.serpVerified).length,
+        matchesTotal: serpVerification.verifiedMatches.length,
+        highlightsVerified: serpVerification.verifiedHighlights.filter(h => h.serpVerified).length,
+        highlightsTotal: serpVerification.verifiedHighlights.length,
+        totalWebCitations: serpVerification.webCitations.length,
+      },
       
       // Explanation
       pipelineExplanation: {

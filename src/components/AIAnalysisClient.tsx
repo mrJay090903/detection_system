@@ -41,6 +41,14 @@ export default function AIAnalysisClient() {
   const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
   const [retryCount, setRetryCount] = useState(0)
 
+  // SerpAPI web search results
+  const [matchBreakdown, setMatchBreakdown] = useState<any>(null)
+  const [textHighlights, setTextHighlights] = useState<any[]>([])
+  const [webCitations, setWebCitations] = useState<any[]>([])
+  const [serpVerification, setSerpVerification] = useState<any>(null)
+  const [fieldAssessment, setFieldAssessment] = useState<any>(null)
+  const [activeResultTab, setActiveResultTab] = useState<'breakdown' | 'highlights' | 'citations'>('breakdown')
+
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
   const overallSimilarity = parseFloat(searchParams.get('overallSimilarity') || '0')
@@ -346,6 +354,23 @@ export default function AIAnalysisClient() {
           setPipelineExplanation(data.pipelineExplanation)
         }
 
+        // SerpAPI web search data
+        if (data.matchBreakdown) {
+          setMatchBreakdown(data.matchBreakdown)
+        }
+        if (data.textHighlights) {
+          setTextHighlights(data.textHighlights)
+        }
+        if (data.webCitations) {
+          setWebCitations(data.webCitations)
+        }
+        if (data.serpVerification) {
+          setSerpVerification(data.serpVerification)
+        }
+        if (data.fieldAssessment) {
+          setFieldAssessment(data.fieldAssessment)
+        }
+
         setProgress(100)
         setLoadingMessage('Analysis complete!')
 
@@ -478,9 +503,412 @@ export default function AIAnalysisClient() {
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Rest of the UI (summary, tabs, content) is preserved from previous implementation. */}
-            {/* For brevity in this helper component, the full JSX is omitted here as it's unchanged. */}
-            <div>AI Analysis content rendered here</div>
+            {/* Summary Header */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl shadow-lg p-8 border border-gray-100"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <Sparkles className="w-7 h-7 text-purple-600" />
+                <h2 className="text-2xl font-bold text-gray-900">AI Analysis Complete</h2>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
+                <span>Comparing:</span>
+                <span className="font-medium text-gray-700">{displayTitle}</span>
+                <span>vs</span>
+                <span className="font-medium text-gray-700">{existingTitle}</span>
+              </div>
+
+              {/* Similarity Metrics */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {Object.entries(metrics).map(([key, metric]) => (
+                  <div key={key} className="p-4 rounded-xl bg-gray-50 border">
+                    <div className="text-xs text-gray-500 mb-1">{metric.label}</div>
+                    <div className="text-3xl font-bold text-gray-900">{metric.score.toFixed(1)}%</div>
+                    <div className="text-xs text-gray-400 mt-1">{metric.description}</div>
+                    <div className={`h-1.5 mt-2 rounded-full ${metric.color}`} style={{ width: `${Math.min(metric.score, 100)}%` }} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Problem Identity */}
+              {problemIdentity && (
+                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Layers className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-semibold text-blue-800">Problem Comparison: {problemIdentity.problemComparison}</span>
+                  </div>
+                  <p className="text-xs text-blue-700">{similarityRationale}</p>
+                </div>
+              )}
+
+              {/* 4-Field Assessment */}
+              {fieldAssessment?.scores && (
+                <div className="p-4 rounded-xl bg-gray-50 border mb-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4" />
+                    4-Field Conceptual Assessment
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Problem/Need', value: fieldAssessment.scores.problemNeed, rationale: fieldAssessment.rationales?.problemNeed },
+                      { label: 'Objectives', value: fieldAssessment.scores.objectives, rationale: fieldAssessment.rationales?.objectives },
+                      { label: 'Scope/Context', value: fieldAssessment.scores.scopeContext, rationale: fieldAssessment.rationales?.scopeContext },
+                      { label: 'Inputs/Outputs', value: fieldAssessment.scores.inputsOutputs, rationale: fieldAssessment.rationales?.inputsOutputs },
+                    ].map((field) => (
+                      <div key={field.label} className="p-3 bg-white rounded-lg border" title={field.rationale || ''}>
+                        <div className="text-[10px] text-gray-500 mb-1">{field.label}</div>
+                        <div className="text-lg font-bold text-gray-900">{field.value !== null && field.value !== undefined ? `${field.value}%` : 'N/A'}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {fieldAssessment.average !== null && (
+                    <div className="mt-3 text-center p-2 bg-white rounded-lg border">
+                      <span className="text-xs text-gray-500">Average: </span>
+                      <span className="text-sm font-bold text-gray-900">{fieldAssessment.average}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SerpAPI Verification Badge */}
+              {serpVerification?.enabled && (
+                <div className="p-3 rounded-xl bg-green-50 border border-green-200 flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                  <div>
+                    <span className="text-sm font-semibold text-green-800">Web Search Verification (SerpAPI)</span>
+                    <p className="text-xs text-green-700">
+                      {serpVerification.matchesVerified}/{serpVerification.matchesTotal} matches verified
+                      &nbsp;•&nbsp;
+                      {serpVerification.highlightsVerified}/{serpVerification.highlightsTotal} highlights verified
+                      &nbsp;•&nbsp;
+                      {serpVerification.totalWebCitations} web citations found
+                    </p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Tab Navigation */}
+            <div className="flex gap-2 bg-white rounded-xl p-1.5 shadow-sm border">
+              {[
+                { key: 'breakdown' as const, label: 'Match Breakdown', icon: <Layers className="w-4 h-4" />, count: matchBreakdown?.matches?.length || 0 },
+                { key: 'highlights' as const, label: 'Text Highlights', icon: <FileText className="w-4 h-4" />, count: textHighlights.length },
+                { key: 'citations' as const, label: 'Web Citations', icon: <BookOpen className="w-4 h-4" />, count: webCitations.length },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveResultTab(tab.key)}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    activeResultTab === tab.key
+                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-md'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                  {tab.count > 0 && (
+                    <span className={`ml-1 text-xs px-1.5 py-0.5 rounded-full ${
+                      activeResultTab === tab.key ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* MATCH BREAKDOWN TAB */}
+            {activeResultTab === 'breakdown' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                {matchBreakdown?.matches?.length > 0 ? (
+                  matchBreakdown.matches.map((match: any, idx: number) => (
+                    <div key={idx} className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition-shadow">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-700">MATCH #{idx + 1}</span>
+                            <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">{match.type}</span>
+                            {match.year && match.year !== 'N/A' && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-600">{match.year}</span>
+                            )}
+                            {match.serpVerified && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3" /> Web Verified
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="text-base font-semibold text-gray-900">{match.name}</h3>
+                          {match.link && match.link !== 'N/A' && match.link !== '' && (
+                            <a href={match.link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline break-all">
+                              {match.link}
+                            </a>
+                          )}
+                        </div>
+                        {match.rubric?.overall !== null && (
+                          <div className={`text-center px-3 py-2 rounded-lg ${
+                            match.rubric.overall >= 50 ? 'bg-red-50 text-red-700' :
+                            match.rubric.overall >= 30 ? 'bg-orange-50 text-orange-700' :
+                            'bg-green-50 text-green-700'
+                          }`}>
+                            <div className="text-xl font-bold">{match.rubric.overall}%</div>
+                            <div className="text-[10px]">Overall</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Rubric Scores */}
+                      {match.rubric && (
+                        <div className="grid grid-cols-5 gap-2 mb-3">
+                          {[
+                            { label: 'Problem', value: match.rubric.problem },
+                            { label: 'Objectives', value: match.rubric.objectives },
+                            { label: 'Inputs', value: match.rubric.inputs },
+                            { label: 'Method', value: match.rubric.method },
+                            { label: 'Users', value: match.rubric.users },
+                          ].map((score) => (
+                            <div key={score.label} className="text-center p-2 bg-gray-50 rounded-lg">
+                              <div className="text-[10px] text-gray-500">{score.label}</div>
+                              <div className="text-sm font-semibold">{score.value !== null ? `${score.value}%` : 'N/A'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Why It Matches */}
+                      {match.whyMatches?.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-xs font-semibold text-gray-600 mb-1">Why It Matches:</div>
+                          <ul className="text-xs text-gray-700 space-y-1">
+                            {match.whyMatches.map((reason: string, i: number) => (
+                              <li key={i} className="flex items-start gap-1.5">
+                                <span className="text-orange-500 mt-0.5">•</span>
+                                {reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* What Is Different */}
+                      {match.whatsDifferent?.length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-xs font-semibold text-gray-600 mb-1">What Is Different:</div>
+                          <ul className="text-xs text-gray-700 space-y-1">
+                            {match.whatsDifferent.map((diff: string, i: number) => (
+                              <li key={i} className="flex items-start gap-1.5">
+                                <span className="text-green-500 mt-0.5">•</span>
+                                {diff}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* SerpAPI Web Results for this match */}
+                      {match.serpResults?.length > 0 && (
+                        <div className="mt-3 pt-3 border-t">
+                          <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                            Internet Sources Found ({match.serpResults.length})
+                          </div>
+                          <div className="space-y-2">
+                            {match.serpResults.slice(0, 3).map((result: any, ri: number) => (
+                              <div key={ri} className="p-2 bg-green-50/50 rounded-lg border border-green-100">
+                                <a href={result.link} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-700 hover:underline line-clamp-1">
+                                  {result.title}
+                                </a>
+                                <p className="text-[10px] text-gray-600 line-clamp-2 mt-0.5">{result.snippet}</p>
+                                <div className="text-[10px] text-gray-400 mt-0.5">{result.source}{result.date ? ` • ${result.date}` : ''}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
+                    <Layers className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500">No match breakdown entries found in the AI analysis.</p>
+                  </div>
+                )}
+
+                {/* Similarity Conclusion */}
+                {matchBreakdown?.conclusion && (
+                  <div className="bg-white rounded-xl shadow-sm border p-6">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <Lightbulb className="w-4 h-4 text-yellow-500" />
+                      Similarity Conclusion
+                    </h3>
+                    <p className="text-sm text-gray-600 whitespace-pre-wrap">{matchBreakdown.conclusion}</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* TEXT HIGHLIGHTS TAB */}
+            {activeResultTab === 'highlights' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                {textHighlights.length > 0 ? (
+                  textHighlights.map((highlight: any, idx: number) => (
+                    <div key={idx} className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition-shadow">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-700">HIGHLIGHT #{idx + 1}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            highlight.matchType === 'Exact Copy' ? 'bg-red-100 text-red-700' :
+                            highlight.matchType === 'Close Paraphrase' ? 'bg-orange-100 text-orange-700' :
+                            highlight.matchType === 'Patchwriting' ? 'bg-yellow-100 text-yellow-700' :
+                            highlight.matchType === 'Common Knowledge' ? 'bg-gray-100 text-gray-600' :
+                            'bg-blue-100 text-blue-600'
+                          }`}>
+                            {highlight.matchType}
+                          </span>
+                          {highlight.serpVerified && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" /> Web Verified
+                            </span>
+                          )}
+                        </div>
+                        <div className={`text-sm font-bold px-2.5 py-1 rounded-lg ${
+                          highlight.similarity >= 80 ? 'bg-red-100 text-red-700' :
+                          highlight.similarity >= 50 ? 'bg-orange-100 text-orange-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>
+                          {highlight.similarity}%
+                        </div>
+                      </div>
+
+                      {/* Matched Text */}
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-3">
+                        <p className="text-sm text-gray-800 italic">"{highlight.matchedText}"</p>
+                      </div>
+
+                      {/* Source Info */}
+                      <div className="text-xs space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-500 font-medium">Source:</span>
+                          <span className="text-gray-700">{highlight.source}</span>
+                        </div>
+                        {highlight.sourceUrl && highlight.sourceUrl !== 'N/A' && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-500 font-medium">URL:</span>
+                            <a href={highlight.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
+                              {highlight.sourceUrl}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* SerpAPI Results for highlight */}
+                      {(highlight.serpResults?.length > 0 || highlight.scholarResults?.length > 0) && (
+                        <div className="mt-3 pt-3 border-t">
+                          <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                            Internet Sources Found
+                          </div>
+                          <div className="space-y-2">
+                            {[...(highlight.serpResults || []), ...(highlight.scholarResults || [])].slice(0, 4).map((result: any, ri: number) => (
+                              <div key={ri} className="p-2 bg-green-50/50 rounded-lg border border-green-100">
+                                <a href={result.link} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-700 hover:underline line-clamp-1">
+                                  {result.title}
+                                </a>
+                                <p className="text-[10px] text-gray-600 line-clamp-2 mt-0.5">{result.snippet}</p>
+                                <div className="text-[10px] text-gray-400 mt-0.5">{result.source}{result.date ? ` • ${result.date}` : ''}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
+                    <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500">No text highlights found. The proposed text appears to be original.</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* WEB CITATIONS TAB */}
+            {activeResultTab === 'citations' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                {webCitations.length > 0 ? (
+                  <>
+                    <div className="bg-white rounded-xl shadow-sm border p-4">
+                      <p className="text-sm text-gray-600">
+                        Found <span className="font-bold text-gray-900">{webCitations.length}</span> unique web citations related to the proposed research.
+                        These are real internet sources found via SerpAPI Google Search and Google Scholar.
+                      </p>
+                    </div>
+                    {webCitations.map((citation: any, idx: number) => (
+                      <div key={idx} className="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <a href={citation.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-700 hover:underline line-clamp-2">
+                              {citation.title}
+                            </a>
+                            <p className="text-xs text-gray-600 mt-1 line-clamp-3">{citation.snippet}</p>
+                            <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-400">
+                              <span>{citation.source}</span>
+                              {citation.date && <span>• {citation.date}</span>}
+                              <span className={`px-1.5 py-0.5 rounded-full ${
+                                citation.foundVia === 'breakdown' ? 'bg-purple-100 text-purple-600' :
+                                citation.foundVia === 'highlight' ? 'bg-amber-100 text-amber-600' :
+                                'bg-blue-100 text-blue-600'
+                              }`}>
+                                via {citation.foundVia}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
+                    <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-500 mb-2">No web citations found.</p>
+                    <p className="text-xs text-gray-400">
+                      {serpVerification?.enabled
+                        ? 'SerpAPI search did not find matching sources on the internet.'
+                        : 'Add SERPAPI_API_KEY to your environment to enable real web search verification.'}
+                    </p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Raw AI Analysis (collapsed) */}
+            {analysis && (
+              <details className="bg-white rounded-xl shadow-sm border">
+                <summary className="cursor-pointer p-4 text-sm font-medium text-gray-600 hover:text-gray-900">
+                  View Raw AI Analysis Output
+                </summary>
+                <div className="p-4 pt-0">
+                  <pre className="text-xs text-gray-600 whitespace-pre-wrap bg-gray-50 p-4 rounded-lg max-h-[400px] overflow-y-auto">{analysis}</pre>
+                </div>
+              </details>
+            )}
+
+            {/* Back Button */}
+            <div className="flex justify-center">
+              <Button
+                onClick={() => router.push('/research-check')}
+                variant="outline"
+                size="lg"
+                className="gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Check Another Research
+              </Button>
+            </div>
           </div>
         )}
       </main>
