@@ -18,6 +18,88 @@ import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
 import { toast } from "sonner"
 
+// ── Inline highlight utilities ────────────────────────────────────────────────
+type HlSpan = {
+  start: number; end: number;
+  matchType: string; source: string; url: string;
+  color: 'red' | 'orange' | 'yellow' | 'blue';
+};
+type TextSegment =
+  | { text: string; highlighted: false }
+  | { text: string; highlighted: true; span: HlSpan };
+
+function getHighlightedSegments(
+  text: string,
+  textHighlights: any[],
+  phraseHighlights: any[]
+): TextSegment[] {
+  if (!text?.trim()) return [];
+  const spans: HlSpan[] = [];
+  const lo = text.toLowerCase();
+
+  // Strong matches from AI text highlights
+  for (const h of textHighlights) {
+    const needle = (h.matchedText || '').trim();
+    if (needle.length < 10) continue;
+    const idx = lo.indexOf(needle.toLowerCase());
+    if (idx === -1) continue;
+    spans.push({
+      start: idx, end: idx + needle.length,
+      matchType: h.matchType || 'Unknown',
+      source: h.source || '',
+      url: (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') ||
+            h.serpResults?.[0]?.link || '',
+      color:
+        h.matchType === 'Exact Copy' ? 'red' :
+        (h.matchType === 'Close Paraphrase' || (h.matchType || '').includes('Structural')) ? 'orange' :
+        h.matchType === 'Patchwriting' ? 'yellow' : 'blue',
+    });
+  }
+
+  // Lighter phrase matches (found on internet)
+  for (const ph of phraseHighlights) {
+    if (!ph.foundOnWeb) continue;
+    const needle = (ph.phrase || '').trim();
+    if (needle.length < 8) continue;
+    const idx = lo.indexOf(needle.toLowerCase());
+    if (idx === -1) continue;
+    const covered = spans.some(s => idx >= s.start && idx + needle.length <= s.end);
+    if (covered) continue;
+    spans.push({
+      start: idx, end: idx + needle.length,
+      matchType: 'Phrase Match',
+      source: ph.bestSource || '',
+      url: ph.bestUrl || '',
+      color: 'blue',
+    });
+  }
+
+  if (spans.length === 0) return [{ text, highlighted: false }];
+
+  // Sort & merge overlapping spans
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: HlSpan[] = [];
+  for (const s of spans) {
+    const prev = merged[merged.length - 1];
+    if (prev && s.start < prev.end) {
+      if (s.end > prev.end) prev.end = s.end;
+    } else {
+      merged.push({ ...s });
+    }
+  }
+
+  // Build output segments
+  const result: TextSegment[] = [];
+  let pos = 0;
+  for (const span of merged) {
+    if (span.start > pos) result.push({ text: text.slice(pos, span.start), highlighted: false });
+    result.push({ text: text.slice(span.start, span.end), highlighted: true, span });
+    pos = span.end;
+  }
+  if (pos < text.length) result.push({ text: text.slice(pos), highlighted: false });
+  return result;
+}
+
 export default function AIAnalysisClient() {
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -44,10 +126,14 @@ export default function AIAnalysisClient() {
   // SerpAPI web search results
   const [matchBreakdown, setMatchBreakdown] = useState<any>(null)
   const [textHighlights, setTextHighlights] = useState<any[]>([])
+  const [phraseHighlights, setPhraseHighlights] = useState<any[]>([])
   const [webCitations, setWebCitations] = useState<any[]>([])
   const [serpVerification, setSerpVerification] = useState<any>(null)
   const [fieldAssessment, setFieldAssessment] = useState<any>(null)
   const [activeResultTab, setActiveResultTab] = useState<'breakdown' | 'highlights' | 'citations'>('breakdown')
+  const [expandedPhrase, setExpandedPhrase] = useState<number | null>(null)
+  const [proposedText, setProposedText] = useState<string>('')
+  const [selectedSpanIdx, setSelectedSpanIdx] = useState<number | null>(null)
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -361,6 +447,9 @@ export default function AIAnalysisClient() {
         if (data.textHighlights) {
           setTextHighlights(data.textHighlights)
         }
+        if (data.phraseHighlights) {
+          setPhraseHighlights(data.phraseHighlights)
+        }
         if (data.webCitations) {
           setWebCitations(data.webCitations)
         }
@@ -369,6 +458,9 @@ export default function AIAnalysisClient() {
         }
         if (data.fieldAssessment) {
           setFieldAssessment(data.fieldAssessment)
+        }
+        if (data.proposedText) {
+          setProposedText(data.proposedText)
         }
 
         setProgress(100)
@@ -544,44 +636,146 @@ export default function AIAnalysisClient() {
               )}
 
               {/* 4-Field Assessment */}
-              {fieldAssessment?.scores && (
-                <div className="p-4 rounded-xl bg-gray-50 border mb-4">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4" />
-                    4-Field Conceptual Assessment
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Problem/Need', value: fieldAssessment.scores.problemNeed, rationale: fieldAssessment.rationales?.problemNeed },
-                      { label: 'Objectives', value: fieldAssessment.scores.objectives, rationale: fieldAssessment.rationales?.objectives },
-                      { label: 'Scope/Context', value: fieldAssessment.scores.scopeContext, rationale: fieldAssessment.rationales?.scopeContext },
-                      { label: 'Inputs/Outputs', value: fieldAssessment.scores.inputsOutputs, rationale: fieldAssessment.rationales?.inputsOutputs },
-                    ].map((field) => (
-                      <div key={field.label} className="p-3 bg-white rounded-lg border" title={field.rationale || ''}>
-                        <div className="text-[10px] text-gray-500 mb-1">{field.label}</div>
-                        <div className="text-lg font-bold text-gray-900">{field.value !== null && field.value !== undefined ? `${field.value}%` : 'N/A'}</div>
+              {fieldAssessment?.scores && (() => {
+                const fields = [
+                  {
+                    key: 'problemNeed',
+                    label: 'Problem / Need',
+                    icon: '🎯',
+                    description: 'How closely the research gap or problem being solved overlaps with existing work.',
+                    value: fieldAssessment.scores.problemNeed,
+                    rationale: fieldAssessment.rationales?.problemNeed,
+                  },
+                  {
+                    key: 'objectives',
+                    label: 'Objectives',
+                    icon: '📌',
+                    description: 'Degree to which the stated goals and aims mirror those of prior studies.',
+                    value: fieldAssessment.scores.objectives,
+                    rationale: fieldAssessment.rationales?.objectives,
+                  },
+                  {
+                    key: 'scopeContext',
+                    label: 'Scope / Context',
+                    icon: '🗺️',
+                    description: 'Similarity in the domain, boundary conditions, and setting of the research.',
+                    value: fieldAssessment.scores.scopeContext,
+                    rationale: fieldAssessment.rationales?.scopeContext,
+                  },
+                  {
+                    key: 'inputsOutputs',
+                    label: 'Inputs / Outputs',
+                    icon: '⚙️',
+                    description: 'Overlap in datasets, methods, deliverables, or expected results.',
+                    value: fieldAssessment.scores.inputsOutputs,
+                    rationale: fieldAssessment.rationales?.inputsOutputs,
+                  },
+                ];
+
+                const getLevel = (v: number | null) => {
+                  if (v === null || v === undefined) return { label: 'N/A', color: 'gray', bar: 'bg-gray-300', badge: 'bg-gray-100 text-gray-500', ring: 'border-gray-200' };
+                  if (v >= 75) return { label: 'High Overlap', color: 'red', bar: 'bg-red-500', badge: 'bg-red-100 text-red-700', ring: 'border-red-200' };
+                  if (v >= 45) return { label: 'Moderate Overlap', color: 'amber', bar: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700', ring: 'border-amber-200' };
+                  return { label: 'Low Overlap', color: 'green', bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700', ring: 'border-emerald-200' };
+                };
+
+                const avg = fieldAssessment.average;
+                const avgLevel = getLevel(avg);
+
+                return (
+                  <div className="rounded-2xl border bg-white shadow-sm mb-4 overflow-hidden">
+                    {/* Header */}
+                    <div className="px-5 pt-4 pb-3 border-b bg-gradient-to-r from-slate-50 to-gray-50 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-purple-600" />
+                        <span className="text-sm font-semibold text-gray-800">4-Field Conceptual Assessment</span>
                       </div>
-                    ))}
-                  </div>
-                  {fieldAssessment.average !== null && (
-                    <div className="mt-3 text-center p-2 bg-white rounded-lg border">
-                      <span className="text-xs text-gray-500">Average: </span>
-                      <span className="text-sm font-bold text-gray-900">{fieldAssessment.average}%</span>
+                      <span className="text-xs text-gray-500">Measures overlap with existing research across 4 dimensions</span>
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {/* Field Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x">
+                      {fields.map((field, fi) => {
+                        const level = getLevel(field.value);
+                        const pct = field.value ?? 0;
+                        return (
+                          <div key={field.key} className={`p-4 ${fi >= 2 ? 'border-t' : ''}`}>
+                            {/* Row 1: icon + label + badge */}
+                            <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg leading-none">{field.icon}</span>
+                                <span className="text-sm font-semibold text-gray-800">{field.label}</span>
+                              </div>
+                              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ml-2 ${level.badge}`}>
+                                {level.label}
+                              </span>
+                            </div>
+
+                            {/* Row 2: description */}
+                            <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">{field.description}</p>
+
+                            {/* Row 3: progress bar + score */}
+                            <div className="flex items-center gap-3 mb-3">
+                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-700 ${level.bar}`}
+                                  style={{ width: field.value !== null && field.value !== undefined ? `${pct}%` : '0%' }}
+                                />
+                              </div>
+                              <span className={`text-base font-bold w-12 text-right ${
+                                level.color === 'red' ? 'text-red-600' :
+                                level.color === 'amber' ? 'text-amber-600' :
+                                level.color === 'green' ? 'text-emerald-600' : 'text-gray-400'
+                              }`}>
+                                {field.value !== null && field.value !== undefined ? `${field.value}%` : '—'}
+                              </span>
+                            </div>
+
+                            {/* Row 4: rationale */}
+                            {field.rationale && (
+                              <div className={`text-[11px] text-gray-600 bg-gray-50 rounded-lg px-3 py-2 border ${level.ring} leading-relaxed`}>
+                                <span className="font-semibold text-gray-700">AI Rationale: </span>
+                                {field.rationale}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Average Row */}
+                    {avg !== null && avg !== undefined && (
+                      <div className="px-5 py-3 border-t bg-gradient-to-r from-slate-50 to-gray-50 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <span className="font-medium">Overall Conceptual Similarity</span>
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${avgLevel.badge}`}>{avgLevel.label}</span>
+                        </div>
+                        <div className="flex items-center gap-3 min-w-[160px]">
+                          <div className="flex-1 h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${avgLevel.bar}`} style={{ width: `${avg}%` }} />
+                          </div>
+                          <span className={`text-lg font-extrabold w-14 text-right ${
+                            avgLevel.color === 'red' ? 'text-red-600' :
+                            avgLevel.color === 'amber' ? 'text-amber-600' :
+                            avgLevel.color === 'green' ? 'text-emerald-600' : 'text-gray-500'
+                          }`}>{avg}%</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SerpAPI Verification Badge */}
               {serpVerification?.enabled && (
                 <div className="p-3 rounded-xl bg-green-50 border border-green-200 flex items-center gap-3">
-                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                  <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
                   <div>
                     <span className="text-sm font-semibold text-green-800">Web Search Verification (SerpAPI)</span>
                     <p className="text-xs text-green-700">
                       {serpVerification.matchesVerified}/{serpVerification.matchesTotal} matches verified
                       &nbsp;•&nbsp;
-                      {serpVerification.highlightsVerified}/{serpVerification.highlightsTotal} highlights verified
+                      {serpVerification.phrasesFound ?? 0}/{serpVerification.phrasesTotal ?? 0} phrases found on web
                       &nbsp;•&nbsp;
                       {serpVerification.totalWebCitations} web citations found
                     </p>
@@ -594,7 +788,7 @@ export default function AIAnalysisClient() {
             <div className="flex gap-2 bg-white rounded-xl p-1.5 shadow-sm border">
               {[
                 { key: 'breakdown' as const, label: 'Match Breakdown', icon: <Layers className="w-4 h-4" />, count: matchBreakdown?.matches?.length || 0 },
-                { key: 'highlights' as const, label: 'Text Highlights', icon: <FileText className="w-4 h-4" />, count: textHighlights.length },
+                { key: 'highlights' as const, label: 'Text Highlights', icon: <FileText className="w-4 h-4" />, count: phraseHighlights.length + textHighlights.length },
                 { key: 'citations' as const, label: 'Web Citations', icon: <BookOpen className="w-4 h-4" />, count: webCitations.length },
               ].map((tab) => (
                 <button
@@ -750,81 +944,338 @@ export default function AIAnalysisClient() {
 
             {/* TEXT HIGHLIGHTS TAB */}
             {activeResultTab === 'highlights' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-                {textHighlights.length > 0 ? (
-                  textHighlights.map((highlight: any, idx: number) => (
-                    <div key={idx} className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition-shadow">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-700">HIGHLIGHT #{idx + 1}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${
-                            highlight.matchType === 'Exact Copy' ? 'bg-red-100 text-red-700' :
-                            highlight.matchType === 'Close Paraphrase' ? 'bg-orange-100 text-orange-700' :
-                            highlight.matchType === 'Patchwriting' ? 'bg-yellow-100 text-yellow-700' :
-                            highlight.matchType === 'Common Knowledge' ? 'bg-gray-100 text-gray-600' :
-                            'bg-blue-100 text-blue-600'
-                          }`}>
-                            {highlight.matchType}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+
+                {/* ── SECTION 0: Inline Document Scan ── */}
+                {proposedText && (() => {
+                  const segments = getHighlightedSegments(proposedText, textHighlights, phraseHighlights);
+                  const matchCount = segments.filter(s => s.highlighted).length;
+                  return (
+                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                      {/* Header */}
+                      <div className="px-6 py-4 bg-gradient-to-r from-red-50 to-rose-50 border-b flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-500"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            Inline Document Scan
+                          </h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Every word and sentence scanned — flagged content highlighted inline. Click any highlight to see its internet source.</p>
+                        </div>
+                        {matchCount > 0 ? (
+                          <span className="shrink-0 text-xs px-2.5 py-1 bg-red-100 text-red-700 rounded-full font-semibold">
+                            {matchCount} passage{matchCount !== 1 ? 's' : ''} flagged
                           </span>
-                          {highlight.serpVerified && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 flex items-center gap-1">
-                              <CheckCircle className="w-3 h-3" /> Web Verified
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-sm font-bold px-2.5 py-1 rounded-lg ${
-                          highlight.similarity >= 80 ? 'bg-red-100 text-red-700' :
-                          highlight.similarity >= 50 ? 'bg-orange-100 text-orange-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {highlight.similarity}%
-                        </div>
-                      </div>
-
-                      {/* Matched Text */}
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-3">
-                        <p className="text-sm text-gray-800 italic">"{highlight.matchedText}"</p>
-                      </div>
-
-                      {/* Source Info */}
-                      <div className="text-xs space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-500 font-medium">Source:</span>
-                          <span className="text-gray-700">{highlight.source}</span>
-                        </div>
-                        {highlight.sourceUrl && highlight.sourceUrl !== 'N/A' && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-500 font-medium">URL:</span>
-                            <a href={highlight.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">
-                              {highlight.sourceUrl}
-                            </a>
-                          </div>
+                        ) : (
+                          <span className="shrink-0 text-xs px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-full font-semibold">✓ No matches detected</span>
                         )}
                       </div>
 
-                      {/* SerpAPI Results for highlight */}
-                      {(highlight.serpResults?.length > 0 || highlight.scholarResults?.length > 0) && (
-                        <div className="mt-3 pt-3 border-t">
-                          <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                            Internet Sources Found
-                          </div>
-                          <div className="space-y-2">
-                            {[...(highlight.serpResults || []), ...(highlight.scholarResults || [])].slice(0, 4).map((result: any, ri: number) => (
-                              <div key={ri} className="p-2 bg-green-50/50 rounded-lg border border-green-100">
-                                <a href={result.link} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-blue-700 hover:underline line-clamp-1">
-                                  {result.title}
-                                </a>
-                                <p className="text-[10px] text-gray-600 line-clamp-2 mt-0.5">{result.snippet}</p>
-                                <div className="text-[10px] text-gray-400 mt-0.5">{result.source}{result.date ? ` • ${result.date}` : ''}</div>
-                              </div>
-                            ))}
-                          </div>
+                      <div className="p-5">
+                        {/* Legend */}
+                        <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b">
+                          <span className="text-[11px] font-semibold text-gray-600 mr-1">Legend:</span>
+                          {[
+                            { label: 'Exact Copy', bg: 'bg-red-200 text-red-800' },
+                            { label: 'Close Paraphrase / Structural Copy', bg: 'bg-orange-200 text-orange-800' },
+                            { label: 'Patchwriting', bg: 'bg-yellow-200 text-yellow-800' },
+                            { label: 'Common Knowledge / Phrase Match', bg: 'bg-blue-100 text-blue-800' },
+                          ].map(l => (
+                            <span key={l.label} className={`text-[10px] font-medium px-2 py-0.5 rounded ${l.bg}`}>{l.label}</span>
+                          ))}
                         </div>
-                      )}
+
+                        {/* Rendered text with inline highlights */}
+                        <div className="text-sm text-gray-800 leading-loose bg-gray-50 rounded-xl p-4 border select-text whitespace-pre-wrap">
+                          {segments.map((seg, si) => {
+                            if (!seg.highlighted) {
+                              return <span key={si}>{seg.text}</span>;
+                            }
+                            const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
+                            const isOpen = selectedSpanIdx === si;
+                            const bgClass =
+                              sp.color === 'red'    ? 'bg-red-200 text-red-900 border-b-2 border-red-400' :
+                              sp.color === 'orange' ? 'bg-orange-200 text-orange-900 border-b-2 border-orange-400' :
+                              sp.color === 'yellow' ? 'bg-yellow-200 text-yellow-900 border-b-2 border-yellow-400' :
+                                                      'bg-blue-100 text-blue-900 border-b-2 border-blue-300';
+                            return (
+                              <span key={si} className="relative inline">
+                                <button
+                                  onClick={() => setSelectedSpanIdx(isOpen ? null : si)}
+                                  className={`${bgClass} rounded px-0.5 cursor-pointer hover:brightness-90 transition-all ${isOpen ? 'ring-2 ring-offset-1 ring-purple-500' : ''}`}
+                                  title={`${sp.matchType} — click for source`}
+                                >
+                                  {seg.text}
+                                </button>
+                                {isOpen && (
+                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${
+                                        sp.color === 'red' ? 'bg-red-100 text-red-700' :
+                                        sp.color === 'orange' ? 'bg-orange-100 text-orange-700' :
+                                        sp.color === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-blue-100 text-blue-700'
+                                      }`}>{sp.matchType}</span>
+                                      <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-sm">✕</button>
+                                    </div>
+                                    {sp.source && (
+                                      <p className="mb-1 text-gray-600"><span className="font-semibold text-gray-700">Source:</span> {sp.source}</p>
+                                    )}
+                                    {sp.url ? (
+                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium mt-0.5">
+                                        View on internet
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                      </a>
+                                    ) : (
+                                      <p className="text-gray-400 italic text-[10px] mt-0.5">No URL available</p>
+                                    )}
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  ))
-                ) : (
+                  );
+                })()}
+
+                {/* ── SECTION 1: Key Phrase Internet Search ── */}
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <div className="px-6 py-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-orange-500"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        Key Phrase Internet Search
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {phraseHighlights.length} phrases extracted from your research — click any phrase to see internet matches
+                      </p>
+                    </div>
+                    {serpVerification?.enabled && (
+                      <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full font-medium">
+                        {phraseHighlights.filter((p: any) => p.foundOnWeb).length}/{phraseHighlights.length} found on web
+                      </span>
+                    )}
+                  </div>
+
+                  {phraseHighlights.length > 0 ? (
+                    <div className="p-5">
+                      {/* Phrase Chips */}
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {phraseHighlights.map((p: any, idx: number) => {
+                          const isExpanded = expandedPhrase === idx
+                          const found = p.foundOnWeb
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => setExpandedPhrase(isExpanded ? null : idx)}
+                              className={`group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                                p.isTitle
+                                  ? 'bg-purple-100 border-purple-300 text-purple-800 hover:bg-purple-200'
+                                  : found
+                                  ? 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'
+                                  : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                              } ${isExpanded ? 'ring-2 ring-offset-1 ring-blue-400' : ''}`}
+                            >
+                              {p.isTitle && (
+                                <span className="text-[9px] font-bold uppercase tracking-wide opacity-60">TITLE</span>
+                              )}
+                              <span className="max-w-[200px] truncate">{p.phrase}</span>
+                              {found ? (
+                                <span className="shrink-0 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
+                                  !
+                                </span>
+                              ) : (
+                                <span className="shrink-0 w-4 h-4 rounded-full bg-green-400 text-white text-[9px] flex items-center justify-center">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {/* Legend */}
+                      <div className="flex items-center gap-4 text-[10px] text-gray-500 mb-4">
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Found on internet (possible match)</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-green-400 inline-block"></span> Not found (likely original)</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-purple-400 inline-block"></span> Title phrase</span>
+                      </div>
+
+                      {/* Expanded phrase detail */}
+                      {expandedPhrase !== null && phraseHighlights[expandedPhrase] && (() => {
+                        const ph = phraseHighlights[expandedPhrase]
+                        const allResults = [...(ph.serpResults || []), ...(ph.scholarResults || [])]
+                        return (
+                          <div className="rounded-xl border-2 border-blue-200 bg-blue-50/30 p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800 mb-1">
+                                  Searching for: &ldquo;
+                                  {ph.bestUrl ? (
+                                    <a
+                                      href={ph.bestUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                                    >
+                                      {ph.phrase}
+                                    </a>
+                                  ) : (
+                                    <span className="text-blue-700">{ph.phrase}</span>
+                                  )}
+                                  &rdquo;
+                                </p>
+                                {ph.foundOnWeb ? (
+                                  <span className="text-xs text-red-600 font-medium">⚠ This phrase was found on the internet — {allResults.length} source(s) matched</span>
+                                ) : (
+                                  <span className="text-xs text-green-600 font-medium">✓ No internet matches found for this phrase</span>
+                                )}
+                              </div>
+                              <button onClick={() => setExpandedPhrase(null)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+                            </div>
+
+                            {allResults.length > 0 ? (
+                              <div className="space-y-2">
+                                {allResults.slice(0, 6).map((result: any, ri: number) => (
+                                  <div key={ri} className="p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                                    <a
+                                      href={result.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline line-clamp-2 block"
+                                    >
+                                      {result.title}
+                                    </a>
+                                    <p className="text-xs text-gray-600 mt-1 line-clamp-2">{result.snippet}</p>
+                                    <div className="flex items-center gap-2 mt-1.5">
+                                      <span className="text-[10px] text-gray-400">{result.source}</span>
+                                      {result.date && <span className="text-[10px] text-gray-400">• {result.date}</span>}
+                                      <a
+                                        href={result.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="ml-auto text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
+                                      >
+                                        Visit →
+                                      </a>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-500 italic">No web results found for this phrase.</p>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center">
+                      <p className="text-gray-400 text-sm">Key phrase extraction will appear here after analysis.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── SECTION 2: AI Text Highlights ── */}
+                {textHighlights.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-amber-500" />
+                      AI-Detected Text Matches ({textHighlights.length})
+                    </h3>
+                    <div className="space-y-3">
+                      {textHighlights.map((highlight: any, idx: number) => {
+                        const bestUrl = highlight.sourceUrl && highlight.sourceUrl !== 'N/A'
+                          ? highlight.sourceUrl
+                          : highlight.serpResults?.[0]?.link || highlight.scholarResults?.[0]?.link || ''
+                        return (
+                          <div key={idx} className="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-700">#{idx + 1}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                  highlight.matchType === 'Exact Copy' ? 'bg-red-100 text-red-700' :
+                                  highlight.matchType === 'Close Paraphrase' ? 'bg-orange-100 text-orange-700' :
+                                  highlight.matchType === 'Patchwriting' ? 'bg-yellow-100 text-yellow-700' :
+                                  highlight.matchType === 'Common Knowledge' ? 'bg-gray-100 text-gray-600' :
+                                  'bg-blue-100 text-blue-600'
+                                }`}>{highlight.matchType}</span>
+                                {highlight.serpVerified && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" /> Web Verified
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`text-sm font-bold px-2.5 py-1 rounded-lg shrink-0 ${
+                                highlight.similarity >= 80 ? 'bg-red-100 text-red-700' :
+                                highlight.similarity >= 50 ? 'bg-orange-100 text-orange-700' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>{highlight.similarity}%</span>
+                            </div>
+
+                            {/* Clickable matched text */}
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg mb-3">
+                              {bestUrl ? (
+                                <a
+                                  href={bestUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm text-blue-800 italic hover:text-blue-600 hover:underline cursor-pointer"
+                                  title={`View source: ${bestUrl}`}
+                                >
+                                  &ldquo;{highlight.matchedText}&rdquo;
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline ml-1 opacity-60"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                </a>
+                              ) : (
+                                <p className="text-sm text-gray-800 italic">&ldquo;{highlight.matchedText}&rdquo;</p>
+                              )}
+                            </div>
+
+                            {/* Source info */}
+                            <div className="text-xs space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500 font-medium">Source:</span>
+                                {bestUrl ? (
+                                  <a href={bestUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{highlight.source}</a>
+                                ) : (
+                                  <span className="text-gray-700">{highlight.source}</span>
+                                )}
+                              </div>
+                              {bestUrl && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-500 font-medium">URL:</span>
+                                  <a href={bestUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{bestUrl}</a>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* SerpAPI results */}
+                            {[...(highlight.serpResults || []), ...(highlight.scholarResults || [])].length > 0 && (
+                              <div className="mt-3 pt-3 border-t space-y-1.5">
+                                <div className="text-[10px] font-semibold text-green-700 mb-1 flex items-center gap-1">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                                  Internet sources
+                                </div>
+                                {[...(highlight.serpResults || []), ...(highlight.scholarResults || [])].slice(0, 3).map((r: any, ri: number) => (
+                                  <div key={ri} className="flex items-start gap-2 p-2 bg-green-50/50 rounded border border-green-100">
+                                    <div className="flex-1 min-w-0">
+                                      <a href={r.link} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-blue-700 hover:underline line-clamp-1">{r.title}</a>
+                                      <p className="text-[9px] text-gray-500 line-clamp-1">{r.snippet}</p>
+                                    </div>
+                                    <a href={r.link} target="_blank" rel="noopener noreferrer" className="shrink-0 text-[9px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded hover:bg-blue-200">→</a>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {phraseHighlights.length === 0 && textHighlights.length === 0 && (
                   <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
                     <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <p className="text-gray-500">No text highlights found. The proposed text appears to be original.</p>

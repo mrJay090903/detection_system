@@ -122,15 +122,130 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
   }
 }
 
+// ============================================================================
+// KEY PHRASE EXTRACTOR
+// Extracts 5–15 meaningful phrases (3–10 words) from title + concept text
+// ============================================================================
+
+const STOP_WORDS = new Set([
+  'a','an','the','and','or','but','in','on','at','to','for','of','with',
+  'by','from','is','are','was','were','be','been','being','have','has',
+  'had','do','does','did','will','would','shall','should','may','might',
+  'must','can','could','this','that','these','those','it','its','they',
+  'them','their','there','then','than','as','if','so','yet','nor','not',
+  'also','about','into','through','during','before','after','above','below',
+  'between','out','off','over','under','again','further','once','here',
+  'when','where','why','how','all','each','every','both','few','more',
+  'most','other','some','such','no','only','same','too','very','just',
+  'student','research','study','system','using','based','approach',
+]);
+
+function extractKeyPhrases(title: string, concept: string): string[] {
+  const phrases: string[] = [];
+
+  // 1. Always include the full title (cleaned)
+  const cleanTitle = title.replace(/^bu thematic area:\s*/i, '').trim();
+  if (cleanTitle.length >= 10) phrases.push(cleanTitle);
+
+  // 2. Build a pool of tokens from title + first 3000 chars of concept
+  const textPool = `${cleanTitle}. ${concept.substring(0, 3000)}`;
+
+  // Tokenise into sentences then words
+  const sentences = textPool
+    .split(/[.?!\n]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 20);
+
+  const candidateSet = new Set<string>();
+
+  for (const sentence of sentences) {
+    // Simple word tokenisation – keep alphanumeric runs & hyphens
+    const words = sentence.match(/\b[a-zA-Z][\w'-]*[a-zA-Z]\b/g) || [];
+    if (words.length < 3) continue;
+
+    // Slide window of 3–10 words
+    for (let winLen = 10; winLen >= 3; winLen--) {
+      for (let start = 0; start <= words.length - winLen; start++) {
+        const window = words.slice(start, start + winLen);
+
+        // Reject if first or last word is a stop word
+        if (
+          STOP_WORDS.has(window[0].toLowerCase()) ||
+          STOP_WORDS.has(window[window.length - 1].toLowerCase())
+        ) continue;
+
+        // Score: count non-stop words inside the phrase
+        const meaningful = window.filter(w => !STOP_WORDS.has(w.toLowerCase())).length;
+        if (meaningful < 2) continue;
+
+        const phrase = window.join(' ');
+
+        // Deduplicate case-insensitively + skip if already covered by title
+        const phraseLC = phrase.toLowerCase();
+        if (
+          !candidateSet.has(phraseLC) &&
+          !cleanTitle.toLowerCase().includes(phraseLC)
+        ) {
+          candidateSet.add(phraseLC);
+          // Store original-cased phrase
+          phrases.push(phrase);
+        }
+
+        // Stop once we have enough
+        if (phrases.length >= 30) break;
+      }
+      if (phrases.length >= 30) break;
+    }
+    if (phrases.length >= 30) break;
+  }
+
+  // 3. Score each candidate: prefer longer & more technical phrases
+  const scored = phrases.map(p => {
+    const words = p.split(' ');
+    const nonStop = words.filter(w => !STOP_WORDS.has(w.toLowerCase())).length;
+    // Prefer mid-length (5–8 words) and high non-stop ratio
+    const lengthScore = words.length >= 5 && words.length <= 8 ? 2 : 1;
+    const techScore = nonStop / words.length;
+    return { phrase: p, score: lengthScore * techScore * words.length };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // 4. Return top 5–15, deduplicated by overlap
+  const final: string[] = [];
+  for (const { phrase } of scored) {
+    if (final.length >= 15) break;
+    // Skip if this phrase is a substring of an already-chosen phrase
+    const alreadyCovered = final.some(
+      f => f.toLowerCase().includes(phrase.toLowerCase()) ||
+           phrase.toLowerCase().includes(f.toLowerCase())
+    );
+    if (!alreadyCovered) final.push(phrase);
+  }
+
+  return final.slice(0, 15);
+}
+
 // Verify match breakdown entries and text highlights using SerpAPI
 async function verifySerpResults(
   matchEntries: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[] }>,
   textHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number }>,
-  proposedTitle: string
+  proposedTitle: string,
+  proposedConcept: string
 ): Promise<{
   verifiedMatches: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[]; serpVerified: boolean; serpResults: SerpWebResult[] }>;
   verifiedHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number; serpVerified: boolean; serpResults: SerpWebResult[]; scholarResults: SerpWebResult[] }>;
-  webCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title'; date?: string }>;
+  webCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }>;
+  phraseHighlights: Array<{
+    phrase: string;
+    isTitle: boolean;
+    serpResults: SerpWebResult[];
+    scholarResults: SerpWebResult[];
+    foundOnWeb: boolean;
+    bestUrl: string;
+    bestSource: string;
+    bestSnippet: string;
+  }>;
 }> {
   const hasSerpApi = !!process.env.SERPAPI_API_KEY;
   
@@ -140,14 +255,15 @@ async function verifySerpResults(
       verifiedMatches: matchEntries.map(m => ({ ...m, serpVerified: false, serpResults: [] })),
       verifiedHighlights: textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] })),
       webCitations: [],
+      phraseHighlights: [],
     };
   }
 
   console.log(`[SerpAPI] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
-  const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title'; date?: string }> = [];
+  const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }> = [];
   const seenUrls = new Set<string>();
 
-  const addCitation = (result: SerpWebResult, via: 'breakdown' | 'highlight' | 'title') => {
+  const addCitation = (result: SerpWebResult, via: 'breakdown' | 'highlight' | 'title' | 'phrase') => {
     if (result.link && !seenUrls.has(result.link)) {
       seenUrls.add(result.link);
       allCitations.push({ title: result.title, url: result.link, snippet: result.snippet, source: result.source, foundVia: via, date: result.date });
@@ -230,7 +346,55 @@ async function verifySerpResults(
   console.log(`[SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
   console.log(`[SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
 
-  return { verifiedMatches, verifiedHighlights, webCitations: allCitations };
+  // 4. Key Phrase Internet Search — extract 5–15 phrases and search each on Google + Scholar
+  const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept);
+  const cleanTitle = proposedTitle.replace(/^bu thematic area:\s*/i, '').trim();
+  console.log(`[SerpAPI] Searching ${keyPhrases.length} key phrases on the web`);
+
+  const phraseHighlights: Array<{
+    phrase: string;
+    isTitle: boolean;
+    serpResults: SerpWebResult[];
+    scholarResults: SerpWebResult[];
+    foundOnWeb: boolean;
+    bestUrl: string;
+    bestSource: string;
+    bestSnippet: string;
+  }> = [];
+
+  const PHRASE_BATCH = 3;
+  for (let i = 0; i < keyPhrases.length; i += PHRASE_BATCH) {
+    const batch = keyPhrases.slice(i, i + PHRASE_BATCH);
+    const batchResults = await Promise.all(
+      batch.map(async (phrase) => {
+        const isTitle = phrase.toLowerCase() === cleanTitle.toLowerCase();
+        const [googleRes, scholarRes] = await Promise.all([
+          serpSearchGoogle(`"${phrase}"`, 5).catch(() => [] as SerpWebResult[]),
+          serpSearchScholar(phrase, 5).catch(() => [] as SerpWebResult[]),
+        ]);
+        const allRes = [...googleRes, ...scholarRes];
+        allRes.forEach(r => addCitation(r, 'phrase'));
+        const best = allRes[0];
+        return {
+          phrase,
+          isTitle,
+          serpResults: googleRes.slice(0, 5),
+          scholarResults: scholarRes.slice(0, 5),
+          foundOnWeb: allRes.length > 0,
+          bestUrl: best?.link || '',
+          bestSource: best?.title || '',
+          bestSnippet: best?.snippet || '',
+        };
+      })
+    );
+    phraseHighlights.push(...batchResults);
+    if (i + PHRASE_BATCH < keyPhrases.length) await new Promise(r => setTimeout(r, 400));
+  }
+
+  const phraseFound = phraseHighlights.filter(p => p.foundOnWeb).length;
+  console.log(`[SerpAPI] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
+
+  return { verifiedMatches, verifiedHighlights, webCitations: allCitations, phraseHighlights };
 }
 
 // ============================================================================
@@ -474,6 +638,8 @@ const prompt = [
 `Cosine Similarity Score (Pre-calculated): ${cosineSimilarity.toFixed(1)}%`,
 "",
 "OUTPUT FORMAT (PLAIN TEXT ONLY - FOLLOW EXACTLY):",
+"CRITICAL: Do NOT use any markdown formatting — no **bold**, no *italic*, no # headers, no > blockquotes.",
+"Use plain text labels exactly as shown below. Never wrap labels in ** or any other markdown syntax.",
 "",
 "Proposed Research:",
 "[ONE sentence summarizing core problem]",
@@ -583,7 +749,7 @@ const prompt = [
 "- If you cannot find a real URL for a match, set Source URL to N/A.",
 "- Identify ALL matching passages — do not limit the count.",
 "",
-"For each matching passage found on the internet, output EXACTLY this format:",
+"For each matching passage found on the internet, output EXACTLY this format (NO markdown, NO **bold**, NO *italic*):",
 "",
 "HIGHLIGHT [number]:",
 "Matched Text: \"[exact quote from the PROPOSED STUDY text that matches]\"",
@@ -605,7 +771,7 @@ const prompt = [
 const modelPriority = [
   // 1️⃣ Primary (Gemini – fast & lowest cost)
     { provider: "openai", model: "gpt-5.2" },
-  { provider: "openai", model: "gemini-2.5-flash" },
+  { provider: "google", model: "gemini-2.5-flash" },
 
   // 2️⃣ Free / low-cost fallback
   { provider: "openai", model: "o4-mini-deep-research" },
@@ -894,40 +1060,83 @@ const modelPriority = [
       similarity: number;
     }> = [];
 
-    const highlightsSection = analysis.match(/=== TEXT MATCH HIGHLIGHTS ===([\s\S]*?)$/i)
-      || analysis.match(/TEXT MATCH HIGHLIGHTS[:\s]*([\s\S]*?)$/i);
+    // Match the section header in multiple formats AI might output
+    const highlightsSectionMatch =
+      analysis.match(/={2,}\s*TEXT MATCH HIGHLIGHTS\s*={2,}([\s\S]*)$/i) ||
+      analysis.match(/\*{2}TEXT MATCH HIGHLIGHTS\*{2}[^\n]*\n([\s\S]*)$/i) ||
+      analysis.match(/TEXT MATCH HIGHLIGHTS[:\s]*([\s\S]*)$/i);
 
-    if (highlightsSection) {
-      const highlightBlocks = highlightsSection[1].split(/HIGHLIGHT\s*(?:\[?\d+\]?)\s*:/i).filter(b => b.trim());
+    if (highlightsSectionMatch) {
+      const rawSection = highlightsSectionMatch[1];
+      // Debug: show the first 400 chars so we can see what format the AI used
+      console.log('[Text Highlights] Raw section preview:\n', rawSection.substring(0, 400));
 
-      for (const block of highlightBlocks) {
-        // Accept any quote style: ", ", “, ”, ', or no quotes at all
-        let matchedTextMatch = block.match(/Matched Text:\s*["\u201c\u201d\u2018\u2019'`]([\s\S]*?)["\u201c\u201d\u2018\u2019'`]/i);
-        if (!matchedTextMatch) {
-          // Fallback: grab everything after "Matched Text:" until next field
-          matchedTextMatch = block.match(/Matched Text:\s*(.+?)(?=\n\s*Source:|$)/i);
+      // Split on any HIGHLIGHT N variant including markdown bold:
+      //   HIGHLIGHT 1:  HIGHLIGHT [1]:  **HIGHLIGHT 1:**  HIGHLIGHT 1 -  HIGHLIGHT 1
+      const highlightBlocks = rawSection
+        .split(/\*{0,2}HIGHLIGHT\s*\[?\d+\]?\*{0,2}\s*[:\-]?\s*\*{0,2}/i)
+        .filter(b => b.trim().length > 0);
+
+      for (let bi = 0; bi < highlightBlocks.length; bi++) {
+        const block = highlightBlocks[bi];
+
+        // Extract Matched Text: try richest match first
+        let matchedText = '';
+
+        // 1) Smart/straight double quotes
+        let m = block.match(/Matched Text:\s*[\u201c"](([\s\S]*?))[\u201d"]/i);
+        if (m) matchedText = m[1];
+
+        // 2) Single quotes or backticks
+        if (!matchedText) {
+          const mq = block.match(/Matched Text:\s*[\u2018\u2019'`]([\s\S]*?)[\u2018\u2019'`]/i);
+          if (mq) matchedText = mq[1];
         }
-        const sourceMatch = block.match(/Source:\s*(?!URL)([^\n]+)/i);
-        const sourceUrlMatch = block.match(/Source URL:\s*([^\n]+)/i);
-        const matchTypeMatch = block.match(/Match Type:\s*([^\n]+)/i);
+
+        // 3) No quotes: everything up to next labelled field (multiline \n safe)
+        if (!matchedText) {
+          const mf = block.match(/Matched Text:\s*([\s\S]+?)(?=\n[ \t]*(?:Source|Source URL|Match Type|Similarity)\s*:)/i);
+          if (mf) matchedText = mf[1];
+        }
+
+        // 4) Last resort: rest of first line
+        if (!matchedText) {
+          const ml = block.match(/Matched Text:\s*([^\n]+)/i);
+          if (ml) matchedText = ml[1];
+        }
+
+        // Strip surrounding quote / markdown chars
+        matchedText = matchedText
+          .trim()
+          .replace(/^[\u201c\u201d\u2018\u2019"'`\-*]+|[\u201c\u201d\u2018\u2019"'`\-*]+$/g, '')
+          .trim();
+
+        if (matchedText.length < 4) {
+          console.log(`[Text Highlights] Block ${bi + 1}: skipped (text too short/empty)`);
+          continue;
+        }
+
+        // Other fields
+        const sourceLineMatch = block.match(/^[ \t]*Source:\s*(?!URL)([^\n]+)/im);
+        const sourceUrlMatch  = block.match(/Source URL:\s*([^\n]+)/i);
+        const matchTypeMatch  = block.match(/Match Type:\s*([^\n]+)/i);
         const similarityMatch = block.match(/Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
 
-        if (matchedTextMatch && matchedTextMatch[1].trim().length >= 4) {
-          // Clean the matched text - remove leading/trailing quotes and whitespace
-          const cleanedText = matchedTextMatch[1].trim().replace(/^["\u201c\u201d'`]+|["\u201c\u201d'`]+$/g, '').trim();
-          
-          textHighlights.push({
-            matchedText: cleanedText,
-            source: sourceMatch ? sourceMatch[1].trim() : 'Unknown Source',
-            sourceUrl: sourceUrlMatch ? sourceUrlMatch[1].trim() : 'N/A',
-            matchType: matchTypeMatch ? matchTypeMatch[1].trim() : 'Unknown',
-            similarity: similarityMatch ? parseFloat(similarityMatch[1]) : 0,
-          });
-        }
+        textHighlights.push({
+          matchedText,
+          source: sourceLineMatch ? sourceLineMatch[1].trim() : 'Unknown Source',
+          sourceUrl: sourceUrlMatch ? sourceUrlMatch[1].trim() : 'N/A',
+          matchType: matchTypeMatch ? matchTypeMatch[1].trim() : 'Unknown',
+          similarity: similarityMatch ? parseFloat(similarityMatch[1]) : 0,
+        });
+
+        console.log(`[Text Highlights] Block ${bi + 1}: "${matchedText.substring(0, 60)}" type=${matchTypeMatch?.[1] ?? 'Unknown'}`);
       }
+    } else {
+      console.log('[Text Highlights] Section header not found in AI response');
     }
 
-    console.log(`[Text Highlights] Found ${textHighlights.length} highlighted passages`);
+    console.log(`[Text Highlights] Total parsed: ${textHighlights.length} passages`);
     if (textHighlights.length > 0) {
       console.log(`[Text Highlights] First 3:`, textHighlights.slice(0, 3).map(h => ({ text: h.matchedText.substring(0, 50), type: h.matchType, source: h.source.substring(0, 40) })));
     }
@@ -942,7 +1151,7 @@ const modelPriority = [
     // SERPAPI WEB VERIFICATION - Verify matches and highlights with real internet data
     // ============================================================================
     console.log('[SerpAPI] Starting web verification of AI-generated matches and highlights...');
-    const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle);
+    const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
     
     const matchBreakdown = {
       matches: serpVerification.verifiedMatches,
@@ -1133,12 +1342,18 @@ const modelPriority = [
       
       // 4-Field Assessment
       fieldAssessment,
-      
+
+      // Full proposed text — used by the frontend for inline word/sentence highlighting
+      proposedText: safeUserConcept,
+
       // Match Breakdown & Source List (now SerpAPI-verified)
       matchBreakdown,
       
       // Text Match Highlights (now SerpAPI-verified)
       textHighlights: serpVerification.verifiedHighlights,
+      
+      // Key Phrase Internet Search results
+      phraseHighlights: serpVerification.phraseHighlights,
       
       // Web Citations from SerpAPI (real internet sources)
       webCitations: serpVerification.webCitations,
@@ -1150,6 +1365,8 @@ const modelPriority = [
         matchesTotal: serpVerification.verifiedMatches.length,
         highlightsVerified: serpVerification.verifiedHighlights.filter(h => h.serpVerified).length,
         highlightsTotal: serpVerification.verifiedHighlights.length,
+        phrasesFound: serpVerification.phraseHighlights.filter(p => p.foundOnWeb).length,
+        phrasesTotal: serpVerification.phraseHighlights.length,
         totalWebCitations: serpVerification.webCitations.length,
       },
       
