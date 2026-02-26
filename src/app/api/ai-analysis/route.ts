@@ -412,6 +412,8 @@ interface WebHighlightSpan {
   sourceSnippet: string;
   /** The actual sentence/passage from the source page that matched */
   matchedSourceText: string;
+  /** The proposed sentence text (for frontend fuzzy fallback) */
+  proposedSentText: string;
 }
 
 interface WebSourceMatch {
@@ -499,18 +501,65 @@ async function fetchPagesText(urls: string[]): Promise<Record<string, string>> {
 /** Split text into sentences AND record their char start/end positions */
 function getSentencesWithPositions(text: string): Array<{ text: string; start: number; end: number }> {
   const result: Array<{ text: string; start: number; end: number }> = [];
-  const re = /[^.!?\n]{20,}[.!?\n]+/g;
+
+  // Strategy 1: Split on sentence-ending punctuation (.!?) followed by space/newline/end
+  const re1 = /[^.!?\n]{15,}?[.!?]+(?=\s|$)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  const covered = new Set<number>(); // track covered char ranges
+
+  while ((m = re1.exec(text)) !== null) {
     const raw = m[0];
     const s = raw.trim();
-    if (s.split(/\s+/).length < 5) continue;
-    // Adjust start to skip any leading whitespace that trim() removed
+    if (s.split(/\s+/).length < 4) continue;
     const leadWS = raw.length - raw.trimStart().length;
     const start = m.index + leadWS;
     const end = start + s.length;
-    if (end <= text.length) result.push({ text: s, start, end });
+    if (end <= text.length) {
+      result.push({ text: s, start, end });
+      for (let c = start; c < end; c++) covered.add(c);
+    }
   }
+
+  // Strategy 2: Split on newlines for lines that weren't captured by punctuation regex
+  const lineRe = /[^\n]+/g;
+  while ((m = lineRe.exec(text)) !== null) {
+    const raw = m[0];
+    const s = raw.trim();
+    if (s.split(/\s+/).length < 5 || s.length < 25) continue;
+    const leadWS = raw.length - raw.trimStart().length;
+    const start = m.index + leadWS;
+    const end = start + s.length;
+    // Skip if mostly already covered
+    let overlapCount = 0;
+    for (let c = start; c < end; c++) if (covered.has(c)) overlapCount++;
+    if (overlapCount > (end - start) * 0.5) continue;
+    if (end <= text.length) {
+      result.push({ text: s, start, end });
+      for (let c = start; c < end; c++) covered.add(c);
+    }
+  }
+
+  // Strategy 3: Sliding-window fallback for remaining uncovered text chunks
+  // This catches text without punctuation or newlines (e.g., pasted paragraphs)
+  const MIN_CHUNK = 60;
+  let chunkStart = -1;
+  for (let i = 0; i <= text.length; i++) {
+    if (i < text.length && !covered.has(i)) {
+      if (chunkStart === -1) chunkStart = i;
+    } else {
+      if (chunkStart !== -1) {
+        const chunk = text.slice(chunkStart, i).trim();
+        if (chunk.length >= MIN_CHUNK && chunk.split(/\s+/).length >= 5) {
+          const cLeadWS = text.slice(chunkStart, i).length - text.slice(chunkStart, i).trimStart().length;
+          result.push({ text: chunk, start: chunkStart + cLeadWS, end: chunkStart + cLeadWS + chunk.length });
+        }
+        chunkStart = -1;
+      }
+    }
+  }
+
+  // Sort by position
+  result.sort((a, b) => a.start - b.start);
   return result;
 }
 
@@ -609,7 +658,7 @@ async function performWebSimilarityScan(
         const srcText = bestSourceSentText || snippet;
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'exact',
           confidence: Math.round(exactRatio * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
-          matchedSourceText: srcText });
+          matchedSourceText: srcText, proposedSentText: ps.text });
         matchedChars += ps.end - ps.start;
         matchedPairs.push({ proposedText: ps.text, sourceText: srcText,
           confidence: Math.round(exactRatio * 100), matchType: 'exact' });
@@ -621,14 +670,14 @@ async function performWebSimilarityScan(
         const mType = bestCos >= 0.92 ? 'exact' : 'near';
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: mType,
           confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
-          matchedSourceText: bestSourceSentText });
+          matchedSourceText: bestSourceSentText, proposedSentText: ps.text });
         matchedChars += ps.end - ps.start;
         matchedPairs.push({ proposedText: ps.text, sourceText: bestSourceSentText,
           confidence: Math.round(bestCos * 100), matchType: mType });
       } else if (bestCos >= 0.65) {
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'paraphrase',
           confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
-          matchedSourceText: bestSourceSentText });
+          matchedSourceText: bestSourceSentText, proposedSentText: ps.text });
         matchedChars += Math.round((ps.end - ps.start) * 0.5);
         matchedPairs.push({ proposedText: ps.text, sourceText: bestSourceSentText,
           confidence: Math.round(bestCos * 100), matchType: 'paraphrase' });
@@ -702,7 +751,8 @@ function sanitizeText(text: string, maxLength: number): string {
     .trim()
     .substring(0, maxLength)
     .replace(/[<>]/g, '') // Remove potential HTML
-    .replace(/[\x00-\x1F\x7F-\x9F]/g, '') // Remove control characters
+    .replace(/\r\n?/g, '\n') // Normalize line endings to \n
+    .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // Remove control chars but keep \n (\x0A) and \r→already replaced
 }
 
 // Detect prompt injection
@@ -980,27 +1030,39 @@ const prompt = [
 "[One paragraph summarizing overall similarity findings across all matches]",
 "",
 "Recommendations:",
-"Write your recommendations using EXACTLY these four labeled sections. Use bullet points (-) for each item:",
+"Write your recommendations using EXACTLY these five labeled sections. Use bullet points (-) for each item.",
+"",
+"FOCUS AREAS",
+"List which SPECIFIC parts of the proposed research need the most attention. For each item, state:",
+"  - The field name (Problem/Need, Objectives, Scope/Context, or Inputs/Outputs)",
+"  - The EXACT sentence or phrase in the proposed research that is the problem",
+"  - Why that specific sentence/phrase overlaps with existing work or needs revision",
+"Format: [Field] — [Exact sentence from proposed research] — [Why it needs attention]",
+"If no focus areas are needed, write: No specific focus areas required.",
+"- ...",
+"- ...",
 "",
 "MAIN ISSUES",
-"List the biggest problems found (if any). If none, write: No major issues found.",
+"List the biggest conceptual overlap or originality problems found. Reference which field each issue affects (Problem/Need, Objectives, Scope/Context, Inputs/Outputs).",
+"If none, write: No major issues found.",
 "- ...",
 "- ...",
 "- ...",
 "",
 "REQUIRED CHANGES",
-"List the specific changes the researcher must make. If APPROVED, write: No required changes.",
+"List the exact changes the researcher MUST make to differentiate from existing work. Be specific: name the section to rewrite and what to change it to.",
+"If the research is approved, write: No required changes.",
 "- ...",
 "- ...",
 "- ...",
 "",
 "SUGGESTED IMPROVEMENTS",
-"Optional improvements to make the study stronger.",
+"Optional improvements to strengthen originality and academic contribution. Reference the specific section to improve.",
 "- ...",
 "- ...",
 "",
 "STRENGTHS",
-"What is already good and should be kept?",
+"What is already original and well-differentiated — what should be kept as-is?",
 "- ...",
 "- ...",
 "",
@@ -1220,6 +1282,29 @@ const modelPriority = [
       inputsOutputs: extractRationale('Inputs\\/Outputs:'),
     };
 
+    // Parse structured recommendation sections
+    const parseRecommendationSection = (sectionName: string): string[] => {
+      const escaped = sectionName.replace(/[/()]/g, '\\$&');
+      const re = new RegExp(
+        `${escaped}[\\s\\S]*?\\n([\\s\\S]*?)(?=\\n(?:FOCUS AREAS|MAIN ISSUES|REQUIRED CHANGES|SUGGESTED IMPROVEMENTS|STRENGTHS|===|$))`,
+        'i'
+      );
+      const m = analysis.match(re);
+      if (!m) return [];
+      return m[1]
+        .split('\n')
+        .map((l: string) => l.replace(/^[-•·]\s*/, '').trim())
+        .filter((l: string) => l.length > 4 && !/^\.\.\.$/.test(l));
+    };
+
+    const recommendations = {
+      focusAreas:           parseRecommendationSection('FOCUS AREAS'),
+      mainIssues:           parseRecommendationSection('MAIN ISSUES'),
+      requiredChanges:      parseRecommendationSection('REQUIRED CHANGES'),
+      suggestedImprovements:parseRecommendationSection('SUGGESTED IMPROVEMENTS'),
+      strengths:            parseRecommendationSection('STRENGTHS'),
+    };
+
     // Extract detailed comparison for each field
     const extractFieldDetail = (fieldName: string, nextFieldName: string) => {
       const pattern = new RegExp(
@@ -1412,6 +1497,7 @@ const modelPriority = [
     const fieldAssessment = {
       scores: fieldScores,
       rationales: fieldRationales,
+      recommendations,
       average: null as number | null
     };
     
@@ -1428,8 +1514,27 @@ const modelPriority = [
     const webScan = await performWebSimilarityScan(safeUserConcept, serpVerification.phraseHighlights);
     console.log(`[WebScan] Done: ${webScan.scannedUrls} pages scanned, ${webScan.highlights.length} spans, overall ${webScan.overallSimilarity}%`);
 
+    // Filter out the database source from match breakdown — the user only wants external matches
+    const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const existingNorm = normalizeTitle(safeExistingTitle);
+    const existingWords = new Set(existingNorm.split(' ').filter(w => w.length > 3));
+
+    const filteredMatches = serpVerification.verifiedMatches.filter(m => {
+      const mNorm = normalizeTitle(m.name);
+      // Exact or near-exact title match
+      if (mNorm === existingNorm) return false;
+      if (existingNorm.includes(mNorm) || mNorm.includes(existingNorm)) return false;
+      // High word overlap (>70% of words match)
+      const mWords = new Set(mNorm.split(' ').filter(w => w.length > 3));
+      if (mWords.size === 0 || existingWords.size === 0) return true;
+      let overlap = 0;
+      for (const w of mWords) if (existingWords.has(w)) overlap++;
+      const overlapRatio = overlap / Math.min(mWords.size, existingWords.size);
+      return overlapRatio < 0.7;
+    });
+
     const matchBreakdown = {
-      matches: serpVerification.verifiedMatches,
+      matches: filteredMatches,
       conclusion: similarityConclusion,
     };
 

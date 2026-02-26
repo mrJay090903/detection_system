@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useEffect, Suspense, useMemo, useCallback } from "react"
 import { motion } from "framer-motion"
@@ -231,12 +231,12 @@ function AnalysisReportsContent() {
       const fallbackMatch = text.match(/(?:concept(?:ual)?\s*similarity|similarity\s*\(concept(?:ual)?\))[\s:]*(\d+(?:\.\d+)?)\s*%/i)
       if (fallbackMatch) {
         sections.conceptSimilarity = fallbackMatch[1] + '%'
-        console.log('📊 Found concept similarity via fallback:', sections.conceptSimilarity)
+        console.log(' Found concept similarity via fallback:', sections.conceptSimilarity)
       } else {
-        console.warn('⚠️ Could not find concept similarity in analysis text')
+        console.warn('ï¸ Could not find concept similarity in analysis text')
       }
     } else {
-      console.log('✅ Found concept similarity:', sections.conceptSimilarity)
+      console.log(' Found concept similarity:', sections.conceptSimilarity)
     }
 
     // FALLBACK: If text similarity is still empty, try to find cosine similarity
@@ -244,12 +244,12 @@ function AnalysisReportsContent() {
       const fallbackTextMatch = text.match(/(?:cosine|text(?:ual)?)\s*similarity[\s:]*(\d+(?:\.\d+)?)\s*%/i)
       if (fallbackTextMatch) {
         sections.textSimilarity = fallbackTextMatch[1] + '%'
-        console.log('📊 Found text similarity via fallback:', sections.textSimilarity)
+        console.log(' Found text similarity via fallback:', sections.textSimilarity)
       } else {
-        console.warn('⚠️ Could not find text similarity in analysis text')
+        console.warn('ï¸ Could not find text similarity in analysis text')
       }
     } else {
-      console.log('✅ Found text similarity:', sections.textSimilarity)
+      console.log(' Found text similarity:', sections.textSimilarity)
     }
 
     return sections
@@ -331,7 +331,7 @@ function AnalysisReportsContent() {
     if (sections?.conceptSimilarity && (aiSemanticSimilarity === null || aiSemanticSimilarity === 0)) {
       const parsedValue = parseFloat(sections.conceptSimilarity) / 100
       if (!isNaN(parsedValue) && parsedValue > 0) {
-        console.log('📊 Using concept similarity from parsed text:', parsedValue)
+        console.log(' Using concept similarity from parsed text:', parsedValue)
         setAiSemanticSimilarity(parsedValue)
       }
     }
@@ -824,7 +824,7 @@ function AnalysisReportsContent() {
                       <div className="mb-6 pb-4 border-b-2 border-slate-200">
                         <h3 className="text-2xl font-bold text-slate-900 mb-2">{displayTitle}</h3>
                         {extractedTitle && (
-                          <p className="text-xs text-indigo-600 font-medium mb-2">✓ Title extracted from document</p>
+                          <p className="text-xs text-indigo-600 font-medium mb-2"> Title extracted from document</p>
                         )}
                         <div className="flex items-center gap-3 text-sm text-slate-500">
                           <span>Submitted for analysis</span>
@@ -1342,183 +1342,318 @@ function AnalysisReportsContent() {
 
                 {/* TAB: 4-FIELD ASSESSMENT */}
                 {sections && activeTab === 'fields' && (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="space-y-6"
+                    className="space-y-4"
                   >
-                    {/* 5-Field Scores Overview */}
-                    <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3 text-white">
-                            <Target className="w-5 h-5" />
-                            <div>
-                              <h3 className="text-lg font-bold">4-Field Conceptual Assessment</h3>
-                              <p className="text-indigo-200 text-xs mt-0.5">Each field scored 0-100% based on conceptual overlap</p>
+                    {fieldAssessment?.scores && (() => {
+                      const recs = fieldAssessment?.recommendations;
+
+                      const fields = [
+                        {
+                          key: 'problemNeed',
+                          label: 'Problem / Need',
+                          shortLabel: 'Problem',
+                          icon: '',
+                          what: 'Research gap or problem being solved',
+                          howScored: 'HIGH = same exact problem; MEDIUM = same domain + gap; LOW = different problem.',
+                          value: fieldAssessment.scores.problemNeed,
+                          rationale: fieldAssessment.rationales?.problemNeed,
+                          highAction: 'Your research problem mirrors an existing study closely — redefine the problem or narrow its scope to differentiate.',
+                          medAction: 'There is partial overlap in the problem area — sharpen your unique angle or add constraints.',
+                          lowAction: 'Your problem statement is sufficiently distinct from existing work.',
+                          questions: ['What specific problem are you solving?', 'Is this the exact same gap or a related one?', 'Can you narrow the problem further?'],
+                        },
+                        {
+                          key: 'objectives',
+                          label: 'Objectives',
+                          shortLabel: 'Objectives',
+                          icon: '',
+                          what: 'Stated goals, deliverables, and aims of the research',
+                          howScored: 'HIGH = same system/output type; MEDIUM = some goal overlap; LOW = fundamentally different.',
+                          value: fieldAssessment.scores.objectives,
+                          rationale: fieldAssessment.rationales?.objectives,
+                          highAction: 'Your objectives closely resemble an existing study — rephrase goals with unique metrics or deliverables.',
+                          medAction: 'Some objectives overlap — clarify what makes your deliverables different.',
+                          lowAction: 'Your objectives are well differentiated.',
+                          questions: ['What type of system/output will you produce?', 'Are your deliverables unique?', 'How do your goals differ from existing work?'],
+                        },
+                        {
+                          key: 'scopeContext',
+                          label: 'Scope / Context',
+                          shortLabel: 'Scope',
+                          icon: '',
+                          what: 'Domain, setting, target institution or users',
+                          howScored: 'HIGH = same institution/environment; MEDIUM = related domain; LOW = different context.',
+                          value: fieldAssessment.scores.scopeContext,
+                          rationale: fieldAssessment.rationales?.scopeContext,
+                          highAction: 'Your scope and context are very similar to another study — target a different population, location, or setting.',
+                          medAction: 'Related scope detected — emphasize unique contextual factors (location, demographics, constraints).',
+                          lowAction: 'Your scope and context are distinct enough.',
+                          questions: ['Who are your target users?', 'Where will this be deployed?', 'What makes your context unique?'],
+                        },
+                        {
+                          key: 'inputsOutputs',
+                          label: 'Inputs / Outputs',
+                          shortLabel: 'I/O',
+                          icon: '',
+                          what: 'Datasets, methods, system inputs, expected results and deliverables',
+                          howScored: 'HIGH = same data model/output; MEDIUM = partially overlapping; LOW = different approach.',
+                          value: fieldAssessment.scores.inputsOutputs,
+                          rationale: fieldAssessment.rationales?.inputsOutputs,
+                          highAction: 'Your data/methods closely match existing work — use different datasets, techniques, or output formats.',
+                          medAction: 'Partial overlap in approach — highlight unique technical contributions or data sources.',
+                          lowAction: 'Your inputs and outputs are sufficiently unique.',
+                          questions: ['What data sources will you use?', 'What is the expected output format?', 'How does your approach differ technically?'],
+                        },
+                      ];
+
+                      const getLevel = (v: number | null) => {
+                        if (v === null || v === undefined) return { label: 'N/A', tier: 'none', bar: 'bg-gray-300', badge: 'bg-gray-100 text-gray-500', ring: 'border-gray-200', bg: 'bg-white', icon: '—', textColor: 'text-gray-400' };
+                        if (v >= 75) return { label: 'High Overlap', tier: 'high', bar: 'bg-red-500', badge: 'bg-red-100 text-red-700', ring: 'border-red-200', bg: 'bg-red-50/40', icon: '', textColor: 'text-red-600' };
+                        if (v >= 45) return { label: 'Moderate Overlap', tier: 'medium', bar: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700', ring: 'border-amber-200', bg: 'bg-amber-50/40', icon: '', textColor: 'text-amber-600' };
+                        return { label: 'Low Overlap', tier: 'low', bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700', ring: 'border-emerald-200', bg: 'bg-emerald-50/30', icon: '', textColor: 'text-emerald-600' };
+                      };
+
+                      const avg = fieldAssessment.average;
+                      const avgLevel = getLevel(avg);
+                      const highCount = fields.filter(f => f.value !== null && f.value !== undefined && f.value >= 75).length;
+                      const medCount = fields.filter(f => f.value !== null && f.value !== undefined && f.value >= 45 && f.value < 75).length;
+                      const lowCount = fields.filter(f => f.value !== null && f.value !== undefined && f.value < 45).length;
+                      const statusText = highCount >= 2 ? 'Significant Revision Needed' : highCount === 1 ? 'Partial Revision Needed' : medCount >= 2 ? 'Minor Adjustments Recommended' : 'Research Appears Novel';
+                      const statusColor = highCount >= 2 ? 'text-red-700 bg-red-50 border-red-200' : highCount === 1 ? 'text-orange-700 bg-orange-50 border-orange-200' : medCount >= 2 ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+
+                      const getFocusForField = (fieldLabel: string) => {
+                        if (!recs?.focusAreas?.length) return [];
+                        const keywords = fieldLabel.toLowerCase().replace(/\//g, ' ').split(/\s+/).filter((w: string) => w.length > 2);
+                        return recs.focusAreas.filter((fa: string) => {
+                          const faLow = fa.toLowerCase();
+                          return keywords.some((kw: string) => faLow.includes(kw));
+                        });
+                      };
+
+                      return (
+                        <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
+                          {/* Header */}
+                          <div className="px-5 pt-4 pb-3 border-b bg-gradient-to-r from-slate-50 to-gray-50">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Target className="w-5 h-5 text-purple-600" />
+                                <span className="text-sm font-bold text-gray-800">4-Field Conceptual Assessment</span>
+                              </div>
+                              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${statusColor}`}>{statusText}</span>
+                            </div>
+                            <p className="text-[10px] text-gray-500 leading-relaxed mb-2">
+                              Compares your proposed research with the existing study across four core dimensions to identify conceptual overlap.
+                            </p>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px]">
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /> 75-100% High Overlap</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> 45-74% Moderate</span>
+                              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> 0-44% Low / Distinct</span>
+                              <span className="flex items-center gap-1 text-gray-400">|</span>
+                              {highCount > 0 && <span className="font-semibold text-red-600">{highCount} High</span>}
+                              {medCount > 0 && <span className="font-semibold text-amber-600">{medCount} Moderate</span>}
+                              {lowCount > 0 && <span className="font-semibold text-emerald-600">{lowCount} Low</span>}
                             </div>
                           </div>
-                          {(fieldAssessment?.average ?? (sections.fieldScores ? Math.round(Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).reduce((a: number, b: number) => a + b, 0) / Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).length) : null)) !== null && (
-                            <div className="text-right">
-                              <div className="text-3xl font-bold text-white">
-                                {fieldAssessment?.average ?? Math.round(Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).reduce((a: number, b: number) => a + b, 0) / Object.values(sections.fieldScores as Record<string, number | null>).filter((v): v is number => v !== null).length)}%
+
+                          {/* Proposed vs Existing Summary */}
+                          {(sections?.proposedResearch || sections?.existingResearch) && (
+                            <div className="px-5 py-3 border-b bg-gray-50/60">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-2.5">
+                                  <div className="text-[9px] font-bold uppercase tracking-wider text-blue-600 mb-1"> Your Proposed Research</div>
+                                  <p className="text-[11px] text-gray-700 leading-relaxed">{sections.proposedResearch || 'Not extracted'}</p>
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-white p-2.5">
+                                  <div className="text-[9px] font-bold uppercase tracking-wider text-gray-500 mb-1"> Existing Research (Database)</div>
+                                  <p className="text-[11px] text-gray-700 leading-relaxed">{sections.existingResearch || 'Not extracted'}</p>
+                                </div>
                               </div>
-                              <div className="text-indigo-200 text-sm">Average Score</div>
                             </div>
                           )}
-                        </div>
-                      </div>
-                      <div className="p-6 space-y-4">
-                        {(() => {
-                          const scores = fieldAssessment?.scores || sections.fieldScores || {};
-                          const proposed = fieldAssessment?.proposed || {};
-                          const existing = fieldAssessment?.existing || {};
-                          const rationales = fieldAssessment?.rationales || {};
-                          
-                          const fields = [
-                            { 
-                              key: 'problemNeed', 
-                              label: 'Problem/Need', 
-                              icon: '🎯',
-                              description: 'What real-world problem or need does the research address?',
-                              proposedDetail: proposed.problem || '',
-                              existingDetail: existing.problem || '',
-                              rationale: rationales.problemNeed || '',
-                              scoring: { high: '70-100%: Same core problem', medium: '40-69%: Related but different domains', low: '0-39%: Clearly different problems' }
-                            },
-                            { 
-                              key: 'objectives', 
-                              label: 'Objectives', 
-                              icon: '🎯',
-                              description: 'What are the goals, deliverables, or outcomes?',
-                              proposedDetail: proposed.objectives || '',
-                              existingDetail: existing.objectives || '',
-                              rationale: rationales.objectives || '',
-                              scoring: { high: '70-100%: Same system goals', medium: '40-69%: Partially overlapping', low: '0-39%: Completely different' }
-                            },
-                            { 
-                              key: 'scopeContext', 
-                              label: 'Scope/Context', 
-                              icon: '🏛️',
-                              description: 'Target institution, environment, users, or domain',
-                              proposedDetail: proposed.scopeContext || '',
-                              existingDetail: existing.scopeContext || '',
-                              rationale: rationales.scopeContext || '',
-                              scoring: { high: '70-100%: Same institution/users', medium: '40-69%: Related departments', low: '0-39%: Completely different context' }
-                            },
-                            { 
-                              key: 'inputsOutputs', 
-                              label: 'Inputs/Outputs', 
-                              icon: '📊',
-                              description: 'Compare input data types and produced outputs',
-                              proposedDetail: proposed.inputsOutputs || '',
-                              existingDetail: existing.inputsOutputs || '',
-                              rationale: rationales.inputsOutputs || '',
-                              scoring: { high: '70-100%: Same data model', medium: '40-69%: Partially overlapping', low: '0-39%: Different data types' }
-                            },
-                          ];
-                          
-                          return fields.map((field, idx) => {
-                            const score = scores[field.key] as number | null;
-                            const scoreLevel = score === null ? 'unknown' : score > 30 ? 'rejected' : score > 20 ? 'revision' : score >= 15 ? 'borderline' : 'safe';
-                            const barColor = scoreLevel === 'rejected' ? 'bg-red-500' : scoreLevel === 'revision' ? 'bg-orange-500' : scoreLevel === 'borderline' ? 'bg-amber-500' : scoreLevel === 'safe' ? 'bg-green-500' : 'bg-slate-300';
-                            const bgColor = scoreLevel === 'rejected' ? 'bg-red-50 border-red-200' : scoreLevel === 'revision' ? 'bg-orange-50 border-orange-200' : scoreLevel === 'borderline' ? 'bg-amber-50 border-amber-200' : scoreLevel === 'safe' ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200';
-                            const textColor = scoreLevel === 'rejected' ? 'text-red-700' : scoreLevel === 'revision' ? 'text-orange-700' : scoreLevel === 'borderline' ? 'text-amber-700' : scoreLevel === 'safe' ? 'text-green-700' : 'text-slate-500';
-                            const badgeColor = scoreLevel === 'rejected' ? 'bg-red-100 text-red-800' : scoreLevel === 'revision' ? 'bg-orange-100 text-orange-800' : scoreLevel === 'borderline' ? 'bg-amber-100 text-amber-800' : scoreLevel === 'safe' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600';
-                            const badgeText = scoreLevel === 'rejected' ? 'OFTEN REJECTED' : scoreLevel === 'revision' ? 'REQUIRES REVISION' : scoreLevel === 'borderline' ? 'BORDERLINE' : scoreLevel === 'safe' ? 'SAFE & ACCEPTABLE' : 'N/A';
-                            
-                            return (
-                              <div key={field.key} className={`rounded-xl border overflow-hidden ${bgColor}`}>
-                                <div className="p-5">
-                                  <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-3">
-                                      <span className="text-2xl">{field.icon}</span>
-                                      <div>
-                                        <h4 className="font-bold text-slate-900 text-lg">{idx + 1}. {field.label}</h4>
-                                        <p className="text-sm text-slate-500">{field.description}</p>
+
+                          {/* Quick Visual Comparison */}
+                          <div className="px-5 py-3 border-b">
+                            <div className="text-[10px] font-semibold text-gray-600 mb-2.5 uppercase tracking-wide">Overview — Score Comparison</div>
+                            <div className="space-y-2">
+                              {fields.map((field) => {
+                                const level = getLevel(field.value);
+                                const pct = field.value ?? 0;
+                                return (
+                                  <div key={field.key} className="flex items-center gap-2">
+                                    <span className="text-xs w-20 text-gray-600 font-medium truncate">{field.icon} {field.shortLabel}</span>
+                                    <div className="flex-1 h-3.5 bg-gray-100 rounded-full overflow-hidden relative">
+                                      <div className={`h-full rounded-full transition-all duration-700 ${level.bar}`} style={{ width: `${pct}%` }} />
+                                      <div className="absolute top-0 left-[45%] w-px h-full bg-gray-300/50" />
+                                      <div className="absolute top-0 left-[75%] w-px h-full bg-gray-300/50" />
+                                    </div>
+                                    <span className={`text-sm font-bold w-12 text-right ${level.textColor}`}>
+                                      {field.value !== null && field.value !== undefined ? `${field.value}%` : '—'}
+                                    </span>
+                                    <span className={`text-[8px] font-semibold px-1.5 py-0.5 rounded-full w-16 text-center ${level.badge}`}>
+                                      {level.label.replace(' Overlap', '')}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Detailed Field Cards */}
+                          <div className="divide-y">
+                            {fields.map((field, fi) => {
+                              const level = getLevel(field.value);
+                              const pct = field.value ?? 0;
+                              const needsAttention = field.value !== null && field.value !== undefined && field.value >= 45;
+                              const fieldFocus = getFocusForField(field.label);
+                              const actionText = level.tier === 'high' ? field.highAction : level.tier === 'medium' ? field.medAction : level.tier === 'low' ? field.lowAction : '';
+
+                              return (
+                                <div key={field.key} className={`px-5 py-4 ${level.bg}`}>
+                                  {/* Field Header */}
+                                  <div className="flex items-center justify-between mb-2 gap-3">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <span className="text-xl leading-none shrink-0">{field.icon}</span>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-sm font-bold text-gray-800">{field.label}</span>
+                                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${level.badge}`}>{level.icon} {level.label}</span>
+                                          {needsAttention ? (
+                                            <span className="text-[8px] font-bold uppercase tracking-wide bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full"> Needs Attention</span>
+                                          ) : level.tier === 'low' ? (
+                                            <span className="text-[8px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full"> Distinct</span>
+                                          ) : null}
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 mt-0.5">{field.what}</p>
                                       </div>
                                     </div>
-                                    <div className="text-right">
-                                      <div className={`text-3xl font-bold ${textColor}`}>
-                                        {score !== null ? `${score}%` : 'N/A'}
-                                      </div>
-                                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeColor}`}>
-                                        {badgeText}
-                                      </span>
+                                    <span className={`text-2xl font-extrabold leading-none shrink-0 ${level.textColor}`}>
+                                      {field.value !== null && field.value !== undefined ? `${field.value}%` : '—'}
+                                    </span>
+                                  </div>
+
+                                  {/* Progress bar with scale markers */}
+                                  <div className="relative mb-3">
+                                    <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                                      <div className={`h-full rounded-full transition-all duration-700 ${level.bar}`} style={{ width: `${pct}%` }} />
+                                    </div>
+                                    <div className="flex justify-between mt-0.5 text-[8px] text-gray-300 px-0.5">
+                                      <span>0%</span><span className="text-gray-400">|45%</span><span className="text-gray-400">|75%</span><span>100%</span>
                                     </div>
                                   </div>
-                                  
-                                  {/* Progress Bar */}
-                                  {score !== null && (
-                                    <div className="w-full bg-white/60 rounded-full h-3 overflow-hidden mb-4">
-                                      <motion.div 
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${Math.min(score, 100)}%` }}
-                                        transition={{ duration: 0.8, delay: 0.1 * idx }}
-                                        className={`h-3 rounded-full ${barColor}`}
-                                      />
+
+                                  {/* Content Grid */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
+                                    {field.rationale && (
+                                      <div className={`text-[11px] text-gray-700 bg-white rounded-lg px-3 py-2.5 border ${level.ring} leading-relaxed`}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                          <span className="text-[10px]"></span>
+                                          <span className="font-bold text-gray-800 text-[10px] uppercase tracking-wide">AI Analysis</span>
+                                        </div>
+                                        {field.rationale}
+                                      </div>
+                                    )}
+                                    <div className="space-y-2">
+                                      {actionText && (
+                                        <div className={`text-[10px] leading-relaxed px-3 py-2 rounded-lg ${
+                                          level.tier === 'high' ? 'bg-red-50 text-red-700 border border-red-200' :
+                                          level.tier === 'medium' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                          'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        }`}>
+                                          <span className="font-bold text-[10px]">{level.tier === 'low' ? ' Assessment: ' : '-> What to do: '}</span>
+                                          {actionText}
+                                        </div>
+                                      )}
+                                      <div className="text-[9px] text-gray-400 italic bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-100">
+                                        <span className="font-semibold text-gray-500 not-italic">Scoring: </span>{field.howScored}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Guiding questions */}
+                                  {needsAttention && field.questions && (
+                                    <div className="text-[10px] bg-purple-50/60 border border-purple-100 rounded-lg px-3 py-2 mb-2">
+                                      <span className="font-bold text-purple-700"> Questions to consider:</span>
+                                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-0.5 text-purple-600">
+                                        {field.questions.map((q: string, qi: number) => (
+                                          <span key={qi}>• {q}</span>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
 
-                                  {/* Score Rationale */}
-                                  {field.rationale && (
-                                    <div className="bg-white/80 rounded-lg p-3 border border-indigo-100 mb-3">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                                        <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Score Rationale</span>
-                                      </div>
-                                      <p className="text-sm text-slate-700 leading-relaxed">{field.rationale}</p>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Proposed vs Existing Details */}
-                                  {(field.proposedDetail || field.existingDetail) && (
-                                    <div className="grid md:grid-cols-2 gap-3 mt-3">
-                                      {field.proposedDetail && (
-                                        <div className="bg-white/70 rounded-lg p-3 border border-slate-200">
-                                          <div className="text-xs font-semibold text-blue-600 mb-1 uppercase">Proposed</div>
-                                          <p className="text-sm text-slate-700">{field.proposedDetail}</p>
+                                  {/* Focus area hints */}
+                                  {fieldFocus.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      {fieldFocus.slice(0, 3).map((fa: string, i: number) => (
+                                        <div key={i} className="text-[10px] bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 text-orange-800 leading-snug">
+                                          <span className="font-bold text-orange-700"> Specific Focus: </span>{fa}
                                         </div>
-                                      )}
-                                      {field.existingDetail && (
-                                        <div className="bg-white/70 rounded-lg p-3 border border-slate-200">
-                                          <div className="text-xs font-semibold text-purple-600 mb-1 uppercase">Existing</div>
-                                          <p className="text-sm text-slate-700">{field.existingDetail}</p>
-                                        </div>
-                                      )}
+                                      ))}
                                     </div>
                                   )}
                                 </div>
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-                      
-                      {/* Scoring Legend */}
-                      <div className="px-6 pb-6">
-                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                          <h4 className="font-semibold text-slate-700 mb-3 text-sm uppercase tracking-wide">Similarity Score Guidelines</h4>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                              <span className="text-slate-600"><strong>Below 15%:</strong> Safe & Acceptable</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                              <span className="text-slate-600"><strong>15-20%:</strong> Borderline</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                              <span className="text-slate-600"><strong>Above 20%:</strong> Requires Revision</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                              <span className="text-slate-600"><strong>Above 30%:</strong> Often Rejected</span>
-                            </div>
+                              );
+                            })}
                           </div>
-                          <p className="text-xs text-slate-500 mt-3">Final Conceptual Similarity = Average of all 4 fields. Below 15% = Safe, 15-20% = Borderline, Above 20% = Requires Revision, Above 30% = Often Rejected.</p>
+
+                          {/* Overall Average */}
+                          {avg !== null && avg !== undefined && (
+                            <div className="border-t">
+                              <div className="px-5 py-4 bg-gradient-to-r from-slate-50 to-gray-50">
+                                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-gray-700">Overall Conceptual Overlap</span>
+                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${avgLevel.badge}`}>{avgLevel.icon} {avgLevel.label}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 min-w-40">
+                                    <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+                                      <div className={`h-full rounded-full ${avgLevel.bar}`} style={{ width: `${avg}%` }} />
+                                    </div>
+                                    <span className={`text-2xl font-extrabold w-16 text-right ${avgLevel.textColor}`}>{avg}%</span>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                  {fields.map(f => {
+                                    const fl = getLevel(f.value);
+                                    return (
+                                      <div key={f.key} className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full border ${fl.badge} ${fl.ring}`}>
+                                        <span>{f.icon}</span>
+                                        <span className="font-semibold">{f.shortLabel}</span>
+                                        <span className="font-bold">{f.value ?? '—'}%</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className={`text-[11px] leading-relaxed rounded-lg px-3.5 py-2.5 ${
+                                  avg >= 75 ? 'bg-red-50 text-red-700 border border-red-200' :
+                                  avg >= 45 ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                  'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}>
+                                  {avg >= 75
+                                    ? ` An overall score of ${avg}% indicates significant conceptual overlap across multiple dimensions. ${highCount} of 4 fields scored High. Major revisions are strongly recommended before proceeding.`
+                                    : avg >= 45
+                                    ? ` An overall score of ${avg}% indicates moderate overlap. ${highCount > 0 ? `${highCount} field(s) scored High and ` : ''}${medCount} field(s) scored Moderate. Review the flagged fields above and refine your unique contributions.`
+                                    : ` An overall score of ${avg}% indicates your research is conceptually distinct. ${lowCount} of 4 fields scored Low. Continue developing your proposal with confidence.`
+                                  }
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
+                      );
+                    })()}
+
+                    {/* Scoring Legend */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+                      <h4 className="font-semibold text-slate-700 mb-3 text-sm uppercase tracking-wide">Similarity Score Guidelines</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-500"></div><span className="text-slate-600"><strong>Below 45%:</strong> Low / Distinct</span></div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-400"></div><span className="text-slate-600"><strong>45-74%:</strong> Moderate Overlap</span></div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div><span className="text-slate-600"><strong>75-100%:</strong> High Overlap</span></div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-gray-300"></div><span className="text-slate-600">N/A: No data available</span></div>
                       </div>
                     </div>
                   </motion.div>
@@ -1550,19 +1685,34 @@ function AnalysisReportsContent() {
                     )}
 
                     {/* Matched Sources */}
-                    {matchBreakdown?.matches && matchBreakdown.matches.length > 0 ? (
+                    {(() => {
+                      const _normalizeT = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+                      const _existNorm = _normalizeT(existingTitle);
+                      const _existWords = new Set(_existNorm.split(' ').filter((w: string) => w.length > 3));
+                      const _filteredMatches = (matchBreakdown?.matches || []).filter((m: any) => {
+                        const mNorm = _normalizeT(m.name || '');
+                        if (!mNorm || !_existNorm) return true;
+                        if (mNorm === _existNorm) return false;
+                        if (_existNorm.includes(mNorm) || mNorm.includes(_existNorm)) return false;
+                        const mWords = new Set(mNorm.split(' ').filter((w: string) => w.length > 3));
+                        let overlap = 0;
+                        for (const w of mWords) if (_existWords.has(w)) overlap++;
+                        const ratio = overlap / Math.min(mWords.size, _existWords.size || 1);
+                        return ratio < 0.7;
+                      });
+                      return _filteredMatches.length > 0 ? (
                       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
                         <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-4">
                           <div className="flex items-center gap-3 text-white">
                             <Search className="w-5 h-5" />
                             <div>
                               <h3 className="text-lg font-bold">Matched Sources</h3>
-                              <p className="text-slate-300 text-xs mt-0.5">{matchBreakdown.matches.length} similar source(s) found — ranked by similarity</p>
+                              <p className="text-slate-300 text-xs mt-0.5">{_filteredMatches.length} external source(s) found — ranked by similarity</p>
                             </div>
                           </div>
                         </div>
                         <div className="p-6 space-y-5">
-                          {matchBreakdown.matches.map((match: any, idx: number) => {
+                          {_filteredMatches.map((match: any, idx: number) => {
                             const overallScore = match.rubric?.overall ?? 0;
                             const scoreColor = overallScore >= 60 ? 'text-red-700 bg-red-50 border-red-200' :
                               overallScore >= 30 ? 'text-amber-700 bg-amber-50 border-amber-200' :
@@ -1675,21 +1825,22 @@ function AnalysisReportsContent() {
                           })}
                         </div>
                       </div>
-                    ) : (
+                      ) : (
                       <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
                         <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-4">
                           <div className="flex items-center gap-3 text-white">
                             <CheckCircle className="w-5 h-5" />
-                            <h3 className="text-lg font-bold">No Similar Sources Found</h3>
+                            <h3 className="text-lg font-bold">No External Sources Found</h3>
                           </div>
                         </div>
                         <div className="p-8 text-center">
                           <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                          <p className="text-lg font-semibold text-green-800 mb-2">The proposed study appears to be novel</p>
-                          <p className="text-sm text-slate-600">No closely matching research papers, theses, apps, or projects were identified.</p>
+                          <p className="text-lg font-semibold text-green-800 mb-2">No external match breakdown entries found</p>
+                          <p className="text-sm text-slate-600">No closely matching external research papers, theses, apps, or projects were identified.</p>
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
 
                   </motion.div>
@@ -1912,7 +2063,7 @@ function AnalysisReportsContent() {
                                           className="inline-flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 underline mt-1"
                                           onClick={(e) => e.stopPropagation()}
                                         >
-                                          View Source ↗
+                                          View Source →
                                         </a>
                                       )}
                                     </span>
