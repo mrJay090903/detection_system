@@ -201,6 +201,7 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
 // ============================================================================
 
 const STOP_WORDS = new Set([
+  // Basic English stop words
   'a','an','the','and','or','but','in','on','at','to','for','of','with',
   'by','from','is','are','was','were','be','been','being','have','has',
   'had','do','does','did','will','would','shall','should','may','might',
@@ -210,7 +211,26 @@ const STOP_WORDS = new Set([
   'between','out','off','over','under','again','further','once','here',
   'when','where','why','how','all','each','every','both','few','more',
   'most','other','some','such','no','only','same','too','very','just',
-  'student','research','study','system','using','based','approach',
+  // Common academic terms that inflate similarity across unrelated papers
+  'student','students','research','researcher','researchers','study','studies',
+  'system','systems','using','based','approach','approaches','method','methods',
+  'result','results','data','analysis','design','development','proposed',
+  'existing','implement','implementation','implemented','process','project',
+  'technology','information','application','provide','provides','provided',
+  'include','includes','including','determine','determine','performance',
+  'evaluate','evaluation','effective','different','specific','various',
+  'overall','significant','important','paper','thesis','chapter','section',
+  'figure','table','review','literature','related','work','framework',
+  'model','technique','techniques','objective','objectives','scope',
+  'methodology','conclusion','recommendation','findings','output','input',
+  'feature','features','user','users','component','components','module',
+  'tool','tools','platform','software','hardware','web','online','mobile',
+  'database','server','interface','function','program','develop','developed',
+  'improve','improved','enable','enables','create','created','support',
+  'manage','management','monitor','monitoring','detect','detection',
+  'identify','track','tracking','report','reports','generate','automated',
+  'manual','digital','real-time','current','proposed','present','use',
+  'used','utilize','utilized','help','allow','allows',
 ]);
 
 function extractKeyPhrases(title: string, concept: string): string[] {
@@ -474,9 +494,9 @@ async function verifySerpResults(
 // ============================================================================
 // WEB SIMILARITY SCAN ENGINE  (Turnitin-style)
 // Fetches real web pages found via SerpAPI and runs three matching layers:
-//   1. Exact copy   – 8-word shingle overlap ≥ 50%
-//   2. Near match   – TF-IDF cosine similarity ≥ 0.85
-//   3. Paraphrase   – TF-IDF cosine similarity 0.65–0.84
+//   1. Exact copy   – 10-word shingle overlap ≥ 60%
+//   2. Near match   – TF-IDF cosine similarity ≥ 0.90
+//   3. Paraphrase   – TF-IDF cosine similarity 0.75–0.89
 // ============================================================================
 
 interface WebHighlightSpan {
@@ -549,22 +569,61 @@ async function fetchPagesText(urls: string[]): Promise<Record<string, string>> {
       const timer = setTimeout(() => ctrl.abort(), 7000);
       const res = await fetch(url, {
         signal: ctrl.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AcademicBot/1.0)' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
       });
       clearTimeout(timer);
       if (!res.ok) return [url, ''];
       const html = await res.text();
-      // Strip tags, scripts, styles → plain text
-      const text = html
+
+      // Enhanced HTML cleanup: remove non-content elements first
+      let cleaned = html
+        // Remove scripts, styles, SVGs, iframes, noscript
         .replace(/<script[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+        .replace(/<iframe[\s\S]*?<\/iframe>/gi, ' ')
+        .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+        // Remove navigation, header, footer, sidebar, menu elements
+        .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+        .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+        .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+        .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+        .replace(/<menu[\s\S]*?<\/menu>/gi, ' ')
+        // Remove form elements
+        .replace(/<form[\s\S]*?<\/form>/gi, ' ')
+        // Remove HTML comments
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        // Remove elements with common non-content classes/ids
+        .replace(/<[^>]+(class|id)\s*=\s*["'][^"']*(nav|menu|sidebar|footer|header|cookie|banner|popup|modal|overlay|social|share|comment|breadcrumb|pagination|widget)[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi, ' ');
+
+      // Strip remaining tags and decode entities
+      const text = cleaned
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
         .replace(/&#?\w+;/g, ' ')
-        .replace(/\s{2,}/g, ' ')
+        // Clean up whitespace
+        .replace(/\t/g, ' ')
+        .replace(/ {2,}/g, ' ')
+        .replace(/(\n\s*){3,}/g, '\n\n')   // collapse excessive blank lines
         .trim()
         .slice(0, 50_000);
-      return [url, text];
+
+      // Filter out lines that look like navigation / UI fragments
+      const filteredText = text.split('\n').filter(line => {
+        const trimmed = line.trim();
+        if (trimmed.length < 15) return false;  // skip very short lines
+        const wordCount = trimmed.split(/\s+/).length;
+        if (wordCount < 4) return false;  // skip lines with < 4 words
+        // Skip lines that are mostly non-alpha (URLs, code, etc.)
+        const alphaRatio = (trimmed.match(/[a-zA-Z]/g) || []).length / trimmed.length;
+        if (alphaRatio < 0.5) return false;
+        return true;
+      }).join('\n');
+
+      return [url, filteredText];
     } catch {
       return [url, ''];
     }
@@ -646,18 +705,44 @@ function tokenize(text: string): string[] {
     .filter(w => !STOP_WORDS.has(w) && w.length > 2);
 }
 
-/** TF-only cosine similarity between two token arrays */
+/**
+ * TF-IDF cosine similarity between two token arrays.
+ * IDF is computed from the two documents themselves:
+ *   - Terms appearing in BOTH docs get lower weight (IDF = log(2/2) = 0)
+ *   - Terms in only ONE doc get higher weight (IDF = log(2/1) ≈ 0.69)
+ * This dramatically reduces the score from shared generic vocabulary.
+ */
 function cosineSim(a: string[], b: string[]): number {
   if (!a.length || !b.length) return 0;
+
+  // Build term-frequency maps
   const fa: Record<string, number> = {};
   const fb: Record<string, number> = {};
   for (const t of a) fa[t] = (fa[t] || 0) + 1;
   for (const t of b) fb[t] = (fb[t] || 0) + 1;
-  let dot = 0, ma = 0, mb = 0;
+
   const all = new Set([...Object.keys(fa), ...Object.keys(fb)]);
+
+  // Compute IDF: log(N / df) where N = 2 documents
+  // df=2 (in both): IDF = log(2/2)=0  → shared terms contribute nothing
+  // df=1 (in one):  IDF = log(2/1)≈0.693 → unique terms matter
+  // We add a small base (0.1) so shared terms contribute a tiny amount
+  // rather than being totally zeroed out
+  const idf: Record<string, number> = {};
   for (const t of all) {
-    const av = fa[t] || 0, bv = fb[t] || 0;
-    dot += av * bv; ma += av * av; mb += bv * bv;
+    const df = (fa[t] ? 1 : 0) + (fb[t] ? 1 : 0);
+    idf[t] = Math.log(2 / df) + 0.1;
+  }
+
+  // TF-IDF weighted cosine
+  let dot = 0, ma = 0, mb = 0;
+  for (const t of all) {
+    const w = idf[t];
+    const av = (fa[t] || 0) * w;
+    const bv = (fb[t] || 0) * w;
+    dot += av * bv;
+    ma += av * av;
+    mb += bv * bv;
   }
   return ma && mb ? dot / (Math.sqrt(ma) * Math.sqrt(mb)) : 0;
 }
@@ -700,6 +785,13 @@ async function performWebSimilarityScan(
     text: extractedTexts[url] || '',
   }));
 
+  // Log extraction quality
+  for (const pt of pageTexts) {
+    const len = pt.text.length;
+    const preview = pt.text.substring(0, 120).replace(/\n/g, ' ');
+    console.log(`[WebScan] Page ${pt.url.substring(0, 60)}: ${len} chars | "${preview}..."`);
+  }
+
   const allHighlights: WebHighlightSpan[] = [];
   const sources: WebSourceMatch[] = [];
 
@@ -707,22 +799,54 @@ async function performWebSimilarityScan(
     if (text.length < 100) continue;
 
     const sourceShingles   = getShinglesSet(text, 10);
-    const sourceSentences  = getSentencesWithPositions(text).slice(0, 150);
+    // Filter source sentences: skip short/garbled/non-content lines
+    const sourceSentences  = getSentencesWithPositions(text)
+      .filter(s => {
+        const words = s.text.split(/\s+/);
+        if (words.length < 5) return false;  // too short
+        // Must be mostly alphabetic (not code/URLs/numbers)
+        const alphaChars = (s.text.match(/[a-zA-Z]/g) || []).length;
+        if (alphaChars / s.text.length < 0.55) return false;
+        // Skip sentences that look like navigation/UI text
+        const lc = s.text.toLowerCase();
+        if (/^(click|sign|log|subscribe|register|download|menu|home|about|contact|privacy|terms|copyright)/.test(lc)) return false;
+        return true;
+      })
+      .slice(0, 150);
     const matchedSpans: WebHighlightSpan[] = [];
     const matchedPairs: Array<{ proposedText: string; sourceText: string; confidence: number; matchType: string }> = [];
     let   matchedChars = 0;
 
     for (const ps of proposedSentences) {
       const pTokens = tokenize(ps.text);
-      if (pTokens.length < 4) continue;
+      if (pTokens.length < 5) continue;  // require at least 5 content tokens
 
       // Find the best-matching source sentence (used for both A and B/C display)
       let bestCos = 0;
       let bestSourceSentText = '';
       for (const ss of sourceSentences) {
-        const s = cosineSim(pTokens, tokenize(ss.text));
+        const sTokens = tokenize(ss.text);
+        if (sTokens.length < 4) continue;  // skip junk source sentences
+        const s = cosineSim(pTokens, sTokens);
         if (s > bestCos) { bestCos = s; bestSourceSentText = ss.text; }
         if (bestCos >= 0.98) break;
+      }
+
+      // Verify: the matched source text should share at least some exact words
+      // with the proposed text (not just similar TF-IDF distributions).
+      // This prevents matching against garbled/unrelated text with coincidentally
+      // similar word distributions.
+      if (bestSourceSentText && bestCos >= 0.75) {
+        const pWords = new Set(pTokens);
+        const sWords = new Set(tokenize(bestSourceSentText));
+        let overlap = 0;
+        for (const w of pWords) if (sWords.has(w)) overlap++;
+        const overlapRatio = pWords.size > 0 ? overlap / pWords.size : 0;
+        // Require at least 30% of proposed content words to actually appear in source
+        if (overlapRatio < 0.30) {
+          bestCos = 0;
+          bestSourceSentText = '';
+        }
       }
 
       // ── A: Exact copy via shingle overlap ─────────────────────────────
@@ -731,7 +855,7 @@ async function performWebSimilarityScan(
       for (const sh of sentShingles) if (sourceShingles.has(sh)) shinHits++;
       const exactRatio = sentShingles.size > 0 ? shinHits / sentShingles.size : 0;
 
-      if (exactRatio >= 0.5) {
+      if (exactRatio >= 0.6) {
         const srcText = bestSourceSentText || snippet;
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'exact',
           confidence: Math.round(exactRatio * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
@@ -743,15 +867,15 @@ async function performWebSimilarityScan(
       }
 
       // ── B: Near-exact / C: Paraphrase via TF-IDF cosine ──────────────
-      if (bestCos >= 0.85) {
-        const mType = bestCos >= 0.92 ? 'exact' : 'near';
+      if (bestCos >= 0.90) {
+        const mType = bestCos >= 0.95 ? 'exact' : 'near';
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: mType,
           confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
           matchedSourceText: bestSourceSentText, proposedSentText: ps.text });
         matchedChars += ps.end - ps.start;
         matchedPairs.push({ proposedText: ps.text, sourceText: bestSourceSentText,
           confidence: Math.round(bestCos * 100), matchType: mType });
-      } else if (bestCos >= 0.65) {
+      } else if (bestCos >= 0.75) {
         matchedSpans.push({ start: ps.start, end: ps.end, matchType: 'paraphrase',
           confidence: Math.round(bestCos * 100), sourceUrl: url, sourceTitle: title, sourceSnippet: snippet,
           matchedSourceText: bestSourceSentText, proposedSentText: ps.text });
