@@ -59,7 +59,7 @@ async function retryWithBackoff<T>(
 export const maxDuration = 300;
 
 // ============================================================================
-// SERPAPI WEB SEARCH HELPERS
+// WEB SEARCH HELPERS — Serper API (primary) → SerpAPI (fallback)
 // ============================================================================
 
 interface SerpWebResult {
@@ -71,7 +71,61 @@ interface SerpWebResult {
   date?: string;
 }
 
-async function serpSearchGoogle(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+// --- Serper API (primary) ---
+
+async function serperSearchGoogle(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey || apiKey === 'your_serper_api_key_here') throw new Error('SERPER_API_KEY not configured');
+
+  const response = await Promise.race([
+    fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: numResults, gl: 'us', hl: 'en' }),
+    }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Serper timeout')), 8000)),
+  ]);
+  if (!response.ok) throw new Error(`Serper HTTP ${response.status}`);
+  const data = await response.json();
+  const organic = data.organic || [];
+  return organic.map((r: any, i: number) => ({
+    position: i + 1,
+    title: r.title || '',
+    link: r.link || '',
+    snippet: r.snippet || '',
+    source: r.displayedLink || r.link || '',
+    date: r.date || undefined,
+  }));
+}
+
+async function serperSearchScholar(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey || apiKey === 'your_serper_api_key_here') throw new Error('SERPER_API_KEY not configured');
+
+  const response = await Promise.race([
+    fetch('https://google.serper.dev/scholar', {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: numResults }),
+    }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Serper Scholar timeout')), 8000)),
+  ]);
+  if (!response.ok) throw new Error(`Serper Scholar HTTP ${response.status}`);
+  const data = await response.json();
+  const organic = data.organic || [];
+  return organic.map((r: any, i: number) => ({
+    position: i + 1,
+    title: r.title || '',
+    link: r.link || '',
+    snippet: r.snippet || '',
+    source: r.publicationInfo?.summary || r.displayedLink || '',
+    date: r.publicationInfo?.summary?.match(/\d{4}/)?.[0] || undefined,
+  }));
+}
+
+// --- SerpAPI (fallback) ---
+
+async function serpSearchGoogleFallback(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) return [];
 
@@ -90,12 +144,12 @@ async function serpSearchGoogle(query: string, numResults: number = 5): Promise<
       date: r.date || undefined,
     }));
   } catch (err) {
-    console.error('[SerpAPI Google]', err instanceof Error ? err.message : err);
+    console.error('[SerpAPI Google fallback]', err instanceof Error ? err.message : err);
     return [];
   }
 }
 
-async function serpSearchScholar(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+async function serpSearchScholarFallback(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) return [];
 
@@ -114,8 +168,30 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
       date: r.publication_info?.summary?.match(/\d{4}/)?.[0] || undefined,
     }));
   } catch (err) {
-    console.error('[SerpAPI Scholar]', err instanceof Error ? err.message : err);
+    console.error('[SerpAPI Scholar fallback]', err instanceof Error ? err.message : err);
     return [];
+  }
+}
+
+// --- Unified wrappers: try Serper first, fall back to SerpAPI ---
+
+async function serpSearchGoogle(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  try {
+    const results = await serperSearchGoogle(query, numResults);
+    return results;
+  } catch (err) {
+    console.log('[Serper Google] Failed, falling back to SerpAPI...', err instanceof Error ? err.message : err);
+    return serpSearchGoogleFallback(query, numResults);
+  }
+}
+
+async function serpSearchScholar(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
+  try {
+    const results = await serperSearchScholar(query, numResults);
+    return results;
+  } catch (err) {
+    console.log('[Serper Scholar] Failed, falling back to SerpAPI...', err instanceof Error ? err.message : err);
+    return serpSearchScholarFallback(query, numResults);
   }
 }
 
@@ -244,10 +320,11 @@ async function verifySerpResults(
     bestSnippet: string;
   }>;
 }> {
+  const hasSerper = process.env.SERPER_API_KEY && process.env.SERPER_API_KEY !== 'your_serper_api_key_here';
   const hasSerpApi = !!process.env.SERPAPI_API_KEY;
   
-  if (!hasSerpApi) {
-    console.log('[SerpAPI] No SERPAPI_API_KEY configured, skipping web verification');
+  if (!hasSerper && !hasSerpApi) {
+    console.log('[Search] No SERPER_API_KEY or SERPAPI_API_KEY configured, skipping web verification');
     return {
       verifiedMatches: matchEntries.map(m => ({ ...m, serpVerified: false, serpResults: [] })),
       verifiedHighlights: textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] })),
@@ -256,7 +333,7 @@ async function verifySerpResults(
     };
   }
 
-  console.log(`[SerpAPI] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
+  console.log(`[Serper→SerpAPI] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
   const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }> = [];
   const seenUrls = new Set<string>();
 
@@ -339,14 +416,14 @@ async function verifySerpResults(
     // no inter-batch sleep — per-call timeout already guards against hangs
   }
 
-  console.log(`[SerpAPI] Verification complete. Found ${allCitations.length} unique web citations`);
-  console.log(`[SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
-  console.log(`[SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
+  console.log(`[Serper→SerpAPI] Verification complete. Found ${allCitations.length} unique web citations`);
+  console.log(`[Serper→SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
+  console.log(`[Serper→SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
 
   // 4. Key Phrase Internet Search — extract up to 10 phrases and search each on Google + Scholar
   const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept).slice(0, 10);
   const cleanTitle = proposedTitle.replace(/^bu thematic area:\s*/i, '').trim();
-  console.log(`[SerpAPI] Searching ${keyPhrases.length} key phrases on the web`);
+  console.log(`[Serper→SerpAPI] Searching ${keyPhrases.length} key phrases on the web`);
 
   const phraseHighlights: Array<{
     phrase: string;
@@ -389,7 +466,7 @@ async function verifySerpResults(
   }
 
   const phraseFound = phraseHighlights.filter(p => p.foundOnWeb).length;
-  console.log(`[SerpAPI] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
+  console.log(`[Serper→SerpAPI] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
 
   return { verifiedMatches, verifiedHighlights, webCitations: allCitations, phraseHighlights };
 }
@@ -1504,7 +1581,7 @@ const modelPriority = [
     // ============================================================================
     // SERPAPI WEB VERIFICATION - Verify matches and highlights with real internet data
     // ============================================================================
-    console.log('[SerpAPI] Starting web verification of AI-generated matches and highlights...');
+    console.log('[Serper→SerpAPI] Starting web verification of AI-generated matches and highlights...');
     const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
 
     // ============================================================================

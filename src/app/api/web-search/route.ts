@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getJson } from 'serpapi';
 
 // ============================================================================
-// WEB SEARCH API - Uses SerpAPI to verify text matches on the internet
+// WEB SEARCH API - Uses Serper API (primary) and SerpAPI (fallback)
 // ============================================================================
 
 export const maxDuration = 60;
@@ -44,6 +44,101 @@ interface SearchResponse {
   results: WebSearchResult[];
   totalResults: number;
 }
+
+// ============================================================================
+// SERPER API - Primary search provider
+// ============================================================================
+
+// Search the web using Serper API Google Search
+async function searchGoogleSerper(query: string, numResults: number = 5): Promise<WebSearchResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+
+  if (!apiKey || apiKey === 'your_serper_api_key_here') {
+    throw new Error('SERPER_API_KEY is not configured');
+  }
+
+  try {
+    const response = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        q: query,
+        num: numResults,
+        gl: 'us',
+        hl: 'en',
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Serper API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const organicResults = data.organic || [];
+
+    return organicResults.map((result: any, index: number) => ({
+      position: index + 1,
+      title: result.title || '',
+      link: result.link || '',
+      snippet: result.snippet || '',
+      source: result.displayedLink || result.link || '',
+      date: result.date || undefined,
+    }));
+  } catch (error) {
+    console.error('[Serper API] Search error:', error);
+    throw error;
+  }
+}
+
+// Search Google Scholar using Serper API
+async function searchGoogleScholarSerper(query: string, numResults: number = 5): Promise<WebSearchResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+
+  if (!apiKey || apiKey === 'your_serper_api_key_here') {
+    throw new Error('SERPER_API_KEY is not configured');
+  }
+
+  try {
+    const response = await fetch('https://google.serper.dev/scholar', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        q: query,
+        num: numResults,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Serper Scholar API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const organicResults = data.organic || [];
+
+    return organicResults.map((result: any, index: number) => ({
+      position: index + 1,
+      title: result.title || '',
+      link: result.link || '',
+      snippet: result.snippet || '',
+      source: result.publicationInfo?.summary || result.displayedLink || '',
+      date: result.publicationInfo?.summary?.match(/\d{4}/)?.[0] || undefined,
+    }));
+  } catch (error) {
+    console.error('[Serper Scholar API] Search error:', error);
+    // Return empty array on error - will fall back to SerpAPI
+    return [];
+  }
+}
+
+// ============================================================================
+// SERPAPI - Fallback search provider
+// ============================================================================
 
 // Search the web using SerpAPI Google Search
 async function searchGoogle(query: string, numResults: number = 5): Promise<WebSearchResult[]> {
@@ -131,9 +226,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.SERPAPI_API_KEY) {
+    // Check if at least one search provider is configured
+    const hasSerper = process.env.SERPER_API_KEY && process.env.SERPER_API_KEY !== 'your_serper_api_key_here';
+    const hasSerpAPI = process.env.SERPAPI_API_KEY;
+
+    if (!hasSerper && !hasSerpAPI) {
       return NextResponse.json(
-        { error: 'Web search is not configured. Please add SERPAPI_API_KEY to your environment variables.' },
+        { error: 'Web search is not configured. Please add SERPER_API_KEY or SERPAPI_API_KEY to your environment variables.' },
         { status: 500 }
       );
     }
@@ -183,11 +282,51 @@ export async function POST(request: Request) {
           // Wrap text in quotes for exact/phrase match
           const phraseQuery = `"${searchText}"`;
 
-          // Run Google search + Scholar search in parallel
-          const [googleResults, scholarResults] = await Promise.all([
-            searchGoogle(phraseQuery, 5).catch(() => [] as WebSearchResult[]),
-            searchGoogleScholar(searchText, 5).catch(() => [] as WebSearchResult[]),
-          ]);
+          // Try Serper API first, fall back to SerpAPI if it fails
+          let googleResults: WebSearchResult[] = [];
+          let scholarResults: WebSearchResult[] = [];
+
+          // Try Google Search
+          try {
+            if (hasSerper) {
+              googleResults = await searchGoogleSerper(phraseQuery, 5);
+              console.log(`[Serper] Google search successful for: "${searchText.substring(0, 50)}..."`);
+            } else {
+              throw new Error('Serper not configured');
+            }
+          } catch (serperError) {
+            console.log(`[Serper] Failed, trying SerpAPI...`);
+            if (hasSerpAPI) {
+              try {
+                googleResults = await searchGoogle(phraseQuery, 5);
+                console.log(`[SerpAPI] Google search successful for: "${searchText.substring(0, 50)}..."`);
+              } catch (serpApiError) {
+                console.error(`[SerpAPI] Google search failed:`, serpApiError);
+                googleResults = [];
+              }
+            }
+          }
+
+          // Try Scholar Search
+          try {
+            if (hasSerper) {
+              scholarResults = await searchGoogleScholarSerper(searchText, 5);
+              console.log(`[Serper] Scholar search successful for: "${searchText.substring(0, 50)}..."`);
+            } else {
+              throw new Error('Serper not configured');
+            }
+          } catch (serperError) {
+            console.log(`[Serper Scholar] Failed, trying SerpAPI...`);
+            if (hasSerpAPI) {
+              try {
+                scholarResults = await searchGoogleScholar(searchText, 5);
+                console.log(`[SerpAPI] Scholar search successful for: "${searchText.substring(0, 50)}..."`);
+              } catch (serpApiError) {
+                console.error(`[SerpAPI] Scholar search failed:`, serpApiError);
+                scholarResults = [];
+              }
+            }
+          }
 
           return {
             originalQuery: queryItem.text,
