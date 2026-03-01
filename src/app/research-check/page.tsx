@@ -172,12 +172,11 @@ export default function ResearchCheckPage() {
         titleSource: stepData.title.trim() ? 'manual' : 'extracted'
       })
 
-      // Stage 2: Algorithm Analysis
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Stage 2: Similarity Detection
+      await new Promise(resolve => setTimeout(resolve, 400))
       setLoadingStage(2)
-      setStageLabel("Algorithm Analysis")
+      setStageLabel("Similarity Detection")
 
-      // Perform similarity check
       const response = await fetch('/api/similarity/check', {
         method: 'POST',
         headers: {
@@ -189,9 +188,9 @@ export default function ResearchCheckPage() {
         }),
       })
 
-      // Stage 3: Similarity Detection
+      // Stage 3: Analyzing Results
       setLoadingStage(3)
-      setStageLabel("Similarity Detection")
+      setStageLabel("Analyzing Results")
 
       console.log('API Response status:', response.status, response.statusText)
 
@@ -334,7 +333,6 @@ export default function ResearchCheckPage() {
 
       toast.loading('Analyzing document automatically...', { id: 'auto-analyze' })
 
-      // Perform similarity check
       const response = await fetch('/api/similarity/check', {
         method: 'POST',
         headers: {

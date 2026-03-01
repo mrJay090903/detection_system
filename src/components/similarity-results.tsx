@@ -565,8 +565,6 @@ export function SimilarityResults() {
             </Card>
           )}
 
-              
-
               {/* Action Buttons */}
               <div className="flex justify-center gap-4">
                 <Link href="/">

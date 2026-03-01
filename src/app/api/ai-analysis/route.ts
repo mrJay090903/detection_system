@@ -195,6 +195,369 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
   }
 }
 
+// ===========================================================================
+// WINSTON AI PLAGIARISM DETECTION
+// Text plagiarism detection using Winston AI API v2
+// Documentation: https://docs.gowinston.ai/api-reference/v2/plagiarism/post
+// ===========================================================================
+
+interface WinstonIndex {
+  startIndex: number;
+  endIndex: number;
+  sequence: string | null;
+}
+
+interface WinstonSource {
+  url: string;
+  title: string;
+  percentPlagiarized: number;
+  textMatched: string;
+}
+
+interface WinstonScanInformation {
+  wordsCount?: number;
+  languageDetected?: string;
+  excludedWords?: string[];
+}
+
+interface WinstonResult {
+  plagiarismScore: number;
+  isPlagiarized: boolean;
+}
+
+interface WinstonAPIResponse {
+  status: number;
+  scanInformation: WinstonScanInformation;
+  result: WinstonResult;
+  sources: WinstonSource[];
+  indexes: WinstonIndex[];
+  credits_used: number;
+  credits_remaining: number;
+  text: string;
+}
+
+interface WinstonPlagiarismResult {
+  plagiarism_score: number;
+  is_plagiarized: boolean;
+  highlights: Array<{
+    start: number;
+    end: number;
+    text: string;
+    url: string;
+    title: string;
+    score: number;
+  }>;
+  sources: Array<{
+    url: string;
+    title: string;
+    plagiarism_score: number;
+    matched_text: string;
+  }>;
+}
+
+async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | null> {
+  const apiKey = process.env.WINSTON_AI_API_KEY;
+
+  if (!apiKey || apiKey === 'your_api_key_here') {
+    console.log('[Winston AI] API key not configured, skipping');
+    return null;
+  }
+
+  try {
+    console.log(`[Winston AI] Checking plagiarism for ${text.length} character text`);
+    console.log(`[Winston AI] Using API key: ${apiKey.substring(0, 8)}...`);
+    
+    // Truncate text if needed (Winston AI v2 supports 100-120,000 chars)
+    // However, being conservative with 50,000 for performance
+    const searchText = text.substring(0, 50000);
+    console.log(`[Winston AI] Sending ${searchText.length} characters to API`);
+    
+    // Validate minimum length (API requires at least 100 chars)
+    if (searchText.length < 100) {
+      console.log('[Winston AI] Text too short (< 100 chars), skipping');
+      return null;
+    }
+    
+    const requestBody = {
+      text: searchText,
+      language: 'auto', // Auto-detect language
+      country: 'us', // Default country
+    };
+    console.log('[Winston AI] Request body:', JSON.stringify({ ...requestBody, text: requestBody.text.substring(0, 100) + '...' }));
+    
+    const response = await Promise.race([
+      fetch('https://api.gowinston.ai/v2/plagiarism', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Winston AI timeout after 45s')), 45000)
+      ),
+    ]);
+
+    console.log(`[Winston AI] Response status: ${response.status} ${response.statusText}`);
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`[Winston AI] API Error Response: ${errorText}`);
+      throw new Error(`Winston AI HTTP ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('[Winston AI] Raw response:', JSON.stringify(data, null, 2));
+    console.log('[Winston AI] Raw response keys:', Object.keys(data));
+    
+    if (!data || typeof data !== 'object') {
+      console.error('[Winston AI] Invalid response format - not an object:', data);
+      return null;
+    }
+
+    // Log ALL fields to identify the correct structure
+    if (data.result) {
+      console.log('[Winston AI] result keys:', Object.keys(data.result));
+      console.log('[Winston AI] result values:', JSON.stringify(data.result));
+    }
+    if (data.sources && data.sources.length > 0) {
+      console.log('[Winston AI] First source keys:', Object.keys(data.sources[0]));
+      console.log('[Winston AI] First source:', JSON.stringify(data.sources[0]));
+    }
+    if (data.indexes && data.indexes.length > 0) {
+      console.log('[Winston AI] First index keys:', Object.keys(data.indexes[0]));
+      console.log('[Winston AI] First index:', JSON.stringify(data.indexes[0]));
+    }
+
+    // ========================================================================
+    // ROBUST SCORE EXTRACTION - try all possible field names
+    // ========================================================================
+    const resultObj = data.result || {};
+    const plagiarismScore: number = 
+      resultObj.plagiarismScore ?? resultObj.score ?? resultObj.plagiarism_score ??
+      resultObj.textScore ?? resultObj.text_score ??
+      data.plagiarismScore ?? data.score ?? data.plagiarism_score ?? 0;
+    
+    const isPlagiarized: boolean = 
+      resultObj.isPlagiarized ?? resultObj.is_plagiarized ?? resultObj.plagiarized ??
+      data.isPlagiarized ?? data.is_plagiarized ?? 
+      (plagiarismScore > 0);
+
+    console.log('[Winston AI] Extracted plagiarism score:', plagiarismScore);
+    console.log('[Winston AI] Extracted isPlagiarized:', isPlagiarized);
+
+    // Log the structure of the response
+    console.log('[Winston AI] Response structure:', {
+      status: data.status,
+      hasResult: !!data.result,
+      plagiarismScore,
+      isPlagiarized,
+      indexesCount: Array.isArray(data.indexes) ? data.indexes.length : 0,
+      sourcesCount: Array.isArray(data.sources) ? data.sources.length : 0,
+      creditsUsed: data.credits_used,
+      creditsRemaining: data.credits_remaining,
+    });
+
+    // Parse and normalize the response to our internal format
+    const highlights: Array<{
+      start: number;
+      end: number;
+      text: string;
+      url: string;
+      title: string;
+      score: number;
+    }> = [];
+
+    // ========================================================================
+    // PROCESS INDEXES - plagiarized text sequences with character positions
+    // ========================================================================
+    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
+      console.log(`[Winston AI] Processing ${data.indexes.length} indexes...`);
+      
+      data.indexes.forEach((index: any, i: number) => {
+        // Robust field name access for indexes
+        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
+        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
+        const seq = index.sequence ?? index.text ?? index.content ?? null;
+
+        // Find the best matching source for this sequence
+        let bestSource: any = null;
+        if (Array.isArray(data.sources) && data.sources.length > 0) {
+          bestSource = data.sources[i % data.sources.length] || data.sources[0];
+        }
+
+        // Robust source field access
+        const sourceUrl = bestSource?.url ?? bestSource?.link ?? '';
+        const sourceTitle = bestSource?.title ?? bestSource?.name ?? 'Unknown Source';
+        const sourceScore = bestSource?.percentPlagiarized ?? bestSource?.percent_plagiarized ?? 
+                           bestSource?.score ?? bestSource?.matchScore ?? plagiarismScore;
+
+        highlights.push({
+          start: startIdx,
+          end: endIdx,
+          text: seq || searchText.substring(startIdx, endIdx),
+          url: sourceUrl,
+          title: sourceTitle,
+          score: sourceScore,
+        });
+      });
+
+      console.log(`[Winston AI] Created ${highlights.length} highlights from indexes`);
+    }
+
+    // ========================================================================
+    // PROCESS SOURCES - websites where matching content was found
+    // ========================================================================
+    const sources: Array<{
+      url: string;
+      title: string;
+      plagiarism_score: number;
+      matched_text: string;
+    }> = [];
+
+    if (Array.isArray(data.sources) && data.sources.length > 0) {
+      data.sources.forEach((source: any) => {
+        // Robust field name access for sources
+        const srcUrl = source.url ?? source.link ?? '';
+        const srcTitle = source.title ?? source.name ?? 'Unknown Source';
+        const srcScore = source.percentPlagiarized ?? source.percent_plagiarized ?? 
+                        source.score ?? source.matchScore ?? 0;
+        const srcText = source.textMatched ?? source.text_matched ?? 
+                       source.matchedText ?? source.matched_text ?? source.snippet ?? '';
+        
+        sources.push({
+          url: srcUrl,
+          title: srcTitle,
+          plagiarism_score: srcScore,
+          matched_text: srcText,
+        });
+      });
+      console.log(`[Winston AI] Processed ${sources.length} sources`);
+      console.log('[Winston AI] First source processed:', JSON.stringify(sources[0]));
+    }
+
+    const result: WinstonPlagiarismResult = {
+      plagiarism_score: plagiarismScore,
+      is_plagiarized: isPlagiarized,
+      highlights,
+      sources,
+    };
+
+    console.log(`[Winston AI] ✓ Success! Plagiarism score: ${result.plagiarism_score}%, ${result.is_plagiarized ? 'PLAGIARIZED' : 'ORIGINAL'}`);
+    console.log(`[Winston AI] ✓ Found ${result.highlights.length} highlights, ${result.sources.length} sources`);
+    console.log(`[Winston AI] ✓ Credits used: ${data.credits_used}, Credits remaining: ${data.credits_remaining}`);
+    
+    if (result.highlights.length > 0) {
+      console.log('[Winston AI] First 3 highlights:', result.highlights.slice(0, 3).map(h => ({
+        text: h.text?.substring(0, 50) || 'N/A',
+        start: h.start,
+        end: h.end,
+        url: h.url?.substring(0, 50) || 'N/A',
+        title: h.title,
+      })));
+    }
+    
+    if (result.sources.length > 0) {
+      console.log('[Winston AI] First 3 sources:', result.sources.slice(0, 3).map(s => ({
+        title: s.title?.substring(0, 50) || 'N/A',
+        url: s.url?.substring(0, 50) || 'N/A',
+        score: s.plagiarism_score,
+      })));
+    }
+    
+    return result;
+
+  } catch (err) {
+    console.error('[Winston AI] ✗ Search failed:', err instanceof Error ? err.message : err);
+    console.error('[Winston AI] ✗ Error details:', err);
+    return null;
+  }
+}
+
+// ===========================================================================
+// COPYSCAPE API INTEGRATION
+// Text plagiarism search using Copyscape API
+// ===========================================================================
+
+interface CopyscapeResult {
+  url: string;
+  title: string;
+  textsnippet: string;
+  htmlsnippet: string;
+  minwordsmatched: number;
+  percentmatched?: number;
+  wordsmatched?: number;
+  textmatched?: string;
+}
+
+interface CopyscapeResponse {
+  count: number;
+  querywords: number;
+  cost: string;
+  allpercentmatched?: number;
+  allwordsmatched?: number;
+  result?: CopyscapeResult[];
+}
+
+async function searchCopyscape(text: string): Promise<CopyscapeResponse | null> {
+  const username = process.env.COPYSCAPE_USERNAME;
+  const apiKey = process.env.COPYSCAPE_API_KEY;
+
+  if (!username || !apiKey || username === 'your_username' || apiKey === 'your_api_key') {
+    console.log('[Copyscape] API credentials not configured, skipping');
+    return null;
+  }
+
+  try {
+    console.log(`[Copyscape] Searching for plagiarism in ${text.length} character text`);
+    
+    // Truncate text to 10000 characters if needed (Copyscape limit)
+    const searchText = text.substring(0, 10000);
+    
+    const formData = new URLSearchParams({
+      u: username,
+      k: apiKey,
+      o: 'csearch',
+      e: 'UTF-8',
+      t: searchText,
+      c: '3', // Full comparisons for top 3 results
+      f: 'json'
+    });
+
+    const response = await Promise.race([
+      fetch('https://www.copyscape.com/api/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData.toString(),
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Copyscape timeout')), 15000)
+      ),
+    ]);
+
+    if (!response.ok) {
+      throw new Error(`Copyscape HTTP ${response.status}`);
+    }
+
+    const data: CopyscapeResponse = await response.json();
+    
+    if ('error' in data) {
+      console.error('[Copyscape] API error:', (data as any).error);
+      return null;
+    }
+
+    console.log(`[Copyscape] Found ${data.count} results, matched ${data.allpercentmatched || 0}% overall`);
+    return data;
+
+  } catch (err) {
+    console.error('[Copyscape] Search failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 // ============================================================================
 // KEY PHRASE EXTRACTOR
 // Extracts 5–15 meaningful phrases (3–10 words) from title + concept text
@@ -491,6 +854,7 @@ async function verifySerpResults(
   return { verifiedMatches, verifiedHighlights, webCitations: allCitations, phraseHighlights };
 }
 
+// ============================================================================
 // ============================================================================
 // WEB SIMILARITY SCAN ENGINE  (Turnitin-style)
 // Fetches real web pages found via SerpAPI and runs three matching layers:
@@ -1269,18 +1633,10 @@ const prompt = [
 "",
 "=== TEXT MATCH HIGHLIGHTS ===",
 "",
-"IMPORTANT: You MUST use your web search / internet browsing capability to find REAL sources from the internet.",
-"Search the web for phrases and sentences from the PROPOSED STUDY text below.",
-"For each phrase or sentence (minimum 5 words), search the internet to check if similar or identical content exists on any website, published paper, thesis repository, journal, blog, or online resource.",
+"NOTE: Web-based plagiarism detection is handled by the Serper system.",
+"Based on your analysis of the text patterns and common research content, identify potential areas that may have similarities with existing research.",
 "",
-"Rules for searching:",
-"- Copy key phrases from the proposed text and search them on the web.",
-"- Look for matches on Google Scholar, ResearchGate, academia.edu, university repositories, Semantic Scholar, journals, and general web pages.",
-"- You MUST provide the ACTUAL URL of the source where you found the matching content. Do NOT guess or fabricate URLs.",
-"- If you cannot find a real URL for a match, set Source URL to N/A.",
-"- Identify ALL matching passages — do not limit the count.",
-"",
-"For each matching passage found on the internet, output EXACTLY this format (NO markdown, NO **bold**, NO *italic*):",
+"For any passage that may need source verification, output this format (NO markdown, NO **bold**, NO *italic*):",
 "",
 "HIGHLIGHT [number]:",
 "Matched Text: \"[exact quote from the PROPOSED STUDY text that matches]\"",
@@ -1301,7 +1657,7 @@ const prompt = [
     // -------------------------
 const modelPriority = [
   // 1️⃣ Primary (Gemini – fast & lowest cost)
-    { provider: "openai", model: "gpt-5.2" },
+    { provider: "openai", model: "" },
   { provider: "google", model: "gemini-2.5-flash" },
 
   // 2️⃣ Free / low-cost fallback
@@ -1341,30 +1697,26 @@ const modelPriority = [
         // Wrap API calls with retry logic
         const apiCall = async () => {
           if (provider === 'openai') {
-            // Use Responses API with web search for real internet source finding
-            console.log(`[OpenAI] Using Responses API with web_search_preview for model: ${modelName}`);
+            // Use standard Chat Completions API (Serper handles web search separately)
+            console.log(`[OpenAI] Using Chat Completions API for model: ${modelName}`);
             
-            const response = await openai.responses.create({
+            const response = await openai.chat.completions.create({
               model: modelName,
-              tools: [{ type: "web_search_preview" as const }],
-              instructions: 'You are an expert academic research evaluator specializing in similarity analysis and plagiarism detection. You MUST use web search to find real sources from the internet when checking for text matches.',
-              input: prompt,
-              max_output_tokens: 8000,
+              messages: [
+                {
+                  role: 'system',
+                  content: 'You are an expert academic research evaluator specializing in similarity analysis and plagiarism detection. Analyze the provided research documents thoroughly.'
+                },
+                {
+                  role: 'user',
+                  content: prompt
+                }
+              ],
+              max_completion_tokens: 8000,
+              temperature: 0.3,
             });
             
-            // Extract text content from Responses API output
-            const textParts: string[] = [];
-            for (const item of response.output) {
-              if (item.type === 'message' && item.content) {
-                for (const block of item.content) {
-                  if (block.type === 'output_text') {
-                    textParts.push(block.text);
-                  }
-                }
-              }
-            }
-            
-            return textParts.join('') || null;
+            return response.choices[0]?.message?.content || null;
             
           } else if (provider === 'gemini') {
             // Gemini API call with Google Search grounding for real web sources
@@ -1703,14 +2055,97 @@ const modelPriority = [
     };
     
     // ============================================================================
-    // SERPAPI WEB VERIFICATION - Verify matches and highlights with real internet data
+    // SERPAPI WEB VERIFICATION
     // ============================================================================
-    console.log('[Serper→SerpAPI] Starting web verification of AI-generated matches and highlights...');
+    console.log('[Serper→SerpAPI] Running web verification...');
     const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
 
     // ============================================================================
-    // WEB SIMILARITY SCAN — fetch real pages + run shingle / cosine matching
+    // WINSTON AI PLAGIARISM CHECK (Primary)
     // ============================================================================
+    console.log('[Winston AI] Running plagiarism check...');
+    console.log('[Winston AI] Text to check (first 200 chars):', safeUserConcept.substring(0, 200));
+    console.log('[Winston AI] Total text length:', safeUserConcept.length);
+    const winstonResult = await searchWinstonAI(safeUserConcept);
+    const winstonHighlights: Array<{
+      start: number;
+      end: number;
+      text: string;
+      url: string;
+      title: string;
+      score: number;
+    }> = [];
+    const winstonSources: Array<{
+      url: string;
+      title: string;
+      plagiarismScore: number;
+      matchedText: string;
+    }> = [];
+    
+    if (winstonResult) {
+      console.log(`[Winston AI] Plagiarism score: ${winstonResult.plagiarism_score}%, ${winstonResult.is_plagiarized ? 'PLAGIARIZED' : 'ORIGINAL'}`);
+      
+      // Process highlights
+      if (winstonResult.highlights && winstonResult.highlights.length > 0) {
+        for (const highlight of winstonResult.highlights) {
+          winstonHighlights.push({
+            start: highlight.start,
+            end: highlight.end,
+            text: highlight.text,
+            url: highlight.url,
+            title: highlight.title,
+            score: highlight.score,
+          });
+        }
+        console.log(`[Winston AI] Found ${winstonHighlights.length} text highlights`);
+      }
+      
+      // Process sources
+      if (winstonResult.sources && winstonResult.sources.length > 0) {
+        for (const source of winstonResult.sources) {
+          winstonSources.push({
+            url: source.url,
+            title: source.title,
+            plagiarismScore: source.plagiarism_score,
+            matchedText: source.matched_text,
+          });
+        }
+        console.log(`[Winston AI] Found ${winstonSources.length} matching sources`);
+      }
+    } else {
+      console.log('[Winston AI] No plagiarism detected or service unavailable');
+    }
+
+    // ============================================================================
+    // COPYSCAPE PLAGIARISM CHECK (Backup/Additional)
+    // ============================================================================
+    console.log('[Copyscape] Running plagiarism check...');
+    const copyscapeResult = await searchCopyscape(safeUserConcept);
+    const copyscapeHighlights: Array<{
+      url: string;
+      title: string;
+      snippet: string;
+      wordsMatched: number;
+      percentMatched: number;
+      textMatched?: string;
+    }> = [];
+    
+    if (copyscapeResult && copyscapeResult.result && copyscapeResult.result.length > 0) {
+      console.log(`[Copyscape] Found ${copyscapeResult.count} matches, ${copyscapeResult.allpercentmatched || 0}% overall match`);
+      for (const result of copyscapeResult.result) {
+        copyscapeHighlights.push({
+          url: result.url,
+          title: result.title,
+          snippet: result.textsnippet,
+          wordsMatched: result.wordsmatched || result.minwordsmatched,
+          percentMatched: result.percentmatched || 0,
+          textMatched: result.textmatched,
+        });
+      }
+    } else {
+      console.log('[Copyscape] No plagiarism matches found');
+    }
+
     console.log('[WebScan] Starting full document scan against real web pages...');
     const webScan = await performWebSimilarityScan(safeUserConcept, serpVerification.phraseHighlights);
     console.log(`[WebScan] Done: ${webScan.scannedUrls} pages scanned, ${webScan.highlights.length} spans, overall ${webScan.overallSimilarity}%`);
@@ -1935,6 +2370,26 @@ const modelPriority = [
       
       // Text Match Highlights (now SerpAPI-verified)
       textHighlights: serpVerification.verifiedHighlights,
+      
+      // Winston AI Plagiarism Detection (Primary)
+      winstonHighlights,
+      winstonSources,
+      winstonSummary: winstonResult ? {
+        plagiarismScore: winstonResult.plagiarism_score,
+        isPlagiarized: winstonResult.is_plagiarized,
+        highlightsCount: winstonHighlights.length,
+        sourcesCount: winstonSources.length,
+      } : null,
+      
+      // Copyscape Plagiarism Check results (Backup)
+      copyscapeHighlights,
+      copyscapeSummary: copyscapeResult ? {
+        count: copyscapeResult.count,
+        querywords: copyscapeResult.querywords,
+        allpercentmatched: copyscapeResult.allpercentmatched || 0,
+        allwordsmatched: copyscapeResult.allwordsmatched || 0,
+        cost: copyscapeResult.cost,
+      } : null,
       
       // Key Phrase Internet Search results
       phraseHighlights: serpVerification.phraseHighlights,

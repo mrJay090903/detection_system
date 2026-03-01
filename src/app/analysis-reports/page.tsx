@@ -20,7 +20,10 @@ import {
   ClipboardList,
   Info,
   Highlighter,
-  Eye
+  Eye,
+  Globe,
+  Bot,
+  ExternalLink
 } from "lucide-react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
@@ -43,6 +46,11 @@ function AnalysisReportsContent() {
   const [fieldAssessment, setFieldAssessment] = useState<any>(null)
   const [matchBreakdown, setMatchBreakdown] = useState<any>(null)
   const [textHighlights, setTextHighlights] = useState<any[]>([])
+  const [winstonHighlights, setWinstonHighlights] = useState<any[]>([])
+  const [winstonSources, setWinstonSources] = useState<any[]>([])
+  const [winstonSummary, setWinstonSummary] = useState<any>(null)
+  const [copyscapeHighlights, setCopyscapeHighlights] = useState<any[]>([])
+  const [copyscapeSummary, setCopyscapeSummary] = useState<any>(null)
   const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
   const [retryCount, setRetryCount] = useState(0)
 
@@ -351,10 +359,9 @@ function AnalysisReportsContent() {
     }, 800)
 
     // Update loading messages
-    const messageTimeout1 = setTimeout(() => setLoadingMessage('Analyzing research content...'), 2000)
-    const messageTimeout2 = setTimeout(() => setLoadingMessage('Comparing with existing research...'), 5000)
-    const messageTimeout3 = setTimeout(() => setLoadingMessage('Generating AI insights...'), 8000)
-    const messageTimeout4 = setTimeout(() => setLoadingMessage('Finalizing analysis...'), 12000)
+    const messageTimeout1 = setTimeout(() => setLoadingMessage('Analyzing research content with AI...'), 2000)
+    const messageTimeout2 = setTimeout(() => setLoadingMessage('Verifying sources on the web...'), 8000)
+    const messageTimeout3 = setTimeout(() => setLoadingMessage('Finalizing analysis...'), 14000)
 
     const loadAnalysis = async () => {
       try {
@@ -457,7 +464,6 @@ function AnalysisReportsContent() {
             clearTimeout(messageTimeout1)
             clearTimeout(messageTimeout2)
             clearTimeout(messageTimeout3)
-            clearTimeout(messageTimeout4)
             
             setError({
               message: friendlyMessage,
@@ -478,7 +484,6 @@ function AnalysisReportsContent() {
           clearTimeout(messageTimeout1)
           clearTimeout(messageTimeout2)
           clearTimeout(messageTimeout3)
-          clearTimeout(messageTimeout4)
           
           setError({
             message: 'AI Analysis Failed',
@@ -513,6 +518,35 @@ function AnalysisReportsContent() {
           setTextHighlights(data.textHighlights)
         }
         
+        // Set Winston AI results if available
+        console.log('[Winston AI Frontend] Received data:', {
+          hasHighlights: !!data.winstonHighlights,
+          hasSources: !!data.winstonSources,
+          hasSummary: !!data.winstonSummary,
+          highlightsCount: data.winstonHighlights?.length || 0,
+          sourcesCount: data.winstonSources?.length || 0,
+          summary: data.winstonSummary
+        });
+        if (data.winstonHighlights) {
+          console.log('[Winston AI Frontend] First 3 highlights:', data.winstonHighlights.slice(0, 3));
+          setWinstonHighlights(data.winstonHighlights)
+        }
+        if (data.winstonSources) {
+          console.log('[Winston AI Frontend] First 3 sources:', data.winstonSources.slice(0, 3));
+          setWinstonSources(data.winstonSources)
+        }
+        if (data.winstonSummary) {
+          setWinstonSummary(data.winstonSummary)
+        }
+        
+        // Set Copyscape results if available
+        if (data.copyscapeHighlights) {
+          setCopyscapeHighlights(data.copyscapeHighlights)
+        }
+        if (data.copyscapeSummary) {
+          setCopyscapeSummary(data.copyscapeSummary)
+        }
+        
         // Complete progress
         setProgress(100)
         setLoadingMessage('Analysis complete!')
@@ -522,7 +556,6 @@ function AnalysisReportsContent() {
         clearTimeout(messageTimeout1)
         clearTimeout(messageTimeout2)
         clearTimeout(messageTimeout3)
-        clearTimeout(messageTimeout4)
         
         setTimeout(() => setIsLoading(false), 500)
       } catch (error) {
@@ -538,7 +571,6 @@ function AnalysisReportsContent() {
         clearTimeout(messageTimeout1)
         clearTimeout(messageTimeout2)
         clearTimeout(messageTimeout3)
-        clearTimeout(messageTimeout4)
         
         setIsLoading(false)
         setError({
@@ -699,7 +731,7 @@ function AnalysisReportsContent() {
                   <BarChart3 className="w-6 h-6 text-white" />
                   <h2 className="text-xl font-bold text-white">Analysis Summary</h2>
                 </div>
-                <p className="text-indigo-100 text-sm">AI-powered comparison of your research with existing work</p>
+                <p className="text-indigo-100 text-sm">Comprehensive comparison of your research with existing work</p>
               </div>
               <div className="p-6">
                 {/* Research Titles */}
@@ -922,25 +954,34 @@ function AnalysisReportsContent() {
                       { id: 'analysis', icon: <BarChart3 className="w-4 h-4" />, label: 'Similarity Analysis', desc: 'Text & concept breakdown' },
                       { id: 'fields', icon: <Target className="w-4 h-4" />, label: '4-Field Assessment', desc: 'Detailed field scores' },
                       { id: 'detailed', icon: <Search className="w-4 h-4" />, label: 'Match Breakdown', desc: 'External source matches' },
-                      { id: 'highlights', icon: <Highlighter className="w-4 h-4" />, label: 'Text Highlights', desc: 'Flagged text passages' },
+                      { id: 'plagiarism', icon: <AlertTriangle className="w-4 h-4" />, label: 'Text Highlights', desc: 'Plagiarism detection', priority: true },
                       { id: 'recommendations', icon: <Lightbulb className="w-4 h-4" />, label: 'Recommendations', desc: 'Improvement suggestions' },
-                    ].map((tab, idx) => (
+                    ].map((tab: any, idx) => (
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         className={`text-left px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-3 ${
                           activeTab === tab.id
-                            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg'
-                            : 'text-slate-600 hover:bg-slate-100'
+                            ? tab.priority ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg'
+                            : tab.priority ? 'text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200' : 'text-slate-600 hover:bg-slate-100'
                         }`}
                       >
                         <div className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
-                          activeTab === tab.id ? 'bg-white/20' : 'bg-slate-100'
+                          activeTab === tab.id ? 'bg-white/20' : tab.priority ? 'bg-purple-100' : 'bg-slate-100'
                         }`}>
                           {tab.icon}
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold truncate">{tab.label}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate flex items-center gap-1.5">
+                            {tab.label}
+                            {tab.priority && (
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                                activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-purple-200 text-purple-700'
+                              }`}>
+                                #1
+                              </span>
+                            )}
+                          </div>
                           <div className={`text-[11px] truncate ${activeTab === tab.id ? 'text-indigo-100' : 'text-slate-400'}`}>{tab.desc}</div>
                         </div>
                       </button>
@@ -1846,300 +1887,314 @@ function AnalysisReportsContent() {
                   </motion.div>
                 )}
 
-                {/* TAB: TEXT HIGHLIGHTS (Turnitin-style) */}
-                {activeTab === 'highlights' && (
-                  <motion.div
+                {/* TAB: TEXT HIGHLIGHTS (PLAGIARISM DETECTION) */}
+                {sections && activeTab === 'plagiarism' && (
+                  <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    {/* Header */}
-                    <div className="bg-white rounded-2xl shadow-lg border border-purple-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-purple-700 to-indigo-700 px-6 py-4">
-                        <div className="flex items-center gap-3 text-white">
-                          <Highlighter className="w-5 h-5" />
-                          <div>
-                            <h3 className="text-lg font-bold">Text Match Highlights</h3>
-                            <p className="text-purple-200 text-xs mt-0.5">Full-text view with flagged passages mapped to internet sources</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Stats bar */}
-                      <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 flex flex-wrap gap-4 items-center text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-purple-800">{textHighlights.length}</span>
-                          <span className="text-purple-600">flagged passages</span>
-                        </div>
-                        <div className="h-4 w-px bg-purple-200" />
-                        {['Exact Copy', 'Close Paraphrase', 'Patchwriting', 'Structural Copy', 'Common Knowledge'].map(type => {
-                          const count = textHighlights.filter(h => (h.matchType || '').toLowerCase().includes(type.toLowerCase().split(' ')[0].toLowerCase())).length
-                          if (count === 0) return null
-                          const color = type === 'Exact Copy' ? 'bg-red-400' : type === 'Close Paraphrase' ? 'bg-orange-400' : type === 'Patchwriting' ? 'bg-yellow-400' : type === 'Structural Copy' ? 'bg-blue-400' : 'bg-slate-400'
-                          return (
-                            <div key={type} className="flex items-center gap-1.5">
-                              <span className={`inline-block w-2.5 h-2.5 rounded-sm ${color}`} />
-                              <span className="text-slate-600">{count} {type}</span>
+                    {/* Winston AI Results (Primary) */}
+                    {winstonSummary && (winstonSummary.plagiarismScore > 0 || winstonSummary.highlightsCount > 0 || winstonSummary.sourcesCount > 0) ? (
+                      <>
+                        {/* Summary Card */}
+                        <div className={`rounded-2xl shadow-lg border-2 overflow-hidden ${
+                          winstonSummary.isPlagiarized ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
+                        }`}>
+                          <div className={`px-6 py-4 ${
+                            winstonSummary.isPlagiarized 
+                              ? 'bg-gradient-to-r from-red-600 to-rose-600' 
+                              : 'bg-gradient-to-r from-green-600 to-emerald-600'
+                          }`}>
+                            <div className="flex items-center gap-3 text-white">
+                              {winstonSummary.isPlagiarized ? <AlertTriangle className="w-6 h-6" /> : <CheckCircle className="w-6 h-6" />}
+                              <div>
+                                <h3 className="text-xl font-bold">Plagiarism Detection</h3>
+                                <p className="text-xs mt-1 text-white/90">Advanced AI-powered plagiarism detection with text highlighting</p>
+                              </div>
                             </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Color legend */}
-                      <div className="px-6 py-2.5 bg-white border-b border-purple-100 flex flex-wrap gap-3 items-center text-[11px]">
-                        <span className="text-slate-500 font-medium mr-1">Legend:</span>
-                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-red-200 border border-red-300" /> Exact Copy</span>
-                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-orange-200 border border-orange-300" /> Close Paraphrase</span>
-                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-yellow-200 border border-yellow-300" /> Patchwriting</span>
-                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-blue-200 border border-blue-300" /> Structural Copy</span>
-                        <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-slate-200 border border-slate-300" /> Common Knowledge</span>
-                      </div>
-                    </div>
-
-                    {textHighlights.length === 0 ? (
-                      <div className="bg-white rounded-2xl shadow-lg border border-green-200 p-10 text-center">
-                        <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                        <h4 className="text-lg font-bold text-green-800 mb-1">No Matches Detected</h4>
-                        <p className="text-sm text-slate-500 max-w-md mx-auto">The AI did not flag any specific text passages as matching existing internet sources. Your text appears original.</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* LEFT: Full text with inline highlights */}
-                        <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                          <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
-                            <Eye className="w-4 h-4 text-slate-500" />
-                            <span className="text-sm font-semibold text-slate-700">Proposed Research Text</span>
                           </div>
-                          <div className="p-5 text-sm leading-relaxed text-slate-800 whitespace-pre-wrap font-[system-ui] max-h-[700px] overflow-y-auto">
-                            {(() => {
-                              if (!userConcept) return <span className="text-slate-400 italic">No text available</span>
-                              
-                              // Build segments: find all highlights in text
-                              type Segment = { text: string; highlight?: typeof textHighlights[0]; index: number }
-                              const segments: Segment[] = []
-                              
-                              // Find positions of each highlight in the text using multiple strategies
-                              const positions: { start: number; end: number; highlight: typeof textHighlights[0]; idx: number }[] = []
-                              const lowerConcept = userConcept.toLowerCase()
-                              
-                              textHighlights.forEach((h, idx) => {
-                                if (!h.matchedText) return
-                                const searchText = h.matchedText.toLowerCase().trim()
-                                if (searchText.length < 4) return
+                          <div className="p-6 bg-white">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                              <div className={`text-center p-3 rounded-xl border ${
+                                winstonSummary.plagiarismScore >= 30 ? 'bg-red-50 border-red-100' :
+                                winstonSummary.plagiarismScore >= 15 ? 'bg-orange-50 border-orange-100' :
+                                'bg-green-50 border-green-100'
+                              }`}>
+                                <div className={`text-2xl font-bold ${
+                                  winstonSummary.plagiarismScore >= 30 ? 'text-red-600' :
+                                  winstonSummary.plagiarismScore >= 15 ? 'text-orange-600' :
+                                  'text-green-600'
+                                }`}>{Math.round(winstonSummary.plagiarismScore * 10) / 10}%</div>
+                                <div className={`text-xs mt-1 ${
+                                  winstonSummary.plagiarismScore >= 30 ? 'text-red-500' :
+                                  winstonSummary.plagiarismScore >= 15 ? 'text-orange-500' :
+                                  'text-green-500'
+                                }`}>Plagiarism Score</div>
+                              </div>
+                              <div className="text-center p-3 bg-blue-50 rounded-xl border border-blue-100">
+                                <div className="text-2xl font-bold text-blue-600">{winstonSummary.highlightsCount}</div>
+                                <div className="text-xs text-blue-500 mt-1">Text Highlights</div>
+                              </div>
+                              <div className="text-center p-3 bg-purple-50 rounded-xl border border-purple-100">
+                                <div className="text-2xl font-bold text-purple-600">{winstonSummary.sourcesCount}</div>
+                                <div className="text-xs text-purple-500 mt-1">Sources Found</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Text with Highlights */}
+                        {winstonHighlights.length > 0 && (
+                        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                          <div className="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600">
+                            <div className="flex items-center gap-3 text-white">
+                              <Highlighter className="w-5 h-5" />
+                              <div>
+                                <h3 className="text-lg font-bold">Your Text with Plagiarism Highlights</h3>
+                                <p className="text-xs mt-1 text-indigo-100">Highlighted portions match external sources</p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-6 max-h-[600px] overflow-y-auto">
+                            <div className="text-sm leading-relaxed text-slate-800 whitespace-pre-wrap font-[system-ui]">
+                              {(() => {
+                                if (!userConcept) return <span className="text-slate-400 italic">No text available</span>;
                                 
-                                // Strategy 1: Exact match (case-insensitive)
-                                let pos = lowerConcept.indexOf(searchText)
-                                if (pos !== -1) {
-                                  positions.push({ start: pos, end: pos + searchText.length, highlight: h, idx })
-                                  return
-                                }
+                                // Sort highlights by start position
+                                const sortedHighlights = [...winstonHighlights].sort((a, b) => a.start - b.start);
                                 
-                                // Strategy 2: Try matching without extra whitespace/punctuation
-                                const normalizedSearch = searchText.replace(/[\s]+/g, ' ').replace(/[^\w\s]/g, '')
-                                const normalizedConcept = lowerConcept.replace(/[\s]+/g, ' ').replace(/[^\w\s]/g, '')
-                                const normalPos = normalizedConcept.indexOf(normalizedSearch)
-                                if (normalPos !== -1 && normalizedSearch.length > 10) {
-                                  // Map back to original text position approximately
-                                  // Find the first word of the search in the original and the last word
-                                  const firstWords = searchText.split(/\s+/).slice(0, 3).join('\\s+')
-                                  const lastWords = searchText.split(/\s+/).slice(-3).join('\\s+')
-                                  try {
-                                    const startRegex = new RegExp(firstWords.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\s\+/g, '\\s+'), 'i')
-                                    const startMatch = userConcept.match(startRegex)
-                                    if (startMatch && startMatch.index !== undefined) {
-                                      // Find the end by looking for last words after the start
-                                      const endRegex = new RegExp(lastWords.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\s\+/g, '\\s+'), 'i')
-                                      const remaining = userConcept.substring(startMatch.index)
-                                      const endMatch = remaining.match(endRegex)
-                                      if (endMatch && endMatch.index !== undefined) {
-                                        const end = startMatch.index + endMatch.index + endMatch[0].length
-                                        positions.push({ start: startMatch.index, end, highlight: h, idx })
-                                        return
-                                      }
-                                    }
-                                  } catch (e) { /* regex error, skip */ }
-                                }
+                                // Build segments
+                                const segments: Array<{ text: string; highlight?: typeof sortedHighlights[0]; index: number }> = [];
+                                let cursor = 0;
                                 
-                                // Strategy 3: Try a significant substring (first 60 chars or first sentence)
-                                const subText = searchText.length > 60 ? searchText.substring(0, 60) : searchText
-                                const subPos = lowerConcept.indexOf(subText)
-                                if (subPos !== -1) {
-                                  positions.push({ start: subPos, end: subPos + Math.min(searchText.length, userConcept.length - subPos), highlight: h, idx })
-                                  return
-                                }
-                                
-                                // Strategy 4: Try first 5+ words as a prefix match
-                                const words = searchText.split(/\s+/)
-                                if (words.length >= 5) {
-                                  for (let wc = Math.min(words.length, 8); wc >= 4; wc--) {
-                                    const partial = words.slice(0, wc).join(' ')
-                                    const pPos = lowerConcept.indexOf(partial)
-                                    if (pPos !== -1) {
-                                      // Extend to cover the full expected length
-                                      const endPos = Math.min(pPos + searchText.length, userConcept.length)
-                                      positions.push({ start: pPos, end: endPos, highlight: h, idx })
-                                      return
-                                    }
+                                sortedHighlights.forEach((highlight, i) => {
+                                  // Add text before highlight
+                                  if (highlight.start > cursor) {
+                                    segments.push({ text: userConcept.slice(cursor, highlight.start), index: i * 2 });
                                   }
-                                }
-                              })
-                              
-                              // Sort by position and remove overlaps
-                              positions.sort((a, b) => a.start - b.start)
-                              const filtered: typeof positions = []
-                              let lastEnd = 0
-                              for (const p of positions) {
-                                if (p.start >= lastEnd) {
-                                  filtered.push(p)
-                                  lastEnd = p.end
-                                }
-                              }
-                              
-                              // Build segments
-                              let cursor = 0
-                              filtered.forEach((p, i) => {
-                                if (p.start > cursor) {
-                                  segments.push({ text: userConcept.slice(cursor, p.start), index: i * 2 })
-                                }
-                                segments.push({ text: userConcept.slice(p.start, p.end), highlight: p.highlight, index: i * 2 + 1 })
-                                cursor = p.end
-                              })
-                              if (cursor < userConcept.length) {
-                                segments.push({ text: userConcept.slice(cursor), index: filtered.length * 2 })
-                              }
-                              
-                              if (filtered.length === 0 && textHighlights.length > 0) {
-                                // None matched in-text — show the raw text with a note
-                                return (
-                                  <>
-                                    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
-                                      <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
-                                      {textHighlights.length} matches were found on the web but could not be highlighted inline. See the source panel for details.
-                                    </div>
-                                    <span>{userConcept}</span>
-                                  </>
-                                )
-                              }
-                              
-                              const getHighlightClass = (matchType: string) => {
-                                const t = (matchType || '').toLowerCase()
-                                if (t.includes('exact')) return 'bg-red-200 border-b-2 border-red-400'
-                                if (t.includes('paraphrase')) return 'bg-orange-200 border-b-2 border-orange-400'
-                                if (t.includes('patchw')) return 'bg-yellow-200 border-b-2 border-yellow-400'
-                                if (t.includes('structural')) return 'bg-blue-200 border-b-2 border-blue-400'
-                                return 'bg-slate-200 border-b-2 border-slate-400'
-                              }
-                              
-                              return segments.map((seg) => 
-                                seg.highlight ? (
-                                  <span
-                                    key={seg.index}
-                                    className={`${getHighlightClass(seg.highlight.matchType)} rounded-sm px-0.5 cursor-pointer relative group/hl inline`}
-                                    onClick={() => {
-                                      if (seg.highlight?.sourceUrl && seg.highlight.sourceUrl !== 'N/A') {
-                                        window.open(seg.highlight.sourceUrl, '_blank')
-                                      }
-                                    }}
-                                  >
-                                    {seg.text}
-                                    {/* Hover tooltip with source info + clickable link */}
-                                    <span className="invisible group-hover/hl:visible absolute z-[100] left-0 top-full mt-1.5 w-80 bg-slate-900 text-white text-xs rounded-xl p-4 shadow-2xl border border-slate-700" style={{ pointerEvents: 'auto' }}>
-                                      <span className="flex items-center gap-2 mb-2">
-                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                          (seg.highlight.matchType || '').toLowerCase().includes('exact') ? 'bg-red-500/30 text-red-300' :
-                                          (seg.highlight.matchType || '').toLowerCase().includes('paraphrase') ? 'bg-orange-500/30 text-orange-300' :
-                                          (seg.highlight.matchType || '').toLowerCase().includes('patchw') ? 'bg-yellow-500/30 text-yellow-300' :
-                                          'bg-slate-500/30 text-slate-300'
-                                        }`}>{seg.highlight.matchType}</span>
-                                        {seg.highlight.similarity ? <span className="text-slate-400 text-[10px]">{seg.highlight.similarity}% match</span> : null}
-                                      </span>
-                                      <span className="block text-slate-300 text-[11px] mb-2 leading-relaxed">&ldquo;{seg.highlight.matchedText.substring(0, 120)}{seg.highlight.matchedText.length > 120 ? '...' : ''}&rdquo;</span>
-                                      <span className="block text-slate-400 text-[10px] mb-1.5 font-medium">{seg.highlight.source}</span>
-                                      {seg.highlight.sourceUrl && seg.highlight.sourceUrl !== 'N/A' && (
-                                        <a
-                                          href={seg.highlight.sourceUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 underline mt-1"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          View Source →
-                                        </a>
-                                      )}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <span key={seg.index}>{seg.text}</span>
-                                )
-                              )
-                            })()}
-                          </div>
-                        </div>
-
-                        {/* RIGHT: Source panel */}
-                        <div className="lg:col-span-1 space-y-4">
-                          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
-                              <span className="text-sm font-semibold text-slate-700">Matched Sources</span>
-                            </div>
-                            <div className="divide-y divide-slate-100 max-h-[700px] overflow-y-auto">
-                              {textHighlights.map((h, idx) => {
-                                const badgeColor = (h.matchType || '').toLowerCase().includes('exact')
-                                  ? 'bg-red-100 text-red-700 border-red-200'
-                                  : (h.matchType || '').toLowerCase().includes('paraphrase')
-                                  ? 'bg-orange-100 text-orange-700 border-orange-200'
-                                  : (h.matchType || '').toLowerCase().includes('patchw')
-                                  ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                                  : (h.matchType || '').toLowerCase().includes('structural')
-                                  ? 'bg-blue-100 text-blue-700 border-blue-200'
-                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                                  // Add highlighted text
+                                  segments.push({ 
+                                    text: userConcept.slice(highlight.start, highlight.end), 
+                                    highlight, 
+                                    index: i * 2 + 1 
+                                  });
+                                  cursor = highlight.end;
+                                });
                                 
-                                const dotColor = (h.matchType || '').toLowerCase().includes('exact')
-                                  ? 'bg-red-400'
-                                  : (h.matchType || '').toLowerCase().includes('paraphrase')
-                                  ? 'bg-orange-400'
-                                  : (h.matchType || '').toLowerCase().includes('patchw')
-                                  ? 'bg-yellow-400'
-                                  : (h.matchType || '').toLowerCase().includes('structural')
-                                  ? 'bg-blue-400'
-                                  : 'bg-slate-400'
+                                // Add remaining text
+                                if (cursor < userConcept.length) {
+                                  segments.push({ text: userConcept.slice(cursor), index: sortedHighlights.length * 2 });
+                                }
                                 
-                                return (
-                                  <div key={idx} className="p-3.5 hover:bg-slate-50 transition-colors">
-                                    <div className="flex items-start gap-2 mb-2">
-                                      <span className={`mt-1 flex-shrink-0 w-2.5 h-2.5 rounded-full ${dotColor}`} />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${badgeColor}`}>
-                                            {h.matchType || 'Match'}
+                                return segments.map((seg) => 
+                                  seg.highlight ? (
+                                    <span
+                                      key={seg.index}
+                                      className="bg-red-200 border-b-2 border-red-400 rounded-sm px-0.5 cursor-pointer relative group/hl inline"
+                                      onClick={() => {
+                                        if (seg.highlight?.url) {
+                                          window.open(seg.highlight.url, '_blank');
+                                        }
+                                      }}
+                                    >
+                                      {seg.text}
+                                      <span className="invisible group-hover/hl:visible absolute z-[100] left-0 top-full mt-1.5 w-80 bg-slate-900 text-white text-xs rounded-xl p-4 shadow-2xl border border-slate-700">
+                                        <span className="flex items-center gap-2 mb-2">
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/30 text-red-300">
+                                            {Math.round(seg.highlight.score * 10) / 10}% Match
                                           </span>
-                                          {h.similarity && (
-                                            <span className="text-[10px] font-bold text-slate-600">{h.similarity}%</span>
-                                          )}
-                                        </div>
-                                        <p className="text-xs text-slate-600 line-clamp-2 mb-1.5">&quot;{h.matchedText}&quot;</p>
-                                        {h.sourceUrl && h.sourceUrl !== 'N/A' ? (
+                                        </span>
+                                        <span className="block text-slate-300 text-[11px] mb-2 leading-relaxed font-semibold">{seg.highlight.title}</span>
+                                        {seg.highlight.url && (
                                           <a
-                                            href={h.sourceUrl}
+                                            href={seg.highlight.url}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium truncate block underline decoration-indigo-300 hover:decoration-indigo-500 transition-colors"
+                                            className="inline-flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 underline mt-1"
+                                            onClick={(e) => e.stopPropagation()}
                                           >
-                                            {h.source}
+                                            View Source →
                                           </a>
-                                        ) : (
-                                          <p className="text-[11px] text-slate-500 truncate font-medium">{h.source}</p>
                                         )}
-                                        {h.sourceUrl && h.sourceUrl !== 'N/A' && (
-                                          <span className="text-[10px] text-slate-400 truncate block mt-0.5">{h.sourceUrl}</span>
-                                        )}
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <span key={seg.index}>{seg.text}</span>
+                                  )
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                        )}
+
+                        {/* Matched Sources List */}
+                        {winstonSources.length > 0 && (
+                          <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                            <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+                              <h3 className="text-lg font-semibold text-slate-800">Matching Sources</h3>
+                              <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
+                            </div>
+                            <div className="divide-y divide-slate-100">
+                              {winstonSources.map((source: any, idx: number) => (
+                                <div key={idx} className="p-6 hover:bg-slate-50 transition-colors">
+                                  <div className="flex items-start gap-4">
+                                    <div className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${
+                                      source.plagiarismScore >= 30 ? 'bg-red-100 text-red-600' :
+                                      source.plagiarismScore >= 15 ? 'bg-orange-100 text-orange-600' :
+                                      'bg-amber-100 text-amber-600'
+                                    }`}>
+                                      <AlertTriangle className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-start justify-between gap-3 mb-2">
+                                        <h4 className="text-base font-semibold text-slate-800 line-clamp-2">
+                                          {source.title}
+                                        </h4>
+                                        <span className={`px-3 py-1 rounded-full text-sm font-bold shrink-0 ${
+                                          source.plagiarismScore >= 30 ? 'bg-red-100 text-red-700' :
+                                          source.plagiarismScore >= 15 ? 'bg-orange-100 text-orange-700' :
+                                          'bg-amber-100 text-amber-700'
+                                        }`}>
+                                          {Math.round(source.plagiarismScore * 10) / 10}% Match
+                                        </span>
+                                      </div>
+                                      {source.matchedText && (
+                                        <p className="text-sm text-slate-600 mb-3 line-clamp-3 italic">&quot;{source.matchedText}&quot;</p>
+                                      )}
+                                      <a
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                                      >
+                                        <Globe className="w-4 h-4" />
+                                        View Source
+                                      </a>
+                                      <div className="mt-3 pt-3 border-t border-slate-100">
+                                        <span className="text-xs text-slate-500 truncate block">{source.url}</span>
                                       </div>
                                     </div>
                                   </div>
-                                )
-                              })}
+                                </div>
+                              ))}
                             </div>
                           </div>
+                        )}
+                      </>
+                    ) : copyscapeHighlights && copyscapeHighlights.length > 0 ? (
+                      <>
+                        {/* Copyscape Results (Fallback) */}
+                        <div className="bg-red-50 rounded-2xl shadow-lg border-2 border-red-200 overflow-hidden">
+                          <div className="px-6 py-4 bg-gradient-to-r from-red-600 to-rose-600">
+                            <div className="flex items-center gap-3 text-white">
+                              <AlertTriangle className="w-6 h-6" />
+                              <div>
+                                <h3 className="text-xl font-bold">Copyscape Plagiarism Detection</h3>
+                                <p className="text-xs mt-1 text-red-100">Professional plagiarism detection</p>
+                              </div>
+                            </div>
+                          </div>
+                          {copyscapeSummary && (
+                            <div className="p-6 bg-white">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="text-center p-3 bg-red-50 rounded-xl border border-red-100">
+                                  <div className="text-2xl font-bold text-red-600">{copyscapeSummary.count}</div>
+                                  <div className="text-xs text-red-500 mt-1">Matches Found</div>
+                                </div>
+                                <div className="text-center p-3 bg-orange-50 rounded-xl border border-orange-100">
+                                  <div className="text-2xl font-bold text-orange-600">{copyscapeSummary.allpercentmatched}%</div>
+                                  <div className="text-xs text-orange-500 mt-1">Overall Match</div>
+                                </div>
+                                <div className="text-center p-3 bg-amber-50 rounded-xl border border-amber-100">
+                                  <div className="text-2xl font-bold text-amber-600">{copyscapeSummary.allwordsmatched}</div>
+                                  <div className="text-xs text-amber-500 mt-1">Words Matched</div>
+                                </div>
+                                <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                  <div className="text-2xl font-bold text-slate-600">{copyscapeSummary.querywords}</div>
+                                  <div className="text-xs text-slate-500 mt-1">Words Checked</div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Matched Sources */}
+                        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+                            <h3 className="text-lg font-semibold text-slate-800">Matched Sources</h3>
+                            <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
+                          </div>
+                          <div className="divide-y divide-slate-100">
+                            {copyscapeHighlights.map((match: any, idx: number) => (
+                              <div key={idx} className="p-6 hover:bg-slate-50 transition-colors">
+                                <div className="flex items-start gap-4">
+                                  <div className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${
+                                    match.percentMatched >= 30 ? 'bg-red-100 text-red-600' :
+                                    match.percentMatched >= 15 ? 'bg-orange-100 text-orange-600' :
+                                    'bg-amber-100 text-amber-600'
+                                  }`}>
+                                    <AlertTriangle className="w-5 h-5" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between gap-3 mb-2">
+                                      <h4 className="text-base font-semibold text-slate-800 line-clamp-2">
+                                        {match.title}
+                                      </h4>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+                                          match.percentMatched >= 30 ? 'bg-red-100 text-red-700' :
+                                          match.percentMatched >= 15 ? 'bg-orange-100 text-orange-700' :
+                                          'bg-amber-100 text-amber-700'
+                                        }`}>
+                                          {match.percentMatched}% Match
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <p className="text-sm text-slate-600 mb-3 line-clamp-3">{match.snippet}</p>
+                                    <a
+                                      href={match.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                                    >
+                                      <Globe className="w-4 h-4" />
+                                      View Source
+                                    </a>
+                                    <div className="mt-3 pt-3 border-t border-slate-100">
+                                      <div className="flex items-center gap-4 text-xs text-slate-500">
+                                        <span className="flex items-center gap-1">
+                                          <FileText className="w-3 h-3" />
+                                          {match.wordsMatched} words matched
+                                        </span>
+                                        <span className="truncate">{match.url}</span>
+                                      </div>
+                                    </div>
+                                    {match.textMatched && (
+                                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                        <div className="text-xs font-semibold text-amber-700 uppercase mb-1">Matched Text:</div>
+                                        <p className="text-sm text-amber-900 italic line-clamp-4">&quot;{match.textMatched}&quot;</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
+                        <div className="p-10 text-center">
+                          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                          <h3 className="text-xl font-bold text-green-800 mb-2">No Plagiarism Detected</h3>
+                          <p className="text-slate-600 max-w-md mx-auto">
+                            {copyscapeSummary 
+                              ? `Copyscape found no matches in external sources. Your text appears to be original.`
+                              : `Plagiarism detection service not configured or unavailable.`
+                            }
+                          </p>
                         </div>
                       </div>
                     )}

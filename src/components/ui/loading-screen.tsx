@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Loader2, Sparkles, CheckCircle2, Brain, FileSearch, BarChart3 } from "lucide-react"
+import { Loader2, Sparkles, CheckCircle2, Brain, FileSearch, BarChart3, Shield } from "lucide-react"
 
 interface LoadingScreenProps {
   currentStage?: number
@@ -47,8 +47,8 @@ const informationalMessages = [
 
 const stages = [
   { icon: FileSearch, label: "Processing Input", color: "text-blue-400" },
-  { icon: BarChart3, label: "Algorithm Analysis", color: "text-purple-400" },
-  { icon: Brain, label: "Similarity Detection", color: "text-green-400" },
+  { icon: Shield, label: "Similarity Detection", color: "text-purple-400" },
+  { icon: BarChart3, label: "Analyzing Results", color: "text-indigo-400" },
   { icon: Sparkles, label: "Generating Report", color: "text-amber-400" },
   { icon: CheckCircle2, label: "Finalizing Results", color: "text-emerald-400" }
 ]

@@ -78,33 +78,30 @@ export default function CheckSimilarityPage() {
         proposedConceptPreview: payload.proposedConcept.substring(0, 100)
       })
 
-      // Stage 2: Algorithm Analysis
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Stage 2: Similarity Detection
+      await new Promise(resolve => setTimeout(resolve, 400))
       setLoadingStage(2)
-      setStageLabel("Algorithm Analysis")
+      setStageLabel("Similarity Detection")
 
-      // Call the API directly to avoid URL length limits with large file content
-      const response = await fetch("/api/similarity/check", {
+      const similarityResponse = await fetch("/api/similarity/check", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
 
-      // Stage 3: Similarity Detection
+      // Stage 3: Analyzing Results
       setLoadingStage(3)
-      setStageLabel("Similarity Detection")
+      setStageLabel("Analyzing Results")
 
-      const data = await response.json()
+      const data = await similarityResponse.json()
 
       console.log("API Response:", {
-        ok: response.ok,
-        status: response.status,
+        ok: similarityResponse.ok,
+        status: similarityResponse.status,
         data: data
       })
 
-      if (!response.ok) {
+      if (!similarityResponse.ok) {
         throw new Error(data.error || "Failed to check similarity")
       }
 
