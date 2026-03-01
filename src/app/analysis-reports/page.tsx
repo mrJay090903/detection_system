@@ -2001,9 +2001,11 @@ function AnalysisReportsContent() {
                                       {seg.text}
                                       <span className="invisible group-hover/hl:visible absolute z-[100] left-0 top-full mt-1.5 w-80 bg-slate-900 text-white text-xs rounded-xl p-4 shadow-2xl border border-slate-700">
                                         <span className="flex items-center gap-2 mb-2">
+                                          {seg.highlight.score > 0 && (
                                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/30 text-red-300">
                                             {Math.round(seg.highlight.score * 10) / 10}% Match
                                           </span>
+                                          )}
                                         </span>
                                         <span className="block text-slate-300 text-[11px] mb-2 leading-relaxed font-semibold">{seg.highlight.title}</span>
                                         {seg.highlight.url && (
@@ -2030,14 +2032,14 @@ function AnalysisReportsContent() {
                         )}
 
                         {/* Matched Sources List */}
-                        {winstonSources.length > 0 && (
+                        {winstonSources.filter((s: any) => s.plagiarismScore > 0).length > 0 && (
                           <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
                             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
                               <h3 className="text-lg font-semibold text-slate-800">Matching Sources</h3>
                               <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
                             </div>
                             <div className="divide-y divide-slate-100">
-                              {winstonSources.map((source: any, idx: number) => (
+                              {winstonSources.filter((s: any) => s.plagiarismScore > 0).map((source: any, idx: number) => (
                                 <div key={idx} className="p-6 hover:bg-slate-50 transition-colors">
                                   <div className="flex items-start gap-4">
                                     <div className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${
