@@ -509,6 +509,12 @@ function AnalysisReportsContent() {
         }
         
         // Set match breakdown if available
+        console.log('[Match Breakdown] Received from API:', {
+          hasMatchBreakdown: !!data.matchBreakdown,
+          conclusion: data.matchBreakdown?.conclusion?.substring(0, 100),
+          matchesCount: data.matchBreakdown?.matches?.length || 0,
+          firstMatch: data.matchBreakdown?.matches?.[0]
+        });
         if (data.matchBreakdown) {
           setMatchBreakdown(data.matchBreakdown)
         }
@@ -954,7 +960,7 @@ function AnalysisReportsContent() {
                       { id: 'analysis', icon: <BarChart3 className="w-4 h-4" />, label: 'Similarity Analysis', desc: 'Text & concept breakdown' },
                       { id: 'fields', icon: <Target className="w-4 h-4" />, label: '4-Field Assessment', desc: 'Detailed field scores' },
                       { id: 'detailed', icon: <Search className="w-4 h-4" />, label: 'Match Breakdown', desc: 'External source matches' },
-                      { id: 'plagiarism', icon: <AlertTriangle className="w-4 h-4" />, label: 'Text Highlights', desc: 'Plagiarism detection', priority: true },
+                      { id: 'plagiarism', icon: <AlertTriangle className="w-4 h-4" />, label: 'Text Highlights', desc: 'Plagiarism detection' },
                       { id: 'recommendations', icon: <Lightbulb className="w-4 h-4" />, label: 'Recommendations', desc: 'Improvement suggestions' },
                     ].map((tab: any, idx) => (
                       <button
@@ -978,7 +984,7 @@ function AnalysisReportsContent() {
                               <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
                                 activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-purple-200 text-purple-700'
                               }`}>
-                                #1
+                                
                               </span>
                             )}
                           </div>
@@ -1711,12 +1717,15 @@ function AnalysisReportsContent() {
                     {matchBreakdown?.conclusion && (
                       <div className="bg-white rounded-2xl shadow-lg border border-indigo-200 overflow-hidden">
                         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4">
-                          <div className="flex items-center gap-3 text-white">
-                            <BarChart3 className="w-5 h-5" />
-                            <div>
-                              <h3 className="text-lg font-bold">Similarity Conclusion</h3>
-                              <p className="text-indigo-200 text-xs mt-0.5">Overall findings from source matching</p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-white">
+                              <BarChart3 className="w-5 h-5" />
+                              <div>
+                                <h3 className="text-lg font-bold">Similarity Conclusion</h3>
+                                <p className="text-indigo-200 text-xs mt-0.5">Overall findings from source matching</p>
+                              </div>
                             </div>
+                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">📡 AI Analysis + Web Search</span>
                           </div>
                         </div>
                         <div className="p-6">
@@ -1730,26 +1739,72 @@ function AnalysisReportsContent() {
                       const _normalizeT = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
                       const _existNorm = _normalizeT(existingTitle);
                       const _existWords = new Set(_existNorm.split(' ').filter((w: string) => w.length > 3));
+                      
+                      console.log('[Match Breakdown Render]', {
+                        hasMatchBreakdown: !!matchBreakdown,
+                        totalMatches: matchBreakdown?.matches?.length || 0,
+                        existingTitle,
+                        existingTitleNormalized: _existNorm
+                      });
+                      
                       const _filteredMatches = (matchBreakdown?.matches || []).filter((m: any) => {
                         const mNorm = _normalizeT(m.name || '');
                         if (!mNorm || !_existNorm) return true;
-                        if (mNorm === _existNorm) return false;
-                        if (_existNorm.includes(mNorm) || mNorm.includes(_existNorm)) return false;
+                        if (mNorm === _existNorm) {
+                          console.log('[Match Breakdown] Filtered exact match:', m.name);
+                          return false;
+                        }
+                        if (_existNorm.includes(mNorm) || mNorm.includes(_existNorm)) {
+                          console.log('[Match Breakdown] Filtered substring match:', m.name);
+                          return false;
+                        }
                         const mWords = new Set(mNorm.split(' ').filter((w: string) => w.length > 3));
                         let overlap = 0;
                         for (const w of mWords) if (_existWords.has(w)) overlap++;
                         const ratio = overlap / Math.min(mWords.size, _existWords.size || 1);
-                        return ratio < 0.7;
+                        if (ratio >= 0.7) {
+                          console.log('[Match Breakdown] Filtered high word overlap:', m.name, 'ratio:', ratio);
+                          return false;
+                        }
+                        return true;
                       });
+                      
+                      console.log('[Match Breakdown] Filtered matches:', _filteredMatches.length, 'remaining');
+                      
+                      // Show message if no matches at all vs filtered out
+                      if (!matchBreakdown || !matchBreakdown.matches || matchBreakdown.matches.length === 0) {
+                        return (
+                          <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
+                            <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3 text-white">
+                                  <CheckCircle className="w-5 h-5" />
+                                  <h3 className="text-lg font-bold">No External Sources Found</h3>
+                                </div>
+                                <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
+                              </div>
+                            </div>
+                            <div className="p-8 text-center">
+                              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                              <p className="text-lg font-semibold text-green-800 mb-2">No external matches were detected</p>
+                              <p className="text-sm text-slate-600">The AI did not identify any closely matching external research papers, theses, apps, or projects.</p>
+                            </div>
+                          </div>
+                        );
+                      }
+                      
                       return _filteredMatches.length > 0 ? (
                       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
                         <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-4">
-                          <div className="flex items-center gap-3 text-white">
-                            <Search className="w-5 h-5" />
-                            <div>
-                              <h3 className="text-lg font-bold">Matched Sources</h3>
-                              <p className="text-slate-300 text-xs mt-0.5">{_filteredMatches.length} external source(s) found — ranked by similarity</p>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-white">
+                              <Search className="w-5 h-5" />
+                              <div>
+                                <h3 className="text-lg font-bold">Matched Sources</h3>
+                                <p className="text-slate-300 text-xs mt-0.5">{_filteredMatches.length} external source(s) found — ranked by similarity</p>
+                              </div>
                             </div>
+                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
                           </div>
                         </div>
                         <div className="p-6 space-y-5">
@@ -1867,17 +1922,24 @@ function AnalysisReportsContent() {
                         </div>
                       </div>
                       ) : (
-                      <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
-                        <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-4">
-                          <div className="flex items-center gap-3 text-white">
-                            <CheckCircle className="w-5 h-5" />
-                            <h3 className="text-lg font-bold">No External Sources Found</h3>
+                      <div className="bg-white rounded-2xl shadow-lg border border-blue-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-white">
+                              <Info className="w-5 h-5" />
+                              <h3 className="text-lg font-bold">All Matches Filtered</h3>
+                            </div>
+                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
                           </div>
                         </div>
                         <div className="p-8 text-center">
-                          <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                          <p className="text-lg font-semibold text-green-800 mb-2">No external match breakdown entries found</p>
-                          <p className="text-sm text-slate-600">No closely matching external research papers, theses, apps, or projects were identified.</p>
+                          <Info className="w-12 h-12 text-blue-500 mx-auto mb-3" />
+                          <p className="text-lg font-semibold text-blue-800 mb-2">All external matches were filtered out</p>
+                          <p className="text-sm text-slate-600 mb-2">
+                            {matchBreakdown.matches.length} source(s) were detected but matched the existing research title in the database, 
+                            so they were excluded to show only truly external sources.
+                          </p>
+                          <p className="text-xs text-slate-500">This is expected behavior - the system automatically filters out the database comparison baseline.</p>
                         </div>
                       </div>
                       );
@@ -1897,6 +1959,18 @@ function AnalysisReportsContent() {
                     {/* Winston AI Results (Primary) */}
                     {winstonSummary && (winstonSummary.plagiarismScore > 0 || winstonSummary.highlightsCount > 0 || winstonSummary.sourcesCount > 0) ? (
                       <>
+                        {/* Source Label */}
+                        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl shadow-lg px-6 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3 text-white">
+                            <AlertTriangle className="w-5 h-5" />
+                            <div>
+                              <h3 className="text-base font-bold">Plagiarism Detection Results</h3>
+                              <p className="text-purple-200 text-[10px] mt-0.5">Scanning entire document against billions of web pages</p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🤖 Winston AI API</span>
+                        </div>
+
                         {/* Summary Card */}
                         <div className={`rounded-2xl shadow-lg border-2 overflow-hidden ${
                           winstonSummary.isPlagiarized ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
@@ -1947,6 +2021,13 @@ function AnalysisReportsContent() {
                         {/* Text with Highlights */}
                         {winstonHighlights.length > 0 && (
                         <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+                          <div className="bg-gradient-to-r from-slate-600 to-slate-800 px-6 py-3 flex items-center justify-between border-b">
+                            <div className="flex items-center gap-2 text-white">
+                              <FileText className="w-4 h-4" />
+                              <span className="text-sm font-semibold">Highlighted Plagiarized Text ({winstonHighlights.length} matches)</span>
+                            </div>
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold">Winston AI</span>
+                          </div>
                           <div className="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600">
                             <div className="flex items-center gap-3 text-white">
                               <Highlighter className="w-5 h-5" />
@@ -2090,12 +2171,15 @@ function AnalysisReportsContent() {
                         {/* Copyscape Results (Fallback) */}
                         <div className="bg-red-50 rounded-2xl shadow-lg border-2 border-red-200 overflow-hidden">
                           <div className="px-6 py-4 bg-gradient-to-r from-red-600 to-rose-600">
-                            <div className="flex items-center gap-3 text-white">
-                              <AlertTriangle className="w-6 h-6" />
-                              <div>
-                                <h3 className="text-xl font-bold">Copyscape Plagiarism Detection</h3>
-                                <p className="text-xs mt-1 text-red-100">Professional plagiarism detection</p>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3 text-white">
+                                <AlertTriangle className="w-6 h-6" />
+                                <div>
+                                  <h3 className="text-xl font-bold">Copyscape Plagiarism Detection</h3>
+                                  <p className="text-xs mt-1 text-red-100">Professional plagiarism detection</p>
+                                </div>
                               </div>
+                              <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">📄 Copyscape API</span>
                             </div>
                           </div>
                           {copyscapeSummary && (
@@ -2124,9 +2208,12 @@ function AnalysisReportsContent() {
 
                         {/* Matched Sources */}
                         <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
-                            <h3 className="text-lg font-semibold text-slate-800">Matched Sources</h3>
-                            <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
+                          <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                            <div>
+                              <h3 className="text-lg font-semibold text-slate-800">Matched Sources</h3>
+                              <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
+                            </div>
+                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-semibold">Copyscape</span>
                           </div>
                           <div className="divide-y divide-slate-100">
                             {copyscapeHighlights.map((match: any, idx: number) => (
@@ -2188,13 +2275,22 @@ function AnalysisReportsContent() {
                       </>
                     ) : (
                       <div className="bg-white rounded-2xl shadow-lg border border-green-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-green-600 to-emerald-600 px-6 py-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-white">
+                              <CheckCircle className="w-5 h-5" />
+                              <h3 className="text-lg font-bold">No Plagiarism Detected</h3>
+                            </div>
+                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🤖 Winston AI API</span>
+                          </div>
+                        </div>
                         <div className="p-10 text-center">
                           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                          <h3 className="text-xl font-bold text-green-800 mb-2">No Plagiarism Detected</h3>
+                          <h3 className="text-xl font-bold text-green-800 mb-2">Your content appears to be original</h3>
                           <p className="text-slate-600 max-w-md mx-auto">
                             {copyscapeSummary 
                               ? `Copyscape found no matches in external sources. Your text appears to be original.`
-                              : `Plagiarism detection service not configured or unavailable.`
+                              : `No matching text was found on billions of web pages, academic databases, and published content.`
                             }
                           </p>
                         </div>

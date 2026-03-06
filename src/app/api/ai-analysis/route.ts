@@ -59,7 +59,7 @@ async function retryWithBackoff<T>(
 export const maxDuration = 300;
 
 // ============================================================================
-// WEB SEARCH HELPERS — Serper API (primary) → SerpAPI (fallback)
+// WEB SEARCH HELPERS — Serper API only (no SerpAPI fallback)
 // ============================================================================
 
 interface SerpWebResult {
@@ -173,15 +173,15 @@ async function serpSearchScholarFallback(query: string, numResults: number = 5):
   }
 }
 
-// --- Unified wrappers: try Serper first, fall back to SerpAPI ---
+// --- Unified wrappers: Serper API only (no SerpAPI fallback) ---
 
 async function serpSearchGoogle(query: string, numResults: number = 5): Promise<SerpWebResult[]> {
   try {
     const results = await serperSearchGoogle(query, numResults);
     return results;
   } catch (err) {
-    console.log('[Serper Google] Failed, falling back to SerpAPI...', err instanceof Error ? err.message : err);
-    return serpSearchGoogleFallback(query, numResults);
+    console.error('[Serper Google] Search failed:', err instanceof Error ? err.message : err);
+    return []; // Return empty array instead of falling back to SerpAPI
   }
 }
 
@@ -190,9 +190,65 @@ async function serpSearchScholar(query: string, numResults: number = 5): Promise
     const results = await serperSearchScholar(query, numResults);
     return results;
   } catch (err) {
-    console.log('[Serper Scholar] Failed, falling back to SerpAPI...', err instanceof Error ? err.message : err);
-    return serpSearchScholarFallback(query, numResults);
+    console.error('[Serper Scholar] Search failed:', err instanceof Error ? err.message : err);
+    return []; // Return empty array instead of falling back to SerpAPI
   }
+}
+
+// ============================================================================
+// SERPER API BATCH PROCESSING
+// Handles rate limits for multiple web searches
+// ============================================================================
+
+async function serperSearchGoogleBatch(queries: string[], numResults: number = 5): Promise<Map<string, SerpWebResult[]>> {
+  const apiKey = process.env.SERPER_API_KEY;
+  const results = new Map<string, SerpWebResult[]>();
+  
+  if (!apiKey || apiKey === 'your_serper_api_key_here') {
+    console.log('[Serper Batch] API key not configured');
+    return results;
+  }
+
+  const BATCH_SIZE = 5; // Process 5 queries per batch
+  const DELAY_BETWEEN_BATCHES = 1500; // 1.5 second delay to avoid rate limits
+
+  console.log(`[Serper Batch] Processing ${queries.length} queries in batches of ${BATCH_SIZE}`);
+
+  for (let i = 0; i < queries.length; i += BATCH_SIZE) {
+    const batch = queries.slice(i, i + BATCH_SIZE);
+    console.log(`[Serper Batch] Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} queries)`);
+
+    // Process batch in parallel
+    const batchPromises = batch.map(async (query) => {
+      try {
+        const searchResults = await retryWithBackoff(
+          async () => await serperSearchGoogle(query, numResults),
+          3,
+          2000
+        );
+        return { query, searchResults };
+      } catch (err) {
+        console.error(`[Serper Batch] Failed for query "${query.substring(0, 50)}...":`, err instanceof Error ? err.message : err);
+        return { query, searchResults: [] as SerpWebResult[] };
+      }
+    });
+
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Store results
+    for (const { query, searchResults } of batchResults) {
+      results.set(query, searchResults);
+    }
+
+    // Add delay before next batch (except for last batch)
+    if (i + BATCH_SIZE < queries.length) {
+      console.log(`[Serper Batch] Waiting ${DELAY_BETWEEN_BATCHES}ms before next batch...`);
+      await sleep(DELAY_BETWEEN_BATCHES);
+    }
+  }
+
+  console.log(`[Serper Batch] ✓ Completed ${results.size} queries`);
+  return results;
 }
 
 // ===========================================================================
@@ -255,7 +311,296 @@ interface WinstonPlagiarismResult {
   }>;
 }
 
+// ============================================================================
+// WINSTON AI BATCH PROCESSING HELPER
+// Splits large text into chunks and processes them sequentially
+// ============================================================================
+
+async function searchWinstonAISingleBatch(text: string, offset: number = 0): Promise<WinstonPlagiarismResult | null> {
+  const apiKey = process.env.WINSTON_AI_API_KEY;
+
+  if (!apiKey || apiKey === 'your_api_key_here') {
+    console.log('[Winston AI Batch] API key not configured, skipping');
+    return null;
+  }
+
+  try {
+    console.log(`[Winston AI Batch] Checking ${text.length} chars (offset: ${offset})`);
+    
+    // Validate minimum length (API requires at least 100 chars)
+    if (text.length < 100) {
+      console.log('[Winston AI Batch] Text too short (< 100 chars), skipping');
+      return null;
+    }
+    
+    const requestBody = {
+      text: text,
+      language: 'auto',
+      country: 'us',
+    };
+    
+    const response = await retryWithBackoff(async () => {
+      const res = await Promise.race([
+        fetch('https://api.gowinston.ai/v2/plagiarism', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Winston AI timeout after 45s')), 45000)
+        ),
+      ]);
+      
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Winston AI HTTP ${res.status}: ${errorText}`);
+      }
+      
+      return res;
+    }, 3, 3000); // 3 retries with 3s initial delay
+
+    const data = await response.json();
+    
+    if (!data || typeof data !== 'object') {
+      console.error('[Winston AI Batch] Invalid response format');
+      return null;
+    }
+
+    // Extract score
+    const resultObj = data.result || {};
+    const plagiarismScore: number = 
+      resultObj.plagiarismScore ?? resultObj.score ?? resultObj.plagiarism_score ??
+      resultObj.textScore ?? resultObj.text_score ??
+      data.plagiarismScore ?? data.score ?? data.plagiarism_score ?? 0;
+    
+    const isPlagiarized: boolean = 
+      resultObj.isPlagiarized ?? resultObj.is_plagiarized ?? resultObj.plagiarized ??
+      data.isPlagiarized ?? data.is_plagiarized ?? 
+      (plagiarismScore > 0);
+
+    // Process highlights with offset adjustment
+    const highlights: Array<{
+      start: number;
+      end: number;
+      text: string;
+      url: string;
+      title: string;
+      score: number;
+    }> = [];
+
+    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
+      data.indexes.forEach((index: any, i: number) => {
+        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
+        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
+        const seq = index.sequence ?? index.text ?? index.content ?? null;
+
+        let bestSource: any = null;
+        if (Array.isArray(data.sources) && data.sources.length > 0) {
+          bestSource = data.sources[i % data.sources.length] || data.sources[0];
+        }
+
+        const sourceUrl = bestSource?.url ?? bestSource?.link ?? '';
+        const sourceTitle = bestSource?.title ?? bestSource?.name ?? 'Unknown Source';
+        const sourceScore = bestSource?.percentPlagiarized ?? bestSource?.percent_plagiarized ?? 
+                           bestSource?.score ?? bestSource?.matchScore ?? plagiarismScore;
+
+        highlights.push({
+          start: startIdx + offset, // Adjust position with offset
+          end: endIdx + offset,     // Adjust position with offset
+          text: seq || text.substring(startIdx, endIdx),
+          url: sourceUrl,
+          title: sourceTitle,
+          score: sourceScore,
+        });
+      });
+    }
+
+    // Process sources
+    const sources: Array<{
+      url: string;
+      title: string;
+      plagiarism_score: number;
+      matched_text: string;
+    }> = [];
+
+    if (Array.isArray(data.sources) && data.sources.length > 0) {
+      data.sources.forEach((source: any) => {
+        const srcUrl = source.url ?? source.link ?? '';
+        const srcTitle = source.title ?? source.name ?? 'Unknown Source';
+        const srcScore = source.percentPlagiarized ?? source.percent_plagiarized ?? 
+                        source.score ?? source.matchScore ?? 0;
+        const srcText = source.textMatched ?? source.text_matched ?? 
+                       source.matchedText ?? source.matched_text ?? source.snippet ?? '';
+        
+        sources.push({
+          url: srcUrl,
+          title: srcTitle,
+          plagiarism_score: srcScore,
+          matched_text: srcText,
+        });
+      });
+    }
+
+    console.log(`[Winston AI Batch] ✓ Score: ${plagiarismScore}%, ${highlights.length} highlights, ${sources.length} sources`);
+    if (data.credits_remaining !== undefined) {
+      console.log(`[Winston AI Batch] Credits remaining: ${data.credits_remaining}`);
+    }
+    
+    return {
+      plagiarism_score: plagiarismScore,
+      is_plagiarized: isPlagiarized,
+      highlights,
+      sources,
+    };
+
+  } catch (err) {
+    console.error('[Winston AI Batch] ✗ Failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | null> {
+  const apiKey = process.env.WINSTON_AI_API_KEY;
+
+  if (!apiKey || apiKey === 'your_api_key_here') {
+    console.log('[Winston AI] API key not configured, skipping');
+    return null;
+  }
+
+  // Batch processing configuration
+  const BATCH_SIZE = 20000; // Characters per batch
+  const BATCH_OVERLAP = 500; // Overlap to catch matches at boundaries
+  const DELAY_BETWEEN_BATCHES = 2000; // 2 second delay to avoid rate limits
+
+  try {
+    console.log(`[Winston AI] Starting plagiarism check for ${text.length} character text`);
+    console.log(`[Winston AI] Using API key: ${apiKey.substring(0, 8)}...`);
+    
+    // Validate minimum length (API requires at least 100 chars)
+    if (text.length < 100) {
+      console.log('[Winston AI] Text too short (< 100 chars), skipping');
+      return null;
+    }
+
+    // Calculate number of batches needed
+    const totalBatches = Math.ceil(text.length / BATCH_SIZE);
+    console.log(`[Winston AI] Splitting into ${totalBatches} batch(es) of ~${BATCH_SIZE} chars each`);
+
+    // Process all batches
+    const allHighlights: Array<{
+      start: number;
+      end: number;
+      text: string;
+      url: string;
+      title: string;
+      score: number;
+    }> = [];
+    
+    const allSources = new Map<string, {
+      url: string;
+      title: string;
+      plagiarism_score: number;
+      matched_text: string;
+    }>();
+    
+    let maxPlagiarismScore = 0;
+    let anyPlagiarized = false;
+
+    for (let i = 0; i < totalBatches; i++) {
+      const start = i * BATCH_SIZE;
+      const end = Math.min(start + BATCH_SIZE + BATCH_OVERLAP, text.length);
+      const chunk = text.substring(start, end);
+      
+      console.log(`[Winston AI] Processing batch ${i + 1}/${totalBatches} (chars ${start}-${end})`);
+      
+      const batchResult = await searchWinstonAISingleBatch(chunk, start);
+      
+      if (batchResult) {
+        // Track highest plagiarism score
+        if (batchResult.plagiarism_score > maxPlagiarismScore) {
+          maxPlagiarismScore = batchResult.plagiarism_score;
+        }
+        if (batchResult.is_plagiarized) {
+          anyPlagiarized = true;
+        }
+
+        // Merge highlights (deduplicate overlapping ones)
+        for (const highlight of batchResult.highlights) {
+          // Check if this highlight overlaps with existing ones
+          const isDuplicate = allHighlights.some(existing => 
+            Math.abs(existing.start - highlight.start) < 50 && 
+            Math.abs(existing.end - highlight.end) < 50
+          );
+          
+          if (!isDuplicate) {
+            allHighlights.push(highlight);
+          }
+        }
+
+        // Merge sources (use URL as unique key)
+        for (const source of batchResult.sources) {
+          if (source.url && !allSources.has(source.url)) {
+            allSources.set(source.url, source);
+          } else if (source.url) {
+            // Update if this batch found a higher score for the same source
+            const existing = allSources.get(source.url)!;
+            if (source.plagiarism_score > existing.plagiarism_score) {
+              allSources.set(source.url, source);
+            }
+          }
+        }
+      }
+      
+      // Add delay between batches to respect rate limits (except for last batch)
+      if (i < totalBatches - 1) {
+        console.log(`[Winston AI] Waiting ${DELAY_BETWEEN_BATCHES}ms before next batch...`);
+        await sleep(DELAY_BETWEEN_BATCHES);
+      }
+    }
+
+    const finalSources = Array.from(allSources.values());
+
+    console.log(`[Winston AI] ✓ All batches complete!`);
+    console.log(`[Winston AI] ✓ Max plagiarism score: ${maxPlagiarismScore}%, ${anyPlagiarized ? 'PLAGIARIZED' : 'ORIGINAL'}`);
+    console.log(`[Winston AI] ✓ Total: ${allHighlights.length} highlights, ${finalSources.length} unique sources`);
+    
+    if (allHighlights.length > 0) {
+      console.log('[Winston AI] First 3 highlights:', allHighlights.slice(0, 3).map(h => ({
+        text: h.text?.substring(0, 50) || 'N/A',
+        start: h.start,
+        end: h.end,
+        url: h.url?.substring(0, 50) || 'N/A',
+        title: h.title,
+      })));
+    }
+    
+    if (finalSources.length > 0) {
+      console.log('[Winston AI] First 3 sources:', finalSources.slice(0, 3).map(s => ({
+        title: s.title?.substring(0, 50) || 'N/A',
+        url: s.url?.substring(0, 50) || 'N/A',
+        score: s.plagiarism_score,
+      })));
+    }
+    
+    return {
+      plagiarism_score: maxPlagiarismScore,
+      is_plagiarized: anyPlagiarized,
+      highlights: allHighlights,
+      sources: finalSources,
+    };
+
+  } catch (err) {
+    console.error('[Winston AI] ✗ Batch processing failed:', err instanceof Error ? err.message : err);
+    console.error('[Winston AI] ✗ Error details:', err);
+    return null;
+  }
+}
+
+// Legacy single-call function kept for reference
+async function searchWinstonAILegacy(text: string): Promise<WinstonPlagiarismResult | null> {
   const apiKey = process.env.WINSTON_AI_API_KEY;
 
   if (!apiKey || apiKey === 'your_api_key_here') {
@@ -308,31 +653,13 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
     }
 
     const data = await response.json();
-    console.log('[Winston AI] Raw response:', JSON.stringify(data, null, 2));
-    console.log('[Winston AI] Raw response keys:', Object.keys(data));
     
     if (!data || typeof data !== 'object') {
       console.error('[Winston AI] Invalid response format - not an object:', data);
       return null;
     }
 
-    // Log ALL fields to identify the correct structure
-    if (data.result) {
-      console.log('[Winston AI] result keys:', Object.keys(data.result));
-      console.log('[Winston AI] result values:', JSON.stringify(data.result));
-    }
-    if (data.sources && data.sources.length > 0) {
-      console.log('[Winston AI] First source keys:', Object.keys(data.sources[0]));
-      console.log('[Winston AI] First source:', JSON.stringify(data.sources[0]));
-    }
-    if (data.indexes && data.indexes.length > 0) {
-      console.log('[Winston AI] First index keys:', Object.keys(data.indexes[0]));
-      console.log('[Winston AI] First index:', JSON.stringify(data.indexes[0]));
-    }
-
-    // ========================================================================
-    // ROBUST SCORE EXTRACTION - try all possible field names
-    // ========================================================================
+    // Extract score
     const resultObj = data.result || {};
     const plagiarismScore: number = 
       resultObj.plagiarismScore ?? resultObj.score ?? resultObj.plagiarism_score ??
@@ -344,22 +671,6 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
       data.isPlagiarized ?? data.is_plagiarized ?? 
       (plagiarismScore > 0);
 
-    console.log('[Winston AI] Extracted plagiarism score:', plagiarismScore);
-    console.log('[Winston AI] Extracted isPlagiarized:', isPlagiarized);
-
-    // Log the structure of the response
-    console.log('[Winston AI] Response structure:', {
-      status: data.status,
-      hasResult: !!data.result,
-      plagiarismScore,
-      isPlagiarized,
-      indexesCount: Array.isArray(data.indexes) ? data.indexes.length : 0,
-      sourcesCount: Array.isArray(data.sources) ? data.sources.length : 0,
-      creditsUsed: data.credits_used,
-      creditsRemaining: data.credits_remaining,
-    });
-
-    // Parse and normalize the response to our internal format
     const highlights: Array<{
       start: number;
       end: number;
@@ -369,25 +680,17 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
       score: number;
     }> = [];
 
-    // ========================================================================
-    // PROCESS INDEXES - plagiarized text sequences with character positions
-    // ========================================================================
     if (Array.isArray(data.indexes) && data.indexes.length > 0) {
-      console.log(`[Winston AI] Processing ${data.indexes.length} indexes...`);
-      
       data.indexes.forEach((index: any, i: number) => {
-        // Robust field name access for indexes
         const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
         const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
         const seq = index.sequence ?? index.text ?? index.content ?? null;
 
-        // Find the best matching source for this sequence
         let bestSource: any = null;
         if (Array.isArray(data.sources) && data.sources.length > 0) {
           bestSource = data.sources[i % data.sources.length] || data.sources[0];
         }
 
-        // Robust source field access
         const sourceUrl = bestSource?.url ?? bestSource?.link ?? '';
         const sourceTitle = bestSource?.title ?? bestSource?.name ?? 'Unknown Source';
         const sourceScore = bestSource?.percentPlagiarized ?? bestSource?.percent_plagiarized ?? 
@@ -402,13 +705,8 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
           score: sourceScore,
         });
       });
-
-      console.log(`[Winston AI] Created ${highlights.length} highlights from indexes`);
     }
 
-    // ========================================================================
-    // PROCESS SOURCES - websites where matching content was found
-    // ========================================================================
     const sources: Array<{
       url: string;
       title: string;
@@ -418,7 +716,6 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
 
     if (Array.isArray(data.sources) && data.sources.length > 0) {
       data.sources.forEach((source: any) => {
-        // Robust field name access for sources
         const srcUrl = source.url ?? source.link ?? '';
         const srcTitle = source.title ?? source.name ?? 'Unknown Source';
         const srcScore = source.percentPlagiarized ?? source.percent_plagiarized ?? 
@@ -433,8 +730,6 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
           matched_text: srcText,
         });
       });
-      console.log(`[Winston AI] Processed ${sources.length} sources`);
-      console.log('[Winston AI] First source processed:', JSON.stringify(sources[0]));
     }
 
     const result: WinstonPlagiarismResult = {
@@ -446,25 +741,6 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
 
     console.log(`[Winston AI] ✓ Success! Plagiarism score: ${result.plagiarism_score}%, ${result.is_plagiarized ? 'PLAGIARIZED' : 'ORIGINAL'}`);
     console.log(`[Winston AI] ✓ Found ${result.highlights.length} highlights, ${result.sources.length} sources`);
-    console.log(`[Winston AI] ✓ Credits used: ${data.credits_used}, Credits remaining: ${data.credits_remaining}`);
-    
-    if (result.highlights.length > 0) {
-      console.log('[Winston AI] First 3 highlights:', result.highlights.slice(0, 3).map(h => ({
-        text: h.text?.substring(0, 50) || 'N/A',
-        start: h.start,
-        end: h.end,
-        url: h.url?.substring(0, 50) || 'N/A',
-        title: h.title,
-      })));
-    }
-    
-    if (result.sources.length > 0) {
-      console.log('[Winston AI] First 3 sources:', result.sources.slice(0, 3).map(s => ({
-        title: s.title?.substring(0, 50) || 'N/A',
-        url: s.url?.substring(0, 50) || 'N/A',
-        score: s.plagiarism_score,
-      })));
-    }
     
     return result;
 
@@ -682,7 +958,7 @@ function extractKeyPhrases(title: string, concept: string): string[] {
   return final.slice(0, 15);
 }
 
-// Verify match breakdown entries and text highlights using SerpAPI
+// Verify match breakdown entries and text highlights using Serper API only
 async function verifySerpResults(
   matchEntries: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[] }>,
   textHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number }>,
@@ -704,10 +980,9 @@ async function verifySerpResults(
   }>;
 }> {
   const hasSerper = process.env.SERPER_API_KEY && process.env.SERPER_API_KEY !== 'your_serper_api_key_here';
-  const hasSerpApi = !!process.env.SERPAPI_API_KEY;
   
-  if (!hasSerper && !hasSerpApi) {
-    console.log('[Search] No SERPER_API_KEY or SERPAPI_API_KEY configured, skipping web verification');
+  if (!hasSerper) {
+    console.log('[Serper API] SERPER_API_KEY not configured, skipping web verification');
     return {
       verifiedMatches: matchEntries.map(m => ({ ...m, serpVerified: false, serpResults: [] })),
       verifiedHighlights: textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] })),
@@ -716,7 +991,7 @@ async function verifySerpResults(
     };
   }
 
-  console.log(`[Serper→SerpAPI] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
+  console.log(`[Serper API] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
   const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }> = [];
   const seenUrls = new Set<string>();
 
@@ -780,7 +1055,7 @@ async function verifySerpResults(
         const allResults = [...googleRes, ...scholarRes];
         allResults.forEach(r => addCitation(r, 'highlight'));
         
-        // Update sourceUrl if SerpAPI found a real one
+        // Update sourceUrl if Serper API found a real one
         const bestResult = allResults[0];
         const verifiedUrl = bestResult?.link || highlight.sourceUrl;
         const verifiedSource = bestResult?.title || highlight.source;
@@ -799,14 +1074,14 @@ async function verifySerpResults(
     // no inter-batch sleep — per-call timeout already guards against hangs
   }
 
-  console.log(`[Serper→SerpAPI] Verification complete. Found ${allCitations.length} unique web citations`);
-  console.log(`[Serper→SerpAPI] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
-  console.log(`[Serper→SerpAPI] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
+  console.log(`[Serper API] Verification complete. Found ${allCitations.length} unique web citations`);
+  console.log(`[Serper API] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
+  console.log(`[Serper API] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
 
   // 4. Key Phrase Internet Search — extract up to 10 phrases and search each on Google + Scholar
   const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept).slice(0, 10);
   const cleanTitle = proposedTitle.replace(/^bu thematic area:\s*/i, '').trim();
-  console.log(`[Serper→SerpAPI] Searching ${keyPhrases.length} key phrases on the web`);
+  console.log(`[Serper API] Searching ${keyPhrases.length} key phrases on the web`);
 
   const phraseHighlights: Array<{
     phrase: string;
@@ -849,7 +1124,7 @@ async function verifySerpResults(
   }
 
   const phraseFound = phraseHighlights.filter(p => p.foundOnWeb).length;
-  console.log(`[Serper→SerpAPI] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
+  console.log(`[Serper API] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
 
   return { verifiedMatches, verifiedHighlights, webCitations: allCitations, phraseHighlights };
 }
@@ -857,7 +1132,7 @@ async function verifySerpResults(
 // ============================================================================
 // ============================================================================
 // WEB SIMILARITY SCAN ENGINE  (Turnitin-style)
-// Fetches real web pages found via SerpAPI and runs three matching layers:
+// Fetches real web pages found via Serper API and runs three matching layers:
 //   1. Exact copy   – 10-word shingle overlap ≥ 60%
 //   2. Near match   – TF-IDF cosine similarity ≥ 0.90
 //   3. Paraphrase   – TF-IDF cosine similarity 0.75–0.89
@@ -1123,7 +1398,7 @@ async function performWebSimilarityScan(
   proposedText: string,
   phraseHighlights: Array<{ serpResults?: any[]; scholarResults?: any[]; foundOnWeb?: boolean }>
 ): Promise<WebScanResult> {
-  // Collect unique candidate URLs from SerpAPI phrase results
+  // Collect unique candidate URLs from Serper API phrase results
   const urlMap = new Map<string, { title: string; snippet: string }>();
   for (const ph of phraseHighlights) {
     for (const r of [...(ph.serpResults || []), ...(ph.scholarResults || [])]) {
@@ -1871,8 +2146,24 @@ const modelPriority = [
     // ============================================================================
     // EXTRACT MATCH BREAKDOWN & SOURCE LIST from AI response
     // ============================================================================
+    console.log('[Match Breakdown] Starting extraction from AI response...');
     const matchBreakdownFullSection = analysis.match(/=== MATCH BREAKDOWN & SOURCE LIST ===([\s\S]*?)(?==== SIMILARITY CONCLUSION ===|$)/i)
       || analysis.match(/MATCH BREAKDOWN & SOURCE LIST[:\s]*([\s\S]*?)(?=SIMILARITY CONCLUSION|Recommendations:|$)/i);
+    
+    if (matchBreakdownFullSection) {
+      console.log('[Match Breakdown] Found section in AI response, length:', matchBreakdownFullSection[1].length);
+      console.log('[Match Breakdown] First 500 chars:', matchBreakdownFullSection[1].substring(0, 500));
+    } else {
+      console.log('[Match Breakdown] ⚠️ Section NOT found in AI response');
+      console.log('[Match Breakdown] Searching for alternative formats...');
+      // Try to find if AI used any variation
+      const altSearch = analysis.match(/MATCH\s*1\s*:/i);
+      if (altSearch) {
+        console.log('[Match Breakdown] Found MATCH 1 marker at position:', analysis.indexOf(altSearch[0]));
+      } else {
+        console.log('[Match Breakdown] No MATCH entries found in response');
+      }
+    }
     
     // Parse individual match cards
     const matchEntries: Array<{
@@ -1895,6 +2186,7 @@ const modelPriority = [
     if (matchBreakdownFullSection) {
       // Split into individual match blocks
       const matchBlocks = matchBreakdownFullSection[1].split(/MATCH\s*\d+\s*:/i).filter(b => b.trim());
+      console.log(`[Match Breakdown] Found ${matchBlocks.length} match blocks to parse`);
       
       for (const block of matchBlocks) {
         const nameMatch = block.match(/Name\/Title:\s*([^\n]+)/i);
@@ -1945,6 +2237,17 @@ const modelPriority = [
           });
         }
       }
+    } else {
+      console.log('[Match Breakdown] No match section found - will rely on Serper web search results');
+    }
+    
+    console.log(`[Match Breakdown] Parsed ${matchEntries.length} total matches from AI`);
+    if (matchEntries.length > 0) {
+      console.log('[Match Breakdown] First 3 matches:', matchEntries.slice(0, 3).map(m => ({
+        name: m.name.substring(0, 60),
+        type: m.type,
+        overall: m.rubric.overall
+      })));
     }
     
     // Sort matches by overall similarity (highest first)
@@ -2055,10 +2358,18 @@ const modelPriority = [
     };
     
     // ============================================================================
-    // SERPAPI WEB VERIFICATION
+    // SERPER API WEB VERIFICATION
     // ============================================================================
-    console.log('[Serper→SerpAPI] Running web verification...');
+    console.log('[Serper API] Running web verification...');
     const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
+    console.log(`[Serper API] Verification complete. Verified ${serpVerification.verifiedMatches.length} matches, ${serpVerification.webCitations.length} citations`);
+    if (serpVerification.verifiedMatches.length > 0) {
+      console.log('[Serper API] First 3 verified matches:', serpVerification.verifiedMatches.slice(0, 3).map(m => ({
+        name: m.name.substring(0, 60),
+        serpVerified: m.serpVerified,
+        resultsFound: m.serpResults.length
+      })));
+    }
 
     // ============================================================================
     // WINSTON AI PLAGIARISM CHECK (Primary)
@@ -2117,10 +2428,9 @@ const modelPriority = [
     }
 
     // ============================================================================
-    // COPYSCAPE PLAGIARISM CHECK (Backup/Additional)
+    // COPYSCAPE PLAGIARISM CHECK (DISABLED - using Serper API only)
     // ============================================================================
-    console.log('[Copyscape] Running plagiarism check...');
-    const copyscapeResult = await searchCopyscape(safeUserConcept);
+    console.log('[Copyscape] Skipped - using Serper API for match detection');
     const copyscapeHighlights: Array<{
       url: string;
       title: string;
@@ -2130,21 +2440,8 @@ const modelPriority = [
       textMatched?: string;
     }> = [];
     
-    if (copyscapeResult && copyscapeResult.result && copyscapeResult.result.length > 0) {
-      console.log(`[Copyscape] Found ${copyscapeResult.count} matches, ${copyscapeResult.allpercentmatched || 0}% overall match`);
-      for (const result of copyscapeResult.result) {
-        copyscapeHighlights.push({
-          url: result.url,
-          title: result.title,
-          snippet: result.textsnippet,
-          wordsMatched: result.wordsmatched || result.minwordsmatched,
-          percentMatched: result.percentmatched || 0,
-          textMatched: result.textmatched,
-        });
-      }
-    } else {
-      console.log('[Copyscape] No plagiarism matches found');
-    }
+    // Copyscape API disabled to avoid credit charges
+    // All match breakdown and source verification is handled by verifySerpResults above
 
     console.log('[WebScan] Starting full document scan against real web pages...');
     const webScan = await performWebSimilarityScan(safeUserConcept, serpVerification.phraseHighlights);
@@ -2158,21 +2455,39 @@ const modelPriority = [
     const filteredMatches = serpVerification.verifiedMatches.filter(m => {
       const mNorm = normalizeTitle(m.name);
       // Exact or near-exact title match
-      if (mNorm === existingNorm) return false;
-      if (existingNorm.includes(mNorm) || mNorm.includes(existingNorm)) return false;
+      if (mNorm === existingNorm) {
+        console.log(`[Match Breakdown] Filtering exact match: "${m.name}"`);
+        return false;
+      }
+      if (existingNorm.includes(mNorm) || mNorm.includes(existingNorm)) {
+        console.log(`[Match Breakdown] Filtering substring match: "${m.name}"`);
+        return false;
+      }
       // High word overlap (>70% of words match)
       const mWords = new Set(mNorm.split(' ').filter(w => w.length > 3));
       if (mWords.size === 0 || existingWords.size === 0) return true;
       let overlap = 0;
       for (const w of mWords) if (existingWords.has(w)) overlap++;
       const overlapRatio = overlap / Math.min(mWords.size, existingWords.size);
-      return overlapRatio < 0.7;
+      if (overlapRatio >= 0.7) {
+        console.log(`[Match Breakdown] Filtering high word overlap (${(overlapRatio * 100).toFixed(1)}%): "${m.name}"`);
+        return false;
+      }
+      return true;
     });
+    
+    console.log(`[Match Breakdown] After filtering: ${filteredMatches.length} external matches remain (filtered out ${serpVerification.verifiedMatches.length - filteredMatches.length})`);
 
     const matchBreakdown = {
       matches: filteredMatches,
       conclusion: similarityConclusion,
     };
+    
+    console.log('[Match Breakdown] Final object:', {
+      matchCount: matchBreakdown.matches.length,
+      hasConclusion: !!matchBreakdown.conclusion,
+      conclusionLength: matchBreakdown.conclusion?.length || 0
+    });
 
     // Calculate average of available field scores
     const availableScores = Object.values(fieldScores).filter((v): v is number => v !== null);
@@ -2250,8 +2565,6 @@ const modelPriority = [
     // Use AI's concept similarity honestly - no artificial capping
     if (completelyDifferent) {
       conceptSimilarity = 0;
-      acceptanceStatus = 'ACCEPTABLE';
-      similarityRationale = `Problems are completely different with no overlap. Concept similarity is 0%. Status: ACCEPTABLE (<40%).`;
     }
     // Use AI's concept similarity directly if provided (STRICT: no deflation)
     else if (aiConceptSim !== null) {
@@ -2262,60 +2575,46 @@ const modelPriority = [
         console.log(`[STRICT] AI scored concept at ${(conceptSimilarity * 100).toFixed(1)}% but problems are SAME. Applying floor of 50%.`);
         conceptSimilarity = Math.max(conceptSimilarity, 0.50);
       }
-      
-      // Determine acceptance status: ACCEPTABLE if <40%, REJECTED if ≥40%
-      if (conceptSimilarity < 0.40) {
-        acceptanceStatus = 'ACCEPTABLE';
-        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (below 40% threshold).`;
-      } else {
-        acceptanceStatus = 'REJECTED';
-        similarityRationale = `Concept similarity is ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40% threshold exceeded).`;
-      }
     } else {
       // Calculate using formula if AI didn't provide one
       if (problemsAreDifferent) {
         // Different problems: scale with text similarity but allow up to 35%
         conceptSimilarity = Math.min(0.35, 0.5 * textSimilarity);
-        if (conceptSimilarity < 0.40) {
-          acceptanceStatus = 'ACCEPTABLE';
-          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (<40%).`;
-        } else {
-          acceptanceStatus = 'REJECTED';
-          similarityRationale = `Problems are different (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
-        }
       } else if (problemsAreSame) {
         // Same problems: STRICT minimum of 50%, scales up with text similarity
         conceptSimilarity = Math.min(1.0, Math.max(0.50, 0.40 + 0.60 * textSimilarity));
-        acceptanceStatus = 'REJECTED';
-        similarityRationale = `Problems are the same (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
       } else {
         // Interpolate for partially related
         const overlapRatio = problemIdentity.coreOverlap / 100;
         const differentFormula = Math.min(0.35, 0.5 * textSimilarity);
         const sameFormula = Math.min(1.0, Math.max(0.50, 0.40 + 0.60 * textSimilarity));
         conceptSimilarity = differentFormula * (1 - overlapRatio) + sameFormula * overlapRatio;
-        if (conceptSimilarity < 0.40) {
-          acceptanceStatus = 'ACCEPTABLE';
-          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: ACCEPTABLE (<40%).`;
-        } else {
-          acceptanceStatus = 'REJECTED';
-          similarityRationale = `Problems are partially related (${problemIdentity.coreOverlap}% overlap). Concept similarity ${(conceptSimilarity * 100).toFixed(1)}%. Status: REJECTED (≥40%).`;
-        }
       }
     }
-    
-    console.log(`[Post-Cosine Evaluation]`);
-    console.log(`  Problem Comparison: ${problemIdentity.problemComparison}`);
-    console.log(`  Text Similarity (Cosine): ${(textSimilarity * 100).toFixed(1)}%`);
-    console.log(`  Concept Similarity: ${(conceptSimilarity * 100).toFixed(1)}%`);
-    console.log(`  Acceptance Status: ${acceptanceStatus}`);
-    console.log(`  Final Verdict: ${problemIdentity.finalVerdict}`);
     
     // Calculate overall similarity: equal-weight average of text and concept similarity
     // Text similarity (TF-IDF cosine) shows lexical/surface overlap
     // Concept similarity (AI-assessed) shows problem/research overlap
     // Overall = 50% text + 50% concept so neither inflates the final score on its own
     const adjustedOverall = Math.min((textSimilarity * 0.5) + (conceptSimilarity * 0.5), 1.0);
+    
+    // Determine acceptance status based on OVERALL similarity (not just concept)
+    // ACCEPTABLE if overall <40%, REJECTED if overall ≥40%
+    if (adjustedOverall < 0.40) {
+      acceptanceStatus = 'ACCEPTABLE';
+      similarityRationale = `Overall similarity is ${(adjustedOverall * 100).toFixed(1)}% (Text: ${(textSimilarity * 100).toFixed(1)}%, Concept: ${(conceptSimilarity * 100).toFixed(1)}%). Status: ACCEPTABLE (below 40% threshold).`;
+    } else {
+      acceptanceStatus = 'REJECTED';
+      similarityRationale = `Overall similarity is ${(adjustedOverall * 100).toFixed(1)}% (Text: ${(textSimilarity * 100).toFixed(1)}%, Concept: ${(conceptSimilarity * 100).toFixed(1)}%). Status: REJECTED (≥40% threshold exceeded).`;
+    }
+    
+    console.log(`[Post-Cosine Evaluation]`);
+    console.log(`  Problem Comparison: ${problemIdentity.problemComparison}`);
+    console.log(`  Text Similarity (Cosine): ${(textSimilarity * 100).toFixed(1)}%`);
+    console.log(`  Concept Similarity: ${(conceptSimilarity * 100).toFixed(1)}%`);
+    console.log(`  Overall Similarity: ${(adjustedOverall * 100).toFixed(1)}%`);
+    console.log(`  Acceptance Status: ${acceptanceStatus}`);
+    console.log(`  Final Verdict: ${problemIdentity.finalVerdict}`);
 
     const aiSimilarities = {
       // Stage 1: Text Similarity (cosine/TF-IDF based)
@@ -2365,10 +2664,10 @@ const modelPriority = [
       // Turnitin-style web scan results: highlight spans + per-source breakdown
       webScan,
 
-      // Match Breakdown & Source List (now SerpAPI-verified)
+      // Match Breakdown & Source List (now Serper API-verified)
       matchBreakdown,
       
-      // Text Match Highlights (now SerpAPI-verified)
+      // Text Match Highlights (now Serper API-verified)
       textHighlights: serpVerification.verifiedHighlights,
       
       // Winston AI Plagiarism Detection (Primary)
@@ -2378,28 +2677,23 @@ const modelPriority = [
         plagiarismScore: winstonResult.plagiarism_score,
         isPlagiarized: winstonResult.is_plagiarized,
         highlightsCount: winstonHighlights.length,
-        sourcesCount: winstonSources.length,
+        // Count unique source URLs from highlights (not from separate sources array)
+        sourcesCount: new Set(winstonHighlights.map(h => h.url).filter(Boolean)).size,
       } : null,
       
-      // Copyscape Plagiarism Check results (Backup)
+      // Copyscape Plagiarism Check results (Disabled - using Serper instead)
       copyscapeHighlights,
-      copyscapeSummary: copyscapeResult ? {
-        count: copyscapeResult.count,
-        querywords: copyscapeResult.querywords,
-        allpercentmatched: copyscapeResult.allpercentmatched || 0,
-        allwordsmatched: copyscapeResult.allwordsmatched || 0,
-        cost: copyscapeResult.cost,
-      } : null,
+      copyscapeSummary: null,
       
       // Key Phrase Internet Search results
       phraseHighlights: serpVerification.phraseHighlights,
       
-      // Web Citations from SerpAPI (real internet sources)
+      // Web Citations from Serper API (real internet sources)
       webCitations: serpVerification.webCitations,
       
-      // SerpAPI verification summary
+      // Serper API verification summary
       serpVerification: {
-        enabled: !!process.env.SERPAPI_API_KEY,
+        enabled: !!process.env.SERPER_API_KEY,
         matchesVerified: serpVerification.verifiedMatches.filter(m => m.serpVerified).length,
         matchesTotal: serpVerification.verifiedMatches.length,
         highlightsVerified: serpVerification.verifiedHighlights.filter(h => h.serpVerified).length,
@@ -2413,8 +2707,8 @@ const modelPriority = [
       pipelineExplanation: {
         stage1: `Text Similarity / Lexical (${(aiSimilarities.textSimilarity * 100).toFixed(1)}%): Measures word/phrase overlap using cosine similarity and TF-IDF. This includes ALL text: generic terms, academic structure, methodology terms, and technology stack.`,
         stage2: `Concept Similarity / Semantic (${(aiSimilarities.conceptSimilarity * 100).toFixed(1)}%): AI evaluation of whether the CORE RESEARCH PROBLEM is the same. ${aiSimilarities.similarityRationale}`,
-        overall: `Overall Assessment (${(aiSimilarities.overall * 100).toFixed(1)}%): Weighted blend of 30% text similarity + 70% concept similarity. Prioritizes concept similarity as it's more important for plagiarism detection.`,
-        acceptance: `Acceptance Status: ${aiSimilarities.acceptanceStatus}. Research is ACCEPTABLE if concept similarity is below 40% (<40%). Similarity ≥40% indicates the research is too similar to existing work (REJECTED).`,
+        overall: `Overall Assessment (${(aiSimilarities.overall * 100).toFixed(1)}%): Equal-weight average of 50% text similarity + 50% concept similarity. Balances lexical overlap with conceptual similarity.`,
+        acceptance: `Acceptance Status: ${aiSimilarities.acceptanceStatus}. Research is ACCEPTABLE if overall similarity is below 40% (<40%). Overall similarity ≥40% indicates the research is too similar to existing work (REJECTED).`,
         note: 'IMPORTANT: Concept similarity reflects whether two researches address the same core problem, users, domain, and intent. Even with different tools/technologies, if the core problem is the same, concept similarity will be HIGH. The system is strict to prevent duplicate research efforts.'
       },
       
