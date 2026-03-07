@@ -589,11 +589,13 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
           anyPlagiarized = true;
         }
 
-        // Merge highlights (deduplicate overlapping ones)
+        // Merge highlights (deduplicate overlapping ones per source URL)
         for (const highlight of batchResult.highlights) {
-          // Check if this highlight overlaps with existing ones
-          const isDuplicate = allHighlights.some(existing => 
-            Math.abs(existing.start - highlight.start) < 10 && 
+          // Only consider it a duplicate if it has the same URL AND same position,
+          // so highlights from different sources for the same text span are preserved
+          const isDuplicate = allHighlights.some(existing =>
+            existing.url === highlight.url &&
+            Math.abs(existing.start - highlight.start) < 10 &&
             Math.abs(existing.end - highlight.end) < 10
           );
           
@@ -2505,18 +2507,41 @@ const modelPriority = [
       // Convert Winston sources to webScan source format
       for (const wSource of winstonSources) {
         if (!existingUrls.has(wSource.url) && wSource.url) {
+          // Build matchedSentences: prefer matchedText, fall back to winstonHighlights for this source
+          let matchedSentences: Array<{ proposedText: string; sourceText: string; confidence: number; matchType: string }>;
+          if (wSource.matchedText) {
+            matchedSentences = [{
+              proposedText: wSource.matchedText.substring(0, 200),
+              sourceText: wSource.matchedText.substring(0, 200),
+              confidence: Math.round(wSource.plagiarismScore),
+              matchType: 'plagiarism',
+            }];
+          } else {
+            // Use highlighted text spans attributed to this source URL
+            const srcHighlights = winstonHighlights
+              .filter(h => h.url === wSource.url && h.text)
+              .slice(0, 5);
+            matchedSentences = srcHighlights.length > 0
+              ? srcHighlights.map(h => ({
+                  proposedText: h.text,
+                  sourceText: h.text,
+                  confidence: Math.round(h.score || wSource.plagiarismScore),
+                  matchType: 'plagiarism',
+                }))
+              : [{
+                  proposedText: '',
+                  sourceText: '',
+                  confidence: Math.round(wSource.plagiarismScore),
+                  matchType: 'plagiarism',
+                }];
+          }
           // Add Winston AI source with proper format
           webScan.sources.push({
             url: wSource.url,
             title: wSource.title || 'Unknown Source',
             matchPercentage: Math.round(wSource.plagiarismScore),
-            matchedSentences: [{
-              proposedText: wSource.matchedText.substring(0, 200),
-              sourceText: wSource.matchedText.substring(0, 200),
-              confidence: Math.round(wSource.plagiarismScore),
-              matchType: 'plagiarism'
-            }],
-            highlights: [], // Winston provides text-level matches, not sentence-level
+            matchedSentences,
+            highlights: [],
           });
           existingUrls.add(wSource.url);
         }

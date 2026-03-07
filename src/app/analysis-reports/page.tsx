@@ -2165,6 +2165,18 @@ function AnalysisReportsContent() {
                                     const existing = sequences.some(s => s.includes(h.text) || h.text.includes(s));
                                     if (!existing) sequences.push(h.text);
                                   });
+                                // Tertiary: fall back to any winstonHighlights when no URL-specific
+                                // highlights exist for this source (deduplication may have dropped them)
+                                if (sequences.length === 0 && winstonHighlights.length > 0) {
+                                  winstonHighlights
+                                    .filter((h: any) => h.text && h.text.trim().length > 15)
+                                    .slice(0, 5)
+                                    .forEach((h: any) => {
+                                      if (!sequences.some(s => s.includes(h.text) || h.text.includes(s))) {
+                                        sequences.push(h.text);
+                                      }
+                                    });
+                                }
                                 const pct = Math.round(source.plagiarismScore);
                                 const isExpanded = expandedSourceSeqs.has(idx);
                                 // SVG circular progress ring
