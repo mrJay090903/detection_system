@@ -120,8 +120,16 @@ export default function ResearchCheckPage() {
     await new Promise(resolve => setTimeout(resolve, 100))
     
     try {
-      // Use file content if available, otherwise use textarea content
-      const textToCheck = stepData.fileContent.trim() || stepData.concept.trim()
+      // Use edited concept field first (user can edit), fallback to file content if concept is empty
+      const textToCheck = stepData.concept.trim() || stepData.fileContent.trim()
+      
+      console.log('📝 Analysis Debug:', {
+        hasEditedConcept: !!stepData.concept.trim(),
+        hasFileContent: !!stepData.fileContent.trim(),
+        usingText: stepData.concept.trim() ? 'edited concept' : 'original file',
+        textLength: textToCheck.length,
+        textPreview: textToCheck.substring(0, 100)
+      })
       
       // Try to extract title from file content if no manual title is provided
       let titleToUse = stepData.title.trim()
@@ -278,16 +286,19 @@ export default function ResearchCheckPage() {
 
   // Auto-analyze function - directly analyze file without manual input
   const handleAutoAnalyze = async () => {
-    if (!stepData.fileContent) {
-      toast.error('Please upload a file first')
+    // Use edited concept if available, otherwise use file content
+    const contentToAnalyze = stepData.concept.trim() || stepData.fileContent.trim()
+    
+    if (!contentToAnalyze) {
+      toast.error('Please upload a file or enter content first')
       return
     }
 
     setIsLoading(true)
     
     try {
-      // Extract title from file content (first line or from prefix), excluding BU Thematic Area
-      const lines = stepData.fileContent.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+      // Extract title from content (first line or from prefix), excluding BU Thematic Area
+      const lines = contentToAnalyze.split('\n').map(line => line.trim()).filter(line => line.length > 0)
       const titleLine = lines.find(line => {
         const lowerLine = line.toLowerCase()
         const isTitleLine = lowerLine.startsWith('proposed title:') || 
@@ -340,7 +351,7 @@ export default function ResearchCheckPage() {
         },
         body: JSON.stringify({
           proposedTitle: extractedTitle,
-          proposedConcept: stepData.fileContent,
+          proposedConcept: contentToAnalyze,
         }),
       })
 
@@ -354,7 +365,7 @@ export default function ResearchCheckPage() {
       setStepData(prev => ({
         ...prev,
         title: extractedTitle,
-        concept: stepData.fileContent,
+        concept: contentToAnalyze,
         analysisResult: result,
       }))
 
@@ -725,7 +736,7 @@ export default function ResearchCheckPage() {
                               </div>
 
                               {/* Your Research Document Preview */}
-                              {stepData.fileContent && (
+                              {stepData.concept && (
                                 <motion.div
                                   initial={{ opacity: 0, y: 20 }}
                                   animate={{ opacity: 1, y: 0 }}
@@ -738,8 +749,8 @@ export default function ResearchCheckPage() {
                                     <div>
                                       <h4 className="text-lg font-semibold text-gray-800">Your Research Document</h4>
                                       <p className="text-sm text-gray-600">
-                                        {stepData.fileContent.length.toLocaleString()} characters • 
-                                        {Math.ceil(stepData.fileContent.split(/\s+/).length)} words
+                                        {stepData.concept.length.toLocaleString()} characters • 
+                                        {Math.ceil(stepData.concept.split(/\s+/).length)} words
                                       </p>
                                     </div>
                                   </div>
@@ -747,8 +758,8 @@ export default function ResearchCheckPage() {
                                   <div className="bg-white rounded-lg p-5 border border-indigo-100 max-h-[400px] overflow-y-auto">
                                     <div className="prose prose-sm max-w-none">
                                       <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-                                        {stepData.fileContent.substring(0, 2000)}
-                                        {stepData.fileContent.length > 2000 && (
+                                        {stepData.concept.substring(0, 2000)}
+                                        {stepData.concept.length > 2000 && (
                                           <span className="text-gray-500 italic">
                                             ... (showing first 2000 characters)
                                           </span>
@@ -795,15 +806,15 @@ export default function ResearchCheckPage() {
                                         variant="outline"
                                         size="sm"
                                         onClick={() => {
-                                          // Prepare the concept text - use file content if available, otherwise concept field
-                                          const userConceptText = (stepData.fileContent || '').trim() || (stepData.concept || '').trim()
+                                          // Prepare the concept text - use edited concept field first (user editable), fallback to file content
+                                          const userConceptText = (stepData.concept || '').trim() || (stepData.fileContent || '').trim()
                                           
-                                          // Try to extract title from file content if no manual title
+                                          // Try to extract title from concept text if no manual title
                                           let userTitleText = (stepData.title || '').trim()
                                           
-                                          if (!userTitleText && stepData.fileContent) {
-                                            // Try to extract title from file content using same logic, excluding BU Thematic Area
-                                            const lines = stepData.fileContent.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+                                          if (!userTitleText && userConceptText) {
+                                            // Try to extract title from concept text using same logic, excluding BU Thematic Area
+                                            const lines = userConceptText.split('\n').map(line => line.trim()).filter(line => line.length > 0)
                                             
                                             // Look for "Proposed Title:" or "Title:" prefix, but exclude BU Thematic Area
                                             const titleLine = lines.find(line => {

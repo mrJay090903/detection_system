@@ -19,7 +19,7 @@ import Image from "next/image"
 import { toast } from "sonner"
 
 // ── Inline highlight utilities ────────────────────────────────────────────────
-type HlColor = 'yellow' | 'orange' | 'rose' | 'blue';
+type HlColor = 'yellow' | 'orange' | 'rose' | 'blue' | 'green' | 'purple' | 'teal' | 'indigo' | 'pink' | 'lime';
 type HlSpan = {
   start: number; end: number;
   matchType: string; source: string; url: string;
@@ -133,13 +133,46 @@ function getHighlightedSegments(
   if (!text?.trim()) return [];
   const spans: HlSpan[] = [];
 
+  // Create a color palette for different sources (10 distinct colors)
+  const sourceColors: HlColor[] = ['yellow', 'orange', 'rose', 'green', 'purple', 'teal', 'indigo', 'blue', 'pink', 'lime'];
+  const sourceUrlToColor = new Map<string, HlColor>();
+  
+  // Build source-to-color mapping — collect URLs from ALL highlight sources
+  const uniqueSourceUrls = new Set<string>();
+  [...webHighlights, ...webSources.flatMap(s => s.matchedSentences?.map(() => s.url) || [])].forEach(item => {
+    const url = typeof item === 'string' ? item : item?.sourceUrl || '';
+    if (url) uniqueSourceUrls.add(url);
+  });
+  
+  webSources.forEach(s => {
+    if (s.url) uniqueSourceUrls.add(s.url);
+  });
+
+  // Also collect URLs from AI text highlights and phrase highlights
+  textHighlights.forEach(h => {
+    const url = (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '';
+    if (url) uniqueSourceUrls.add(url);
+  });
+  phraseHighlights.forEach(ph => {
+    if (ph.bestUrl) uniqueSourceUrls.add(ph.bestUrl);
+  });
+  
+  let colorIndex = 0;
+  uniqueSourceUrls.forEach(url => {
+    sourceUrlToColor.set(url, sourceColors[colorIndex % sourceColors.length]);
+    colorIndex++;
+  });
+
   const addWebSpan = (start: number, end: number, h: { matchType: string; sourceUrl?: string; sourceTitle?: string; matchedSourceText?: string }) => {
+    const sourceUrl = h.sourceUrl || '';
+    const sourceColor = sourceUrlToColor.get(sourceUrl) || 'blue';
+    
     spans.push({
       start, end,
       matchType: h.matchType === 'exact' ? 'Exact Copy' : h.matchType === 'near' ? 'Near Match' : 'Paraphrase',
       source: h.sourceTitle || '',
-      url: h.sourceUrl || '',
-      color: h.matchType === 'exact' ? 'yellow' : h.matchType === 'near' ? 'orange' : 'rose',
+      url: sourceUrl,
+      color: sourceColor,
       matchedSourceText: h.matchedSourceText || '',
     });
   };
@@ -193,15 +226,13 @@ function getHighlightedSegments(
            (found.start <= s.start && found.end >= s.end)
     );
     if (alreadyCovered) continue;
+    const hlUrl = (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '';
     spans.push({
       start: found.start, end: found.end,
       matchType: h.matchType || 'Unknown',
       source: h.source || '',
-      url: (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '',
-      color:
-        h.matchType === 'Exact Copy' ? 'yellow' :
-        (h.matchType === 'Close Paraphrase' || (h.matchType || '').includes('Structural')) ? 'orange' :
-        h.matchType === 'Patchwriting' ? 'rose' : 'blue',
+      url: hlUrl,
+      color: sourceUrlToColor.get(hlUrl) || 'blue',
     });
   }
 
@@ -221,28 +252,21 @@ function getHighlightedSegments(
     spans.push({
       start: found.start, end: found.end,
       matchType: 'Phrase Match', source: ph.bestSource || '', url: ph.bestUrl || '',
-      color: 'blue',
+      color: sourceUrlToColor.get(ph.bestUrl || '') || 'blue',
     });
   }
 
   if (spans.length === 0) return [{ text, highlighted: false }];
 
-  // Sort & merge overlapping spans (keep highest-priority color)
+  // Sort & merge overlapping spans (keep first source's color for overlapping regions)
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
   const merged: HlSpan[] = [];
   for (const s of spans) {
     const prev = merged[merged.length - 1];
     if (prev && s.start < prev.end) {
+      // Overlapping spans - expand the region but keep first source's color
       if (s.end > prev.end) prev.end = s.end;
-      // Keep higher-priority match info
-      const priority = { 'yellow': 3, 'orange': 2, 'rose': 1, 'blue': 0 } as Record<string, number>;
-      if ((priority[s.color] ?? 0) > (priority[prev.color] ?? 0)) {
-        prev.matchType = s.matchType;
-        prev.source = s.source;
-        prev.url = s.url;
-        prev.color = s.color;
-        prev.matchedSourceText = s.matchedSourceText || prev.matchedSourceText;
-      }
+      // Keep the first source's information (don't override)
     } else {
       merged.push({ ...s });
     }
@@ -1357,10 +1381,6 @@ export default function AIAnalysisClient() {
                       {/* SerpAPI Web Results for this match */}
                       {match.serpResults?.length > 0 && (
                         <div className="mt-3 pt-3 border-t">
-                          <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                            Internet Sources Found ({match.serpResults.length})
-                          </div>
                           <div className="space-y-2">
                             {match.serpResults.slice(0, 3).map((result: any, ri: number) => (
                               <div key={ri} className="p-2 bg-green-50/50 rounded-lg border border-green-100">
@@ -1425,13 +1445,27 @@ export default function AIAnalysisClient() {
                     color === 'yellow' ? 'bg-yellow-200 text-yellow-900 border-b-2 border-yellow-400' :
                     color === 'orange' ? 'bg-orange-200 text-orange-900 border-b-2 border-orange-400' :
                     color === 'rose'   ? 'bg-rose-200 text-rose-900 border-b-2 border-rose-300' :
-                                        'bg-blue-100 text-blue-900 border-b border-blue-300';
+                    color === 'blue'   ? 'bg-blue-100 text-blue-900 border-b border-blue-300' :
+                    color === 'green'  ? 'bg-green-200 text-green-900 border-b-2 border-green-400' :
+                    color === 'purple' ? 'bg-purple-200 text-purple-900 border-b-2 border-purple-400' :
+                    color === 'teal'   ? 'bg-teal-200 text-teal-900 border-b-2 border-teal-400' :
+                    color === 'indigo' ? 'bg-indigo-200 text-indigo-900 border-b-2 border-indigo-400' :
+                    color === 'pink'   ? 'bg-pink-200 text-pink-900 border-b-2 border-pink-400' :
+                    color === 'lime'   ? 'bg-lime-200 text-lime-900 border-b-2 border-lime-400' :
+                                        'bg-gray-200 text-gray-900 border-b border-gray-400';
 
                   const badgeClass = (color: string) =>
                     color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
                     color === 'orange' ? 'bg-orange-100 text-orange-800' :
                     color === 'rose'   ? 'bg-rose-100 text-rose-700' :
-                                        'bg-blue-100 text-blue-700';
+                    color === 'blue'   ? 'bg-blue-100 text-blue-700' :
+                    color === 'green'  ? 'bg-green-100 text-green-700' :
+                    color === 'purple' ? 'bg-purple-100 text-purple-700' :
+                    color === 'teal'   ? 'bg-teal-100 text-teal-700' :
+                    color === 'indigo' ? 'bg-indigo-100 text-indigo-700' :
+                    color === 'pink'   ? 'bg-pink-100 text-pink-700' :
+                    color === 'lime'   ? 'bg-lime-100 text-lime-700' :
+                                        'bg-gray-100 text-gray-700';
 
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
@@ -1469,17 +1503,45 @@ export default function AIAnalysisClient() {
                       </div>
 
                       <div className="p-5 space-y-5">
-                        {/* ── Legend ── */}
+                        {/* ── Legend (Source-based colors) ── */}
                         <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                          <span className="font-semibold text-gray-600 mr-1">Legend:</span>
-                          {[
-                            { label: 'Exact Copy',   bg: 'bg-yellow-200 text-yellow-800' },
-                            { label: 'Near Match',   bg: 'bg-orange-200 text-orange-800' },
-                            { label: 'Paraphrase',   bg: 'bg-rose-200 text-rose-800' },
-                            { label: 'Phrase Match', bg: 'bg-blue-100 text-blue-700' },
-                          ].map(l => (
-                            <span key={l.label} className={`px-2 py-0.5 rounded font-medium ${l.bg}`}>{l.label}</span>
-                          ))}
+                          {(() => {
+                            // Extract unique sources with their colors from segments
+                            const sourceMap = new Map<string, { label: string; color: string; url: string }>();
+                            segments.forEach(seg => {
+                              if (seg.highlighted) {
+                                const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
+                                if (sp.url && !sourceMap.has(sp.url)) {
+                                  const colorMap = {
+                                    'yellow': 'bg-yellow-200 text-yellow-800',
+                                    'orange': 'bg-orange-200 text-orange-800',
+                                    'rose': 'bg-rose-200 text-rose-800',
+                                    'blue': 'bg-blue-100 text-blue-700',
+                                    'green': 'bg-green-200 text-green-800',
+                                    'purple': 'bg-purple-200 text-purple-800',
+                                    'teal': 'bg-teal-200 text-teal-800',
+                                    'indigo': 'bg-indigo-200 text-indigo-800',
+                                    'pink': 'bg-pink-200 text-pink-800',
+                                    'lime': 'bg-lime-200 text-lime-800',
+                                  };
+                                  sourceMap.set(sp.url, {
+                                    label: sp.source || new URL(sp.url).hostname,
+                                    color: colorMap[sp.color as keyof typeof colorMap] || colorMap.blue,
+                                    url: sp.url
+                                  });
+                                }
+                              }
+                            });
+                            return Array.from(sourceMap.values()).map((src, idx) => (
+                              <span 
+                                key={idx} 
+                                className={`px-2 py-0.5 rounded font-medium ${src.color} cursor-help`}
+                                title={src.url}
+                              >
+                                {src.label.length > 30 ? src.label.substring(0, 30) + '...' : src.label}
+                              </span>
+                            ));
+                          })()}
                           <span className="ml-auto text-gray-400">{flagged.length} passage{flagged.length !== 1 ? 's' : ''} flagged</span>
                         </div>
 
@@ -1501,7 +1563,10 @@ export default function AIAnalysisClient() {
                                 {isOpen && (
                                   <span className="absolute top-full left-0 z-30 mt-1.5 w-[26rem] bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
                                     <div className="flex items-center justify-between mb-2">
-                                      <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${badgeClass(sp.color)}`}>{sp.matchType}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${badgeClass(sp.color)}`}>{sp.matchType}</span>
+                                        <span className={`w-3 h-3 rounded-full ${bgClass(sp.color)} border border-gray-300`} title="Source color indicator"></span>
+                                      </div>
                                       <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-base leading-none">✕</button>
                                     </div>
                                     {/* Side-by-side comparison */}
@@ -1517,7 +1582,7 @@ export default function AIAnalysisClient() {
                                         </p>
                                       </div>
                                     </div>
-                                    {sp.source && <p className="mb-1.5 text-gray-600 text-[10px]"><span className="font-semibold text-gray-700">Source: </span>{sp.source}</p>}
+
                                     {sp.url ? (
                                       <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium text-[11px]">
                                         View on internet
@@ -1830,17 +1895,8 @@ export default function AIAnalysisClient() {
 
                             {/* Source info */}
                             <div className="text-xs space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-500 font-medium">Source:</span>
-                                {bestUrl ? (
-                                  <a href={bestUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{highlight.source}</a>
-                                ) : (
-                                  <span className="text-gray-700">{highlight.source}</span>
-                                )}
-                              </div>
                               {bestUrl && (
                                 <div className="flex items-center gap-2">
-                                  <span className="text-gray-500 font-medium">URL:</span>
                                   <a href={bestUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{bestUrl}</a>
                                 </div>
                               )}

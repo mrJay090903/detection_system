@@ -49,8 +49,8 @@ export default function CheckSimilarityPage() {
   }, [isLoading])
 
   const handleCheckSimilarity = async () => {
-    // Use file content if available, otherwise use textarea content
-    const conceptToCheck = fileContent.trim() || proposedConcept.trim()
+    // Use edited concept field first (user can edit), fallback to file content if concept is empty
+    const conceptToCheck = proposedConcept.trim() || fileContent.trim()
     
     if (!proposedTitle.trim() || !conceptToCheck) {
       toast.error("Please fill in both research title and concept (or upload a file)")
@@ -118,9 +118,9 @@ export default function CheckSimilarityPage() {
 
         // Store result in sessionStorage and navigate to results page
         sessionStorage.setItem("similarityResult", JSON.stringify(data))
-        // Store file content if it was used
-        if (fileContent.trim()) {
-          sessionStorage.setItem("uploadedFileContent", fileContent.trim())
+        // Store the concept text (edited by user) if available
+        if (conceptToCheck) {
+          sessionStorage.setItem("uploadedFileContent", conceptToCheck)
         }
         window.location.href = "/similarity-results"
       } else {
@@ -135,13 +135,17 @@ export default function CheckSimilarityPage() {
   }
 
   const handleFileContentRead = (content: string, title?: string) => {
-    // Store file content but don't display it in textarea
+    // Store file content AND populate the concept textarea so user can edit
     setFileContent(content)
+    setProposedConcept(content)  // Auto-populate so user can edit
     
     // If title was extracted from the PDF, auto-fill the title field
     if (title && title !== 'Untitled Research' && !proposedTitle.trim()) {
       setProposedTitle(title)
     }
+    
+    // Show success message
+    toast.success(`✓ File uploaded! ${content.length.toLocaleString()} characters extracted. You can now edit the text below.`)
   }
 
   return (
@@ -271,14 +275,14 @@ export default function CheckSimilarityPage() {
                 <Textarea
                   id="concept"
                   rows={8}
-                  placeholder={fileContent ? "File content loaded. You can edit or add more text here..." : "Describe your research concept in detail..."}
+                  placeholder="Describe your research concept in detail, or upload a file above to auto-populate this field..."
                   value={proposedConcept}
                   onChange={(e) => setProposedConcept(e.target.value)}
                   disabled={isLoading}
                   className="text-base border-2 focus:border-[#fca311] transition-colors resize-none"
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  {fileContent ? `${fileContent.length.toLocaleString()} characters from file` : 'Provide a detailed description of your research'}
+                  {proposedConcept ? `${proposedConcept.length.toLocaleString()} characters` : 'Provide a detailed description of your research'}
                 </p>
               </div>
 

@@ -568,7 +568,7 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
     console.log(`[Winston AI] ✓ Total: ${allHighlights.length} highlights, ${finalSources.length} unique sources`);
     
     if (allHighlights.length > 0) {
-      console.log('[Winston AI] First 3 highlights:', allHighlights.slice(0, 3).map(h => ({
+      console.log('[Winston AI] First 5 highlights:', allHighlights.slice(0, 5).map(h => ({
         text: h.text?.substring(0, 50) || 'N/A',
         start: h.start,
         end: h.end,
@@ -578,11 +578,12 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
     }
     
     if (finalSources.length > 0) {
-      console.log('[Winston AI] First 3 sources:', finalSources.slice(0, 3).map(s => ({
-        title: s.title?.substring(0, 50) || 'N/A',
-        url: s.url?.substring(0, 50) || 'N/A',
-        score: s.plagiarism_score,
-      })));
+      console.log('[Winston AI] All sources detected:');
+      finalSources.forEach((s, idx) => {
+        console.log(`  ${idx + 1}. ${s.title?.substring(0, 60) || 'N/A'}`);
+        console.log(`     URL: ${s.url?.substring(0, 80) || 'N/A'}`);
+        console.log(`     Score: ${s.plagiarism_score}%`);
+      });
     }
     
     return {
@@ -958,40 +959,34 @@ function extractKeyPhrases(title: string, concept: string): string[] {
   return final.slice(0, 15);
 }
 
-// Verify match breakdown entries and text highlights using Serper API only
-async function verifySerpResults(
-  matchEntries: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[] }>,
-  textHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number }>,
+// ============================================================================
+// SERPER API — Search Google/Scholar for similar research (Match Breakdown)
+// Instead of relying on AI training knowledge, we search the real web.
+// ============================================================================
+async function searchSerpForMatches(
   proposedTitle: string,
   proposedConcept: string
 ): Promise<{
-  verifiedMatches: Array<{ name: string; type: string; year: string; link: string; whyMatches: string[]; rubric: any; whatsDifferent: string[]; serpVerified: boolean; serpResults: SerpWebResult[] }>;
-  verifiedHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number; serpVerified: boolean; serpResults: SerpWebResult[]; scholarResults: SerpWebResult[] }>;
+  matches: Array<{
+    name: string; type: string; year: string; link: string;
+    whyMatches: string[]; snippet: string;
+    rubric: { problem: number; objectives: number; inputs: number; method: number; users: number; overall: number };
+    whatsDifferent: string[];
+    serpVerified: boolean; serpResults: SerpWebResult[];
+  }>;
   webCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }>;
   phraseHighlights: Array<{
-    phrase: string;
-    isTitle: boolean;
-    serpResults: SerpWebResult[];
-    scholarResults: SerpWebResult[];
-    foundOnWeb: boolean;
-    bestUrl: string;
-    bestSource: string;
-    bestSnippet: string;
+    phrase: string; isTitle: boolean;
+    serpResults: SerpWebResult[]; scholarResults: SerpWebResult[];
+    foundOnWeb: boolean; bestUrl: string; bestSource: string; bestSnippet: string;
   }>;
 }> {
   const hasSerper = process.env.SERPER_API_KEY && process.env.SERPER_API_KEY !== 'your_serper_api_key_here';
-  
   if (!hasSerper) {
-    console.log('[Serper API] SERPER_API_KEY not configured, skipping web verification');
-    return {
-      verifiedMatches: matchEntries.map(m => ({ ...m, serpVerified: false, serpResults: [] })),
-      verifiedHighlights: textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] })),
-      webCitations: [],
-      phraseHighlights: [],
-    };
+    console.log('[Serper Match Search] SERPER_API_KEY not configured');
+    return { matches: [], webCitations: [], phraseHighlights: [] };
   }
 
-  console.log(`[Serper API] Verifying ${matchEntries.length} matches and ${textHighlights.length} highlights`);
   const allCitations: Array<{ title: string; url: string; snippet: string; source: string; foundVia: 'breakdown' | 'highlight' | 'title' | 'phrase'; date?: string }> = [];
   const seenUrls = new Set<string>();
 
@@ -1002,96 +997,151 @@ async function verifySerpResults(
     }
   };
 
-  // 1. Search for the proposed title itself
-  const titleResults = await serpSearchScholar(proposedTitle, 5).catch(() => []);
-  titleResults.forEach(r => addCitation(r, 'title'));
-
-  // 2. Verify match breakdown entries (search by name/title of each match)
-  const MATCH_BATCH = 3;
-  const verifiedMatches = [];
-  for (let i = 0; i < matchEntries.length; i += MATCH_BATCH) {
-    const batch = matchEntries.slice(i, i + MATCH_BATCH);
-    const batchResults = await Promise.all(
-      batch.map(async (entry) => {
-        const query = entry.name.substring(0, 200);
-        const [googleRes, scholarRes] = await Promise.all([
-          serpSearchGoogle(`"${query}"`, 3).catch(() => [] as SerpWebResult[]),
-          serpSearchScholar(query, 3).catch(() => [] as SerpWebResult[]),
-        ]);
-        const allResults = [...googleRes, ...scholarRes];
-        allResults.forEach(r => addCitation(r, 'breakdown'));
-        
-        // Check if we found the exact source — update the link if the AI provided "N/A" or a broken link
-        const bestResult = allResults[0];
-        const verifiedLink = bestResult?.link || entry.link;
-        
-        return {
-          ...entry,
-          link: verifiedLink,
-          serpVerified: allResults.length > 0,
-          serpResults: allResults.slice(0, 5),
-        };
-      })
-    );
-    verifiedMatches.push(...batchResults);
-    // no inter-batch sleep — per-call timeout already guards against hangs
-  }
-
-  // 3. Verify text highlights (search by matched text phrases)
-  const HIGHLIGHT_BATCH = 3;
-  const verifiedHighlights = [];
-  for (let i = 0; i < textHighlights.length; i += HIGHLIGHT_BATCH) {
-    const batch = textHighlights.slice(i, i + HIGHLIGHT_BATCH);
-    const batchResults = await Promise.all(
-      batch.map(async (highlight) => {
-        const searchText = highlight.matchedText.substring(0, 256);
-        if (searchText.length < 10) {
-          return { ...highlight, serpVerified: false, serpResults: [] as SerpWebResult[], scholarResults: [] as SerpWebResult[] };
-        }
-        const [googleRes, scholarRes] = await Promise.all([
-          serpSearchGoogle(`"${searchText}"`, 3).catch(() => [] as SerpWebResult[]),
-          serpSearchScholar(searchText, 3).catch(() => [] as SerpWebResult[]),
-        ]);
-        const allResults = [...googleRes, ...scholarRes];
-        allResults.forEach(r => addCitation(r, 'highlight'));
-        
-        // Update sourceUrl if Serper API found a real one
-        const bestResult = allResults[0];
-        const verifiedUrl = bestResult?.link || highlight.sourceUrl;
-        const verifiedSource = bestResult?.title || highlight.source;
-        
-        return {
-          ...highlight,
-          sourceUrl: verifiedUrl,
-          source: highlight.source === 'Unknown Source' ? verifiedSource : highlight.source,
-          serpVerified: allResults.length > 0,
-          serpResults: googleRes.slice(0, 3),
-          scholarResults: scholarRes.slice(0, 3),
-        };
-      })
-    );
-    verifiedHighlights.push(...batchResults);
-    // no inter-batch sleep — per-call timeout already guards against hangs
-  }
-
-  console.log(`[Serper API] Verification complete. Found ${allCitations.length} unique web citations`);
-  console.log(`[Serper API] Verified matches: ${verifiedMatches.filter(m => m.serpVerified).length}/${verifiedMatches.length}`);
-  console.log(`[Serper API] Verified highlights: ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length}`);
-
-  // 4. Key Phrase Internet Search — extract up to 10 phrases and search each on Google + Scholar
-  const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept).slice(0, 10);
   const cleanTitle = proposedTitle.replace(/^bu thematic area:\s*/i, '').trim();
-  console.log(`[Serper API] Searching ${keyPhrases.length} key phrases on the web`);
+  console.log(`[Serper Match Search] Searching for similar research: "${cleanTitle.substring(0, 80)}"`);
+
+  // ── 1. Search multiple queries in parallel to find similar research ──
+  const conceptSnippet = proposedConcept.substring(0, 300).replace(/\n/g, ' ').trim();
+  const searchQueries = [
+    cleanTitle,                                                         // exact title
+    `"${cleanTitle}" thesis OR research OR study`,                      // title + academic context
+    `${cleanTitle} similar research paper`,                             // broader search
+    `${conceptSnippet.substring(0, 150)} research`,                    // concept-based
+  ];
+
+  // Run Google + Scholar searches in parallel for all queries
+  const searchPromises = searchQueries.flatMap(q => [
+    serpSearchGoogle(q, 10).catch(() => [] as SerpWebResult[]),
+    serpSearchScholar(q, 10).catch(() => [] as SerpWebResult[]),
+  ]);
+
+  const allSearchResults = await Promise.all(searchPromises);
+  const flatResults: SerpWebResult[] = allSearchResults.flat();
+
+  // Deduplicate by URL
+  const uniqueMatches = new Map<string, SerpWebResult>();
+  for (const r of flatResults) {
+    if (r.link && !uniqueMatches.has(r.link)) {
+      uniqueMatches.set(r.link, r);
+      addCitation(r, 'breakdown');
+    }
+  }
+
+  console.log(`[Serper Match Search] Found ${uniqueMatches.size} unique results from ${searchQueries.length} queries`);
+
+  // ── 2. Convert Serper results into match breakdown entries with similarity rubric ──
+  const proposedTitleTokens = tokenize(proposedTitle);
+  const proposedConceptTokens = tokenize(proposedConcept.substring(0, 5000));
+  const proposedAllTokens = [...proposedTitleTokens, ...proposedConceptTokens];
+  const proposedTitleWordSet = new Set(proposedTitleTokens);
+  const proposedConceptWordSet = new Set(proposedConceptTokens);
+
+  const matches = Array.from(uniqueMatches.values()).map(r => {
+    // Determine type from source/snippet
+    const lowerTitle = (r.title || '').toLowerCase();
+    const lowerSnippet = (r.snippet || '').toLowerCase();
+    const combined = lowerTitle + ' ' + lowerSnippet;
+    let type = 'Article';
+    if (combined.includes('thesis') || combined.includes('dissertation')) type = 'Thesis';
+    else if (combined.includes('github') || r.link.includes('github.com')) type = 'GitHub';
+    else if (combined.includes('journal') || combined.includes('conference') || combined.includes('ieee') || combined.includes('acm') || combined.includes('springer') || combined.includes('doi.org')) type = 'Paper';
+    else if (combined.includes('app') || combined.includes('play.google') || combined.includes('apps.apple')) type = 'App';
+
+    // Extract year from date or snippet
+    const yearMatch = (r.date || r.snippet || '').match(/(20\d{2}|19\d{2})/);
+    const year = yearMatch ? yearMatch[1] : 'N/A';
+
+    // ── Compute similarity rubric using tokenized cosine similarity ──
+    const matchTitleTokens = tokenize(r.title || '');
+    const matchSnippetTokens = tokenize(r.snippet || '');
+    const matchAllTokens = [...matchTitleTokens, ...matchSnippetTokens];
+
+    // Title-to-title similarity → problem/topic overlap
+    const titleSim = cosineSim(proposedTitleTokens, matchTitleTokens);
+
+    // Snippet-to-concept similarity → content overlap
+    const snippetSim = cosineSim(matchSnippetTokens, proposedConceptTokens);
+
+    // Full text similarity (title+snippet vs title+concept)
+    const fullSim = cosineSim(matchAllTokens, proposedAllTokens);
+
+    // Word overlap: how many of the proposed title keywords appear in the match title
+    const matchTitleWordSet = new Set(matchTitleTokens);
+    let titleOverlap = 0;
+    const overlappingWords: string[] = [];
+    for (const w of proposedTitleWordSet) {
+      if (matchTitleWordSet.has(w)) { titleOverlap++; overlappingWords.push(w); }
+    }
+    const titleOverlapRatio = proposedTitleWordSet.size > 0 ? titleOverlap / proposedTitleWordSet.size : 0;
+
+    // Concept word overlap
+    const matchAllWordSet = new Set(matchAllTokens);
+    let conceptOverlap = 0;
+    const uniqueProposedWords: string[] = [];
+    for (const w of proposedConceptWordSet) {
+      if (matchAllWordSet.has(w)) conceptOverlap++;
+      else uniqueProposedWords.push(w);
+    }
+
+    // Rubric scores (0-100 scale)
+    const problemScore = Math.round(Math.max(titleSim, titleOverlapRatio) * 100);
+    const objectivesScore = Math.round(Math.max(snippetSim, fullSim * 0.8) * 100);
+    const inputsScore = Math.round(snippetSim * 100);
+    const methodScore = Math.round(fullSim * 100);
+    const usersScore = Math.round(Math.max(titleSim * 0.5, snippetSim * 0.8) * 100);
+    const overallScore = Math.round(
+      Math.max(
+        titleSim * 0.5 + snippetSim * 0.3 + fullSim * 0.2,
+        titleOverlapRatio * 0.6 + snippetSim * 0.4
+      ) * 100
+    );
+
+    // ── Generate "Why It Matches" from overlapping keywords and snippet ──
+    const whyMatches: string[] = [];
+    if (overlappingWords.length > 0) {
+      whyMatches.push(`Shared keywords: ${overlappingWords.slice(0, 8).join(', ')}`);
+    }
+    if (titleSim > 0.3) {
+      whyMatches.push(`Title similarity: ${Math.round(titleSim * 100)}% — similar research topic`);
+    }
+    if (r.snippet) {
+      whyMatches.push(r.snippet);
+    }
+
+    // ── Generate "What's Different" from unique proposed keywords ──
+    const whatsDifferent: string[] = [];
+    const importantUnique = uniqueProposedWords
+      .filter(w => w.length > 4)
+      .slice(0, 6);
+    if (importantUnique.length > 0) {
+      whatsDifferent.push(`Proposed research has unique terms: ${importantUnique.join(', ')}`);
+    }
+    if (titleSim < 0.3 && snippetSim < 0.2) {
+      whatsDifferent.push('Low textual similarity — may address a different specific problem');
+    }
+
+    return {
+      name: r.title || 'Untitled',
+      type,
+      year,
+      link: r.link,
+      whyMatches: whyMatches.length > 0 ? whyMatches : ['Found via Google/Scholar search'],
+      snippet: r.snippet || '',
+      rubric: { problem: problemScore, objectives: objectivesScore, inputs: inputsScore, method: methodScore, users: usersScore, overall: overallScore },
+      whatsDifferent,
+      serpVerified: true,
+      serpResults: [r],
+    };
+  });
+
+  // ── 3. Key Phrase Internet Search ──
+  const keyPhrases = extractKeyPhrases(proposedTitle, proposedConcept).slice(0, 10);
+  console.log(`[Serper Match Search] Searching ${keyPhrases.length} key phrases on the web`);
 
   const phraseHighlights: Array<{
-    phrase: string;
-    isTitle: boolean;
-    serpResults: SerpWebResult[];
-    scholarResults: SerpWebResult[];
-    foundOnWeb: boolean;
-    bestUrl: string;
-    bestSource: string;
-    bestSnippet: string;
+    phrase: string; isTitle: boolean;
+    serpResults: SerpWebResult[]; scholarResults: SerpWebResult[];
+    foundOnWeb: boolean; bestUrl: string; bestSource: string; bestSnippet: string;
   }> = [];
 
   const PHRASE_BATCH = 5;
@@ -1120,13 +1170,55 @@ async function verifySerpResults(
       })
     );
     phraseHighlights.push(...batchResults);
-    // no sleep — per-call 8 s timeout already guards against hangs
   }
 
   const phraseFound = phraseHighlights.filter(p => p.foundOnWeb).length;
-  console.log(`[Serper API] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
+  console.log(`[Serper Match Search] Phrases found on web: ${phraseFound}/${phraseHighlights.length}`);
+  console.log(`[Serper Match Search] Total matches: ${matches.length}, Total citations: ${allCitations.length}`);
 
-  return { verifiedMatches, verifiedHighlights, webCitations: allCitations, phraseHighlights };
+  return { matches, webCitations: allCitations, phraseHighlights };
+}
+
+// Verify text highlights using Serper API
+async function verifyTextHighlights(
+  textHighlights: Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number }>
+): Promise<Array<{ matchedText: string; source: string; sourceUrl: string; matchType: string; similarity: number; serpVerified: boolean; serpResults: SerpWebResult[]; scholarResults: SerpWebResult[] }>> {
+  const hasSerper = process.env.SERPER_API_KEY && process.env.SERPER_API_KEY !== 'your_serper_api_key_here';
+  if (!hasSerper) {
+    return textHighlights.map(h => ({ ...h, serpVerified: false, serpResults: [], scholarResults: [] }));
+  }
+
+  const HIGHLIGHT_BATCH = 3;
+  const verifiedHighlights = [];
+  for (let i = 0; i < textHighlights.length; i += HIGHLIGHT_BATCH) {
+    const batch = textHighlights.slice(i, i + HIGHLIGHT_BATCH);
+    const batchResults = await Promise.all(
+      batch.map(async (highlight) => {
+        const searchText = highlight.matchedText.substring(0, 256);
+        if (searchText.length < 10) {
+          return { ...highlight, serpVerified: false, serpResults: [] as SerpWebResult[], scholarResults: [] as SerpWebResult[] };
+        }
+        const [googleRes, scholarRes] = await Promise.all([
+          serpSearchGoogle(`"${searchText}"`, 3).catch(() => [] as SerpWebResult[]),
+          serpSearchScholar(searchText, 3).catch(() => [] as SerpWebResult[]),
+        ]);
+        const allResults = [...googleRes, ...scholarRes];
+        const bestResult = allResults[0];
+        const verifiedUrl = bestResult?.link || highlight.sourceUrl;
+        const verifiedSource = bestResult?.title || highlight.source;
+        return {
+          ...highlight,
+          sourceUrl: verifiedUrl,
+          source: highlight.source === 'Unknown Source' ? verifiedSource : highlight.source,
+          serpVerified: allResults.length > 0,
+          serpResults: googleRes.slice(0, 3),
+          scholarResults: scholarRes.slice(0, 3),
+        };
+      })
+    );
+    verifiedHighlights.push(...batchResults);
+  }
+  return verifiedHighlights;
 }
 
 // ============================================================================
@@ -1402,14 +1494,14 @@ async function performWebSimilarityScan(
   const urlMap = new Map<string, { title: string; snippet: string }>();
   for (const ph of phraseHighlights) {
     for (const r of [...(ph.serpResults || []), ...(ph.scholarResults || [])]) {
-      if (r?.link && !urlMap.has(r.link) && urlMap.size < 8) {
+      if (r?.link && !urlMap.has(r.link) && urlMap.size < 20) {
         urlMap.set(r.link, { title: r.title || '', snippet: r.snippet || '' });
       }
     }
-    if (urlMap.size >= 8) break;
+    if (urlMap.size >= 20) break;
   }
 
-  const urlEntries = Array.from(urlMap.entries()).slice(0, 5);
+  const urlEntries = Array.from(urlMap.entries()).slice(0, 15);
   if (urlEntries.length === 0) return { overallSimilarity: 0, sources: [], highlights: [], scannedUrls: 0 };
 
   const proposedSentences = getSentencesWithPositions(proposedText);
@@ -1830,45 +1922,6 @@ const prompt = [
 "Final Verdict:",
 "[Either 'Not the same research concept' OR 'Same research concept']",
 "",
-"=== MATCH BREAKDOWN & SOURCE LIST ===",
-"",
-"You are also a STRICT academic research novelty evaluator.",
-"Using your training knowledge, find existing research papers, theses, journal articles, GitHub projects, and commercial apps that are conceptually similar to the PROPOSED STUDY above.",
-"Compare the proposal with the closest matches and compute a concept-level similarity score for each.",
-"Provide citations/references for every match.",
-"",
-"SEARCH RULES:",
-"- Find ALL relevant sources you can identify (academic papers, theses, apps, GitHub projects, articles). Do NOT limit the number.",
-"- Include sources from ANY year — old or new. Do not restrict by publication date.",
-"- Ignore keyword-only matches; prioritize SAME PROBLEM + SAME OUTPUT + SAME WORKFLOW.",
-"",
-"For each match, output EXACTLY this format:",
-"",
-"MATCH [number]:",
-"Name/Title: [title of the matching source]",
-"Type: [Paper / Thesis / App / GitHub / Article]",
-"Year: [year if available, otherwise N/A]",
-"Link: [URL or citation reference]",
-"Why It Matches:",
-"- [bullet 1]",
-"- [bullet 2]",
-"- [bullet 3]",
-"Similarity Rubric:",
-"  Problem/Need: [X%]",
-"  Objectives/Outputs: [X%]",
-"  Inputs: [X%]",
-"  Method/Tech: [X%]",
-"  Users/Scope: [X%]",
-"  Overall: [X%] (weighted: Problem 25%, Objectives 25%, Inputs 15%, Method 25%, Users 10%)",
-"What Is Different:",
-"- [bullet 1]",
-"- [bullet 2]",
-"",
-"After listing ALL matches, provide:",
-"",
-"=== SIMILARITY CONCLUSION ===",
-"[One paragraph summarizing overall similarity findings across all matches]",
-"",
 "Recommendations:",
 "Write your recommendations using EXACTLY these five labeled sections. Use bullet points (-) for each item.",
 "",
@@ -2144,119 +2197,8 @@ const modelPriority = [
     };
 
     // ============================================================================
-    // EXTRACT MATCH BREAKDOWN & SOURCE LIST from AI response
+    // (Match Breakdown is now generated from Serper API, not AI response)
     // ============================================================================
-    console.log('[Match Breakdown] Starting extraction from AI response...');
-    const matchBreakdownFullSection = analysis.match(/=== MATCH BREAKDOWN & SOURCE LIST ===([\s\S]*?)(?==== SIMILARITY CONCLUSION ===|$)/i)
-      || analysis.match(/MATCH BREAKDOWN & SOURCE LIST[:\s]*([\s\S]*?)(?=SIMILARITY CONCLUSION|Recommendations:|$)/i);
-    
-    if (matchBreakdownFullSection) {
-      console.log('[Match Breakdown] Found section in AI response, length:', matchBreakdownFullSection[1].length);
-      console.log('[Match Breakdown] First 500 chars:', matchBreakdownFullSection[1].substring(0, 500));
-    } else {
-      console.log('[Match Breakdown] ⚠️ Section NOT found in AI response');
-      console.log('[Match Breakdown] Searching for alternative formats...');
-      // Try to find if AI used any variation
-      const altSearch = analysis.match(/MATCH\s*1\s*:/i);
-      if (altSearch) {
-        console.log('[Match Breakdown] Found MATCH 1 marker at position:', analysis.indexOf(altSearch[0]));
-      } else {
-        console.log('[Match Breakdown] No MATCH entries found in response');
-      }
-    }
-    
-    // Parse individual match cards
-    const matchEntries: Array<{
-      name: string;
-      type: string;
-      year: string;
-      link: string;
-      whyMatches: string[];
-      rubric: {
-        problem: number | null;
-        objectives: number | null;
-        inputs: number | null;
-        method: number | null;
-        users: number | null;
-        overall: number | null;
-      };
-      whatsDifferent: string[];
-    }> = [];
-    
-    if (matchBreakdownFullSection) {
-      // Split into individual match blocks
-      const matchBlocks = matchBreakdownFullSection[1].split(/MATCH\s*\d+\s*:/i).filter(b => b.trim());
-      console.log(`[Match Breakdown] Found ${matchBlocks.length} match blocks to parse`);
-      
-      for (const block of matchBlocks) {
-        const nameMatch = block.match(/Name\/Title:\s*([^\n]+)/i);
-        const typeMatch = block.match(/Type:\s*([^\n]+)/i);
-        const yearMatch = block.match(/Year:\s*([^\n]+)/i);
-        const linkMatch = block.match(/Link:\s*([^\n]+)/i);
-        
-        // Extract "Why It Matches" bullets
-        const whySection = block.match(/Why It Matches:[\s\S]*?(?=Similarity Rubric:|What Is Different:|MATCH\s*\d+:|$)/i);
-        const whyBullets: string[] = [];
-        if (whySection) {
-          const bullets = whySection[0].match(/[-•]\s*([^\n]+)/g);
-          if (bullets) bullets.forEach(b => whyBullets.push(b.replace(/^[-•]\s*/, '').trim()));
-        }
-        
-        // Extract similarity rubric scores
-        const problemScore = block.match(/Problem\/Need:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        const objectivesScore = block.match(/Objectives\/Outputs:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        const inputsScore = block.match(/Inputs:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        const methodScore = block.match(/Method\/Tech:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        const usersScore = block.match(/Users\/Scope:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        const overallScore = block.match(/Overall:\s*\[?(\d+(?:\.\d+)?)%?\]?/i);
-        
-        // Extract "What Is Different" bullets
-        const diffSection = block.match(/What Is Different:[\s\S]*?(?=MATCH\s*\d+:|=== |$)/i);
-        const diffBullets: string[] = [];
-        if (diffSection) {
-          const bullets = diffSection[0].match(/[-•]\s*([^\n]+)/g);
-          if (bullets) bullets.forEach(b => diffBullets.push(b.replace(/^[-•]\s*/, '').trim()));
-        }
-        
-        if (nameMatch) {
-          matchEntries.push({
-            name: nameMatch[1].trim(),
-            type: typeMatch ? typeMatch[1].trim() : 'Unknown',
-            year: yearMatch ? yearMatch[1].trim() : 'N/A',
-            link: linkMatch ? linkMatch[1].trim() : '',
-            whyMatches: whyBullets,
-            rubric: {
-              problem: problemScore ? parseFloat(problemScore[1]) : null,
-              objectives: objectivesScore ? parseFloat(objectivesScore[1]) : null,
-              inputs: inputsScore ? parseFloat(inputsScore[1]) : null,
-              method: methodScore ? parseFloat(methodScore[1]) : null,
-              users: usersScore ? parseFloat(usersScore[1]) : null,
-              overall: overallScore ? parseFloat(overallScore[1]) : null,
-            },
-            whatsDifferent: diffBullets,
-          });
-        }
-      }
-    } else {
-      console.log('[Match Breakdown] No match section found - will rely on Serper web search results');
-    }
-    
-    console.log(`[Match Breakdown] Parsed ${matchEntries.length} total matches from AI`);
-    if (matchEntries.length > 0) {
-      console.log('[Match Breakdown] First 3 matches:', matchEntries.slice(0, 3).map(m => ({
-        name: m.name.substring(0, 60),
-        type: m.type,
-        overall: m.rubric.overall
-      })));
-    }
-    
-    // Sort matches by overall similarity (highest first)
-    matchEntries.sort((a, b) => (b.rubric.overall ?? 0) - (a.rubric.overall ?? 0));
-    
-    // Extract Similarity Conclusion
-    const similarityConclusionMatch = analysis.match(/=== SIMILARITY CONCLUSION ===\s*([\s\S]*?)(?=Recommendations:|$)/i)
-      || analysis.match(/SIMILARITY CONCLUSION[:\s]*([\s\S]*?)(?=Recommendations:|$)/i);
-    const similarityConclusion = similarityConclusionMatch ? similarityConclusionMatch[1].trim() : '';
     
     // ============================================================================
     // EXTRACT TEXT MATCH HIGHLIGHTS from AI response
@@ -2358,18 +2300,15 @@ const modelPriority = [
     };
     
     // ============================================================================
-    // SERPER API WEB VERIFICATION
+    // SERPER API — Search Google/Scholar for similar research (Match Breakdown)
     // ============================================================================
-    console.log('[Serper API] Running web verification...');
-    const serpVerification = await verifySerpResults(matchEntries, textHighlights, safeUserTitle, safeUserConcept);
-    console.log(`[Serper API] Verification complete. Verified ${serpVerification.verifiedMatches.length} matches, ${serpVerification.webCitations.length} citations`);
-    if (serpVerification.verifiedMatches.length > 0) {
-      console.log('[Serper API] First 3 verified matches:', serpVerification.verifiedMatches.slice(0, 3).map(m => ({
-        name: m.name.substring(0, 60),
-        serpVerified: m.serpVerified,
-        resultsFound: m.serpResults.length
-      })));
-    }
+    console.log('[Serper API] Searching for similar research on Google/Scholar...');
+    const serpMatchSearch = await searchSerpForMatches(safeUserTitle, safeUserConcept);
+    console.log(`[Serper API] Found ${serpMatchSearch.matches.length} matches, ${serpMatchSearch.webCitations.length} citations`);
+
+    // Verify text highlights separately
+    const verifiedHighlights = await verifyTextHighlights(textHighlights);
+    console.log(`[Serper API] Verified ${verifiedHighlights.filter(h => h.serpVerified).length}/${verifiedHighlights.length} text highlights`);
 
     // ============================================================================
     // WINSTON AI PLAGIARISM CHECK (Primary)
@@ -2441,46 +2380,103 @@ const modelPriority = [
     }> = [];
     
     // Copyscape API disabled to avoid credit charges
-    // All match breakdown and source verification is handled by verifySerpResults above
 
     console.log('[WebScan] Starting full document scan against real web pages...');
-    const webScan = await performWebSimilarityScan(safeUserConcept, serpVerification.phraseHighlights);
+    const webScan = await performWebSimilarityScan(safeUserConcept, serpMatchSearch.phraseHighlights);
     console.log(`[WebScan] Done: ${webScan.scannedUrls} pages scanned, ${webScan.highlights.length} spans, overall ${webScan.overallSimilarity}%`);
+
+    // ============================================================================
+    // MERGE WINSTON AI SOURCES INTO WEB SCAN RESULTS
+    // Ensure all unique sources are displayed together
+    // ============================================================================
+    if (winstonSources.length > 0) {
+      console.log(`[WebScan] Merging ${winstonSources.length} Winston AI sources into web scan results`);
+      
+      const existingUrls = new Set(webScan.sources.map((s: any) => s.url));
+      
+      // Convert Winston sources to webScan source format
+      for (const wSource of winstonSources) {
+        if (!existingUrls.has(wSource.url) && wSource.url) {
+          // Add Winston AI source with proper format
+          webScan.sources.push({
+            url: wSource.url,
+            title: wSource.title || 'Unknown Source',
+            matchPercentage: Math.round(wSource.plagiarismScore),
+            matchedSentences: [{
+              proposedText: wSource.matchedText.substring(0, 200),
+              sourceText: wSource.matchedText.substring(0, 200),
+              confidence: Math.round(wSource.plagiarismScore),
+              matchType: 'plagiarism'
+            }],
+            highlights: [], // Winston provides text-level matches, not sentence-level
+          });
+          existingUrls.add(wSource.url);
+        }
+      }
+      
+      // Re-sort sources by match percentage after merging
+      webScan.sources.sort((a: any, b: any) => b.matchPercentage - a.matchPercentage);
+      
+      console.log(`[WebScan] Total sources after merge: ${webScan.sources.length} unique sources`);
+    }
 
     // Filter out the database source from match breakdown — the user only wants external matches
     const normalizeTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     const existingNorm = normalizeTitle(safeExistingTitle);
     const existingWords = new Set(existingNorm.split(' ').filter(w => w.length > 3));
 
-    const filteredMatches = serpVerification.verifiedMatches.filter(m => {
+    // Filter out the user's own proposed title and the database existing title from Serper results
+    const userNorm = normalizeTitle(safeUserTitle);
+    const userWords = new Set(userNorm.split(' ').filter(w => w.length > 3));
+
+    const filteredMatches = serpMatchSearch.matches.filter(m => {
       const mNorm = normalizeTitle(m.name);
-      // Exact or near-exact title match
-      if (mNorm === existingNorm) {
-        console.log(`[Match Breakdown] Filtering exact match: "${m.name}"`);
+      // Filter exact/near-exact matches to existing database title
+      if (mNorm === existingNorm || existingNorm.includes(mNorm) || mNorm.includes(existingNorm)) {
+        console.log(`[Match Breakdown] Filtering database title match: "${m.name}"`);
         return false;
       }
-      if (existingNorm.includes(mNorm) || mNorm.includes(existingNorm)) {
-        console.log(`[Match Breakdown] Filtering substring match: "${m.name}"`);
+      // Filter exact/near-exact matches to user's own proposed title  
+      if (mNorm === userNorm || userNorm.includes(mNorm) || mNorm.includes(userNorm)) {
+        console.log(`[Match Breakdown] Filtering own title match: "${m.name}"`);
         return false;
       }
-      // High word overlap (>70% of words match)
+      // High word overlap (>70%) with existing title
       const mWords = new Set(mNorm.split(' ').filter(w => w.length > 3));
-      if (mWords.size === 0 || existingWords.size === 0) return true;
-      let overlap = 0;
-      for (const w of mWords) if (existingWords.has(w)) overlap++;
-      const overlapRatio = overlap / Math.min(mWords.size, existingWords.size);
-      if (overlapRatio >= 0.7) {
-        console.log(`[Match Breakdown] Filtering high word overlap (${(overlapRatio * 100).toFixed(1)}%): "${m.name}"`);
-        return false;
+      if (mWords.size > 0 && existingWords.size > 0) {
+        let overlap = 0;
+        for (const w of mWords) if (existingWords.has(w)) overlap++;
+        const overlapRatio = overlap / Math.min(mWords.size, existingWords.size);
+        if (overlapRatio >= 0.7) {
+          console.log(`[Match Breakdown] Filtering high overlap with existing (${(overlapRatio * 100).toFixed(1)}%): "${m.name}"`);
+          return false;
+        }
+      }
+      // High word overlap (>70%) with user's own title
+      if (mWords.size > 0 && userWords.size > 0) {
+        let overlap = 0;
+        for (const w of mWords) if (userWords.has(w)) overlap++;
+        const overlapRatio = overlap / Math.min(mWords.size, userWords.size);
+        if (overlapRatio >= 0.7) {
+          console.log(`[Match Breakdown] Filtering high overlap with own title (${(overlapRatio * 100).toFixed(1)}%): "${m.name}"`);
+          return false;
+        }
       }
       return true;
     });
     
-    console.log(`[Match Breakdown] After filtering: ${filteredMatches.length} external matches remain (filtered out ${serpVerification.verifiedMatches.length - filteredMatches.length})`);
+    console.log(`[Match Breakdown] After filtering: ${filteredMatches.length} external matches remain (filtered out ${serpMatchSearch.matches.length - filteredMatches.length})`);
+
+    // Remove 0% overall matches and sort by overall rubric score (highest first)
+    const rankedMatches = filteredMatches
+      .filter(m => m.rubric.overall > 0)
+      .sort((a, b) => b.rubric.overall - a.rubric.overall);
+
+    console.log(`[Match Breakdown] After ranking: ${rankedMatches.length} matches with >0% overall`);
 
     const matchBreakdown = {
-      matches: filteredMatches,
-      conclusion: similarityConclusion,
+      matches: rankedMatches,
+      conclusion: '',
     };
     
     console.log('[Match Breakdown] Final object:', {
@@ -2664,11 +2660,11 @@ const modelPriority = [
       // Turnitin-style web scan results: highlight spans + per-source breakdown
       webScan,
 
-      // Match Breakdown & Source List (now Serper API-verified)
+      // Match Breakdown & Source List (from Serper API Google/Scholar search)
       matchBreakdown,
       
-      // Text Match Highlights (now Serper API-verified)
-      textHighlights: serpVerification.verifiedHighlights,
+      // Text Match Highlights (Serper API-verified)
+      textHighlights: verifiedHighlights,
       
       // Winston AI Plagiarism Detection (Primary)
       winstonHighlights,
@@ -2686,21 +2682,21 @@ const modelPriority = [
       copyscapeSummary: null,
       
       // Key Phrase Internet Search results
-      phraseHighlights: serpVerification.phraseHighlights,
+      phraseHighlights: serpMatchSearch.phraseHighlights,
       
       // Web Citations from Serper API (real internet sources)
-      webCitations: serpVerification.webCitations,
+      webCitations: serpMatchSearch.webCitations,
       
-      // Serper API verification summary
+      // Serper API search summary
       serpVerification: {
         enabled: !!process.env.SERPER_API_KEY,
-        matchesVerified: serpVerification.verifiedMatches.filter(m => m.serpVerified).length,
-        matchesTotal: serpVerification.verifiedMatches.length,
-        highlightsVerified: serpVerification.verifiedHighlights.filter(h => h.serpVerified).length,
-        highlightsTotal: serpVerification.verifiedHighlights.length,
-        phrasesFound: serpVerification.phraseHighlights.filter(p => p.foundOnWeb).length,
-        phrasesTotal: serpVerification.phraseHighlights.length,
-        totalWebCitations: serpVerification.webCitations.length,
+        matchesVerified: serpMatchSearch.matches.filter(m => m.serpVerified).length,
+        matchesTotal: serpMatchSearch.matches.length,
+        highlightsVerified: verifiedHighlights.filter(h => h.serpVerified).length,
+        highlightsTotal: verifiedHighlights.length,
+        phrasesFound: serpMatchSearch.phraseHighlights.filter(p => p.foundOnWeb).length,
+        phrasesTotal: serpMatchSearch.phraseHighlights.length,
+        totalWebCitations: serpMatchSearch.webCitations.length,
       },
       
       // Explanation

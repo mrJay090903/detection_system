@@ -1781,7 +1781,7 @@ function AnalysisReportsContent() {
                                   <CheckCircle className="w-5 h-5" />
                                   <h3 className="text-lg font-bold">No External Sources Found</h3>
                                 </div>
-                                <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
+                               
                               </div>
                             </div>
                             <div className="p-8 text-center">
@@ -1804,7 +1804,7 @@ function AnalysisReportsContent() {
                                 <p className="text-slate-300 text-xs mt-0.5">{_filteredMatches.length} external source(s) found — ranked by similarity</p>
                               </div>
                             </div>
-                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
+                          
                           </div>
                         </div>
                         <div className="p-6 space-y-5">
@@ -1929,7 +1929,7 @@ function AnalysisReportsContent() {
                               <Info className="w-5 h-5" />
                               <h3 className="text-lg font-bold">All Matches Filtered</h3>
                             </div>
-                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🔍 Serper API + Google Scholar</span>
+                          
                           </div>
                         </div>
                         <div className="p-8 text-center">
@@ -1959,17 +1959,7 @@ function AnalysisReportsContent() {
                     {/* Winston AI Results (Primary) */}
                     {winstonSummary && (winstonSummary.plagiarismScore > 0 || winstonSummary.highlightsCount > 0 || winstonSummary.sourcesCount > 0) ? (
                       <>
-                        {/* Source Label */}
-                        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl shadow-lg px-6 py-3 flex items-center justify-between">
-                          <div className="flex items-center gap-3 text-white">
-                            <AlertTriangle className="w-5 h-5" />
-                            <div>
-                              <h3 className="text-base font-bold">Plagiarism Detection Results</h3>
-                              <p className="text-purple-200 text-[10px] mt-0.5">Scanning entire document against billions of web pages</p>
-                            </div>
-                          </div>
-                          <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🤖 Winston AI API</span>
-                        </div>
+                        
 
                         {/* Summary Card */}
                         <div className={`rounded-2xl shadow-lg border-2 overflow-hidden ${
