@@ -53,6 +53,7 @@ function AnalysisReportsContent() {
   const [copyscapeSummary, setCopyscapeSummary] = useState<any>(null)
   const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
   const [retryCount, setRetryCount] = useState(0)
+  const [expandedSourceSeqs, setExpandedSourceSeqs] = useState<Set<number>>(new Set())
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -2016,7 +2017,7 @@ function AnalysisReportsContent() {
                               <FileText className="w-4 h-4" />
                               <span className="text-sm font-semibold">Highlighted Plagiarized Text ({winstonHighlights.length} matches)</span>
                             </div>
-                            <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/20 text-white font-semibold">Winston AI</span>
+                          
                           </div>
                           <div className="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600">
                             <div className="flex items-center gap-3 text-white">
@@ -2032,69 +2033,108 @@ function AnalysisReportsContent() {
                               {(() => {
                                 if (!userConcept) return <span className="text-slate-400 italic">No text available</span>;
                                 
-                                // Sort highlights by start position
-                                const sortedHighlights = [...winstonHighlights].sort((a, b) => a.start - b.start);
-                                
-                                // Build segments
-                                const segments: Array<{ text: string; highlight?: typeof sortedHighlights[0]; index: number }> = [];
-                                let cursor = 0;
-                                
-                                sortedHighlights.forEach((highlight, i) => {
-                                  // Add text before highlight
-                                  if (highlight.start > cursor) {
-                                    segments.push({ text: userConcept.slice(cursor, highlight.start), index: i * 2 });
+                                // Build source URL → color mapping (10 distinct colors)
+                                const hlColors = [
+                                  { bg: 'bg-yellow-200', border: 'border-yellow-400', badge: 'bg-yellow-500/30 text-yellow-300', dot: 'bg-yellow-400' },
+                                  { bg: 'bg-orange-200', border: 'border-orange-400', badge: 'bg-orange-500/30 text-orange-300', dot: 'bg-orange-400' },
+                                  { bg: 'bg-rose-200', border: 'border-rose-400', badge: 'bg-rose-500/30 text-rose-300', dot: 'bg-rose-400' },
+                                  { bg: 'bg-green-200', border: 'border-green-400', badge: 'bg-green-500/30 text-green-300', dot: 'bg-green-400' },
+                                  { bg: 'bg-purple-200', border: 'border-purple-400', badge: 'bg-purple-500/30 text-purple-300', dot: 'bg-purple-400' },
+                                  { bg: 'bg-teal-200', border: 'border-teal-400', badge: 'bg-teal-500/30 text-teal-300', dot: 'bg-teal-400' },
+                                  { bg: 'bg-indigo-200', border: 'border-indigo-400', badge: 'bg-indigo-500/30 text-indigo-300', dot: 'bg-indigo-400' },
+                                  { bg: 'bg-blue-200', border: 'border-blue-400', badge: 'bg-blue-500/30 text-blue-300', dot: 'bg-blue-400' },
+                                  { bg: 'bg-pink-200', border: 'border-pink-400', badge: 'bg-pink-500/30 text-pink-300', dot: 'bg-pink-400' },
+                                  { bg: 'bg-lime-200', border: 'border-lime-400', badge: 'bg-lime-500/30 text-lime-300', dot: 'bg-lime-400' },
+                                ];
+                                const urlToColorIdx = new Map<string, number>();
+                                let colorIdx = 0;
+                                winstonHighlights.forEach((h: any) => {
+                                  if (h.url && !urlToColorIdx.has(h.url)) {
+                                    urlToColorIdx.set(h.url, colorIdx % hlColors.length);
+                                    colorIdx++;
                                   }
-                                  // Add highlighted text
-                                  segments.push({ 
-                                    text: userConcept.slice(highlight.start, highlight.end), 
-                                    highlight, 
-                                    index: i * 2 + 1 
-                                  });
-                                  cursor = highlight.end;
                                 });
+
+                                // Sort highlights by start position
+                                const sortedHighlights = [...winstonHighlights].sort((a: any, b: any) => a.start - b.start);
                                 
+                                // Build segments using interval-splitting to show different sources
+                                // with different colors, even when highlights overlap
+                                const boundaries = new Set<number>();
+                                sortedHighlights.forEach((h: any) => { boundaries.add(h.start); boundaries.add(h.end); });
+                                const sortedBounds = Array.from(boundaries).sort((a, b) => a - b);
+
+                                type HlSeg = { text: string; highlight?: any; index: number };
+                                const splitSegs: HlSeg[] = [];
+                                for (let bi = 0; bi < sortedBounds.length - 1; bi++) {
+                                  const segS = sortedBounds[bi];
+                                  const segE = sortedBounds[bi + 1];
+                                  // Find all highlights covering this sub-interval
+                                  const covering = sortedHighlights.filter((h: any) => h.start <= segS && h.end >= segE);
+                                  if (covering.length === 0) continue;
+                                  // Pick the narrowest (most specific) span as primary
+                                  covering.sort((a: any, b: any) => (a.end - a.start) - (b.end - b.start));
+                                  splitSegs.push({ text: userConcept.slice(segS, segE), highlight: covering[0], index: bi });
+                                }
+
+                                // Re-merge adjacent segments with same source to avoid visual fragmentation
+                                const segments: HlSeg[] = [];
+                                let cursor = 0;
+                                for (const seg of splitSegs) {
+                                  const segStart = sortedBounds[seg.index];
+                                  // Add gap text before this segment
+                                  if (segStart > cursor) {
+                                    segments.push({ text: userConcept.slice(cursor, segStart), index: segments.length * 2 });
+                                  }
+                                  const prev = segments[segments.length - 1];
+                                  if (prev?.highlight && prev.highlight.url === seg.highlight?.url) {
+                                    prev.text += seg.text; // merge adjacent same-source
+                                  } else {
+                                    segments.push({ text: seg.text, highlight: seg.highlight, index: segments.length * 2 + 1 });
+                                  }
+                                  cursor = sortedBounds[seg.index + 1];
+                                }
                                 // Add remaining text
                                 if (cursor < userConcept.length) {
-                                  segments.push({ text: userConcept.slice(cursor), index: sortedHighlights.length * 2 });
+                                  segments.push({ text: userConcept.slice(cursor), index: segments.length * 2 });
                                 }
+
+                                // Color legend
+                                const legend = Array.from(urlToColorIdx.entries()).map(([url, ci]) => ({
+                                  url,
+                                  title: winstonHighlights.find((h: any) => h.url === url)?.title || url,
+                                  color: hlColors[ci],
+                                }));
                                 
-                                return segments.map((seg) => 
-                                  seg.highlight ? (
-                                    <span
-                                      key={seg.index}
-                                      className="bg-red-200 border-b-2 border-red-400 rounded-sm px-0.5 cursor-pointer relative group/hl inline"
-                                      onClick={() => {
-                                        if (seg.highlight?.url) {
-                                          window.open(seg.highlight.url, '_blank');
-                                        }
-                                      }}
-                                    >
-                                      {seg.text}
-                                      <span className="invisible group-hover/hl:visible absolute z-[100] left-0 top-full mt-1.5 w-80 bg-slate-900 text-white text-xs rounded-xl p-4 shadow-2xl border border-slate-700">
-                                        <span className="flex items-center gap-2 mb-2">
-                                          {seg.highlight.score > 0 && (
-                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/30 text-red-300">
-                                            {Math.round(seg.highlight.score * 10) / 10}% Match
-                                          </span>
-                                          )}
-                                        </span>
-                                        <span className="block text-slate-300 text-[11px] mb-2 leading-relaxed font-semibold">{seg.highlight.title}</span>
-                                        {seg.highlight.url && (
-                                          <a
-                                            href={seg.highlight.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 underline mt-1"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            View Source →
+                                return (
+                                  <>
+                                    {/* Color legend */}
+                                    {legend.length > 0 && (
+                                      <div className="flex flex-wrap gap-2 mb-4 pb-3 border-b border-slate-200">
+                                        {legend.map((item, li) => (
+                                          <a key={li} href={item.url} target="_blank" rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors border border-slate-200 max-w-[280px]">
+                                            <span className={`w-3 h-3 rounded-full shrink-0 ${item.color.dot}`}></span>
+                                            <span className="truncate">{item.title}</span>
                                           </a>
-                                        )}
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    <span key={seg.index}>{seg.text}</span>
-                                  )
+                                        ))}
+                                      </div>
+                                    )}
+                                    {segments.map((seg) => {
+                                      if (!seg.highlight) return <span key={seg.index}>{seg.text}</span>;
+                                      const ci = urlToColorIdx.get(seg.highlight.url) ?? 0;
+                                      const c = hlColors[ci];
+                                      return (
+                                        <span
+                                          key={seg.index}
+                                          className={`${c.bg} border-b-2 ${c.border} rounded-sm px-0.5 inline`}
+                                          title={seg.highlight.title || ''}
+                                        >
+                                          {seg.text}
+                                        </span>
+                                      );
+                                    })}
+                                  </>
                                 );
                               })()}
                             </div>
@@ -2110,48 +2150,110 @@ function AnalysisReportsContent() {
                               <p className="text-xs text-slate-500 mt-1">External sources containing similar content</p>
                             </div>
                             <div className="divide-y divide-slate-100">
-                              {winstonSources.filter((s: any) => s.plagiarismScore > 0).map((source: any, idx: number) => (
-                                <div key={idx} className="p-6 hover:bg-slate-50 transition-colors">
-                                  <div className="flex items-start gap-4">
-                                    <div className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${
-                                      source.plagiarismScore >= 30 ? 'bg-red-100 text-red-600' :
-                                      source.plagiarismScore >= 15 ? 'bg-orange-100 text-orange-600' :
-                                      'bg-amber-100 text-amber-600'
-                                    }`}>
-                                      <AlertTriangle className="w-5 h-5" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-start justify-between gap-3 mb-2">
-                                        <h4 className="text-base font-semibold text-slate-800 line-clamp-2">
-                                          {source.title}
-                                        </h4>
-                                        <span className={`px-3 py-1 rounded-full text-sm font-bold shrink-0 ${
-                                          source.plagiarismScore >= 30 ? 'bg-red-100 text-red-700' :
-                                          source.plagiarismScore >= 15 ? 'bg-orange-100 text-orange-700' :
-                                          'bg-amber-100 text-amber-700'
-                                        }`}>
-                                          {Math.round(source.plagiarismScore * 10) / 10}% Match
+                              {winstonSources.filter((s: any) => s.plagiarismScore > 0).map((source: any, idx: number) => {
+                                // Gather matching sequences for this source from winstonHighlights
+                                const sequences: string[] = [];
+                                // Primary: use source.matchedText (source-specific from Winston API)
+                                if (source.matchedText) {
+                                  sequences.push(source.matchedText);
+                                }
+                                // Secondary: add highlights that match this source URL
+                                winstonHighlights
+                                  .filter((h: any) => h.url === source.url && h.text)
+                                  .forEach((h: any) => {
+                                    // Avoid duplicating text already from matchedText
+                                    const existing = sequences.some(s => s.includes(h.text) || h.text.includes(s));
+                                    if (!existing) sequences.push(h.text);
+                                  });
+                                const pct = Math.round(source.plagiarismScore);
+                                const isExpanded = expandedSourceSeqs.has(idx);
+                                // SVG circular progress ring
+                                const radius = 18;
+                                const circumference = 2 * Math.PI * radius;
+                                const strokeOffset = circumference - (pct / 100) * circumference;
+                                const ringColor = pct >= 50 ? '#ef4444' : pct >= 25 ? '#f97316' : '#eab308';
+
+                                return (
+                                  <div key={idx} className="p-5 hover:bg-slate-50/50 transition-colors">
+                                    {/* Top row: ring + title + URL */}
+                                    <div className="flex items-start gap-4">
+                                      {/* Circular percentage ring */}
+                                      <div className="shrink-0 relative w-12 h-12">
+                                        <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44">
+                                          <circle cx="22" cy="22" r={radius} fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                                          <circle cx="22" cy="22" r={radius} fill="none" stroke={ringColor} strokeWidth="4"
+                                            strokeDasharray={circumference} strokeDashoffset={strokeOffset}
+                                            strokeLinecap="round" />
+                                        </svg>
+                                        <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold" style={{ color: ringColor }}>
+                                          {pct}%
                                         </span>
                                       </div>
-                                      {source.matchedText && (
-                                        <p className="text-sm text-slate-600 mb-3 line-clamp-3 italic">&quot;{source.matchedText}&quot;</p>
-                                      )}
-                                      <a
-                                        href={source.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                                      >
-                                        <Globe className="w-4 h-4" />
-                                        View Source
-                                      </a>
-                                      <div className="mt-3 pt-3 border-t border-slate-100">
-                                        <span className="text-xs text-slate-500 truncate block">{source.url}</span>
+
+                                      <div className="flex-1 min-w-0">
+                                        {/* Title */}
+                                        <h4 className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2">
+                                          {source.title || 'Untitled Source'}
+                                        </h4>
+                                        {/* URL */}
+                                        <a href={source.url} target="_blank" rel="noopener noreferrer"
+                                          className="text-xs text-blue-600 hover:underline truncate block mt-1">
+                                          {source.url}
+                                        </a>
                                       </div>
+
+                                      {/* Match badge */}
+                                      <span className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-bold ${
+                                        pct >= 50 ? 'bg-red-100 text-red-700' :
+                                        pct >= 25 ? 'bg-orange-100 text-orange-700' :
+                                        'bg-amber-100 text-amber-700'
+                                      }`}>
+                                        {pct}% Match
+                                      </span>
                                     </div>
+
+                                    {/* Matching Sequences toggle */}
+                                    {sequences.length > 0 && (
+                                      <div className="mt-3">
+                                        <button
+                                          onClick={() => {
+                                            setExpandedSourceSeqs(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(idx)) next.delete(idx);
+                                              else next.add(idx);
+                                              return next;
+                                            });
+                                          }}
+                                          className="flex items-center justify-between w-full text-left"
+                                        >
+                                          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                            Matching Sequences ({sequences.length})
+                                          </span>
+                                          <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                            isExpanded ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-600'
+                                          }`}>
+                                            {isExpanded ? 'Hide' : 'Show'}
+                                          </span>
+                                        </button>
+
+                                        {isExpanded && (
+                                          <div className="mt-2 space-y-2">
+                                            {sequences.map((seq: string, si: number) => (
+                                              <div key={si} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                                                <p className="text-xs text-slate-700 leading-relaxed">
+                                                  <span className="text-slate-400">... </span>
+                                                  {seq.length > 200 ? seq.slice(0, 200) + ' ...' : seq}
+                                                  {seq.length <= 200 && <span className="text-slate-400"> ...</span>}
+                                                </p>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -2271,7 +2373,7 @@ function AnalysisReportsContent() {
                               <CheckCircle className="w-5 h-5" />
                               <h3 className="text-lg font-bold">No Plagiarism Detected</h3>
                             </div>
-                            <span className="text-[10px] px-2.5 py-1 rounded-full bg-white/20 text-white font-semibold">🤖 Winston AI API</span>
+                          
                           </div>
                         </div>
                         <div className="p-10 text-center">

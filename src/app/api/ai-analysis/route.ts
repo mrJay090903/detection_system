@@ -369,6 +369,15 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
       return null;
     }
 
+    // Log raw API response structure for debugging
+    console.log(`[Winston AI Batch] Raw response keys: ${Object.keys(data).join(', ')}`);
+    console.log(`[Winston AI Batch] Raw indexes: ${Array.isArray(data.indexes) ? data.indexes.length : 'none'}, Raw sources: ${Array.isArray(data.sources) ? data.sources.length : 'none'}`);
+    if (Array.isArray(data.sources) && data.sources.length > 0) {
+      data.sources.forEach((s: any, si: number) => {
+        console.log(`[Winston AI Batch] Source ${si}: "${(s.title || s.name || 'N/A').substring(0, 60)}" score=${s.percentPlagiarized ?? s.score ?? 0}% textMatched=${(s.textMatched || s.matched_text || '').length} chars`);
+      });
+    }
+
     // Extract score
     const resultObj = data.result || {};
     const plagiarismScore: number = 
@@ -391,34 +400,7 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
       score: number;
     }> = [];
 
-    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
-      data.indexes.forEach((index: any, i: number) => {
-        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
-        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
-        const seq = index.sequence ?? index.text ?? index.content ?? null;
-
-        let bestSource: any = null;
-        if (Array.isArray(data.sources) && data.sources.length > 0) {
-          bestSource = data.sources[i % data.sources.length] || data.sources[0];
-        }
-
-        const sourceUrl = bestSource?.url ?? bestSource?.link ?? '';
-        const sourceTitle = bestSource?.title ?? bestSource?.name ?? 'Unknown Source';
-        const sourceScore = bestSource?.percentPlagiarized ?? bestSource?.percent_plagiarized ?? 
-                           bestSource?.score ?? bestSource?.matchScore ?? plagiarismScore;
-
-        highlights.push({
-          start: startIdx + offset, // Adjust position with offset
-          end: endIdx + offset,     // Adjust position with offset
-          text: seq || text.substring(startIdx, endIdx),
-          url: sourceUrl,
-          title: sourceTitle,
-          score: sourceScore,
-        });
-      });
-    }
-
-    // Process sources
+    // Process sources first so we can match them to indexes
     const sources: Array<{
       url: string;
       title: string;
@@ -442,6 +424,86 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
           matched_text: srcText,
         });
       });
+    }
+
+    // Helper: find ALL sources that match a highlight by comparing text content
+    function findMatchingSourcesForText(hlText: string, srcs: typeof sources): typeof sources {
+      if (!hlText || srcs.length === 0) return srcs.length > 0 ? [srcs[0]] : [];
+      const hlLower = hlText.toLowerCase().trim();
+      const hlWords = new Set(hlLower.split(/\s+/).filter(w => w.length > 3));
+      const matched: typeof sources = [];
+      for (const src of srcs) {
+        if (!src.matched_text) {
+          // If source has no matched_text, include it as a fallback candidate
+          matched.push(src);
+          continue;
+        }
+        const srcLower = src.matched_text.toLowerCase().trim();
+        // Check containment
+        if (srcLower.includes(hlLower) || hlLower.includes(srcLower)) {
+          matched.push(src);
+          continue;
+        }
+        // Word-level overlap: require at least 20% overlap
+        const srcWords = srcLower.split(/\s+/).filter(w => w.length > 3);
+        const overlap = srcWords.filter(w => hlWords.has(w)).length;
+        const ratio = hlWords.size > 0 ? overlap / hlWords.size : 0;
+        if (ratio >= 0.2 || overlap >= 3) {
+          matched.push(src);
+        }
+      }
+      // If nothing matched, fall back to first source
+      return matched.length > 0 ? matched : (srcs[0] ? [srcs[0]] : []);
+    }
+
+    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
+      console.log(`[Winston AI Batch] Raw indexes count: ${data.indexes.length}, sources count: ${data.sources?.length || 0}`);
+      data.indexes.forEach((index: any, i: number) => {
+        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
+        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
+        const seq = index.sequence ?? index.text ?? index.content ?? null;
+        const hlText = seq || text.substring(startIdx, endIdx);
+
+        // Create a highlight entry for EACH matching source so each source
+        // gets properly attributed highlights
+        const matchingSources = findMatchingSourcesForText(hlText, sources);
+
+        for (const src of matchingSources) {
+          highlights.push({
+            start: startIdx + offset,
+            end: endIdx + offset,
+            text: hlText,
+            url: src.url || '',
+            title: src.title || 'Unknown Source',
+            score: src.plagiarism_score || plagiarismScore,
+          });
+        }
+      });
+    }
+
+    // Also generate highlights from sources[].matched_text that aren't covered by indexes
+    for (const src of sources) {
+      if (!src.matched_text || src.matched_text.length < 20) continue;
+      const srcTextLower = src.matched_text.toLowerCase().trim();
+      const textLower = text.toLowerCase();
+      const pos = textLower.indexOf(srcTextLower);
+      if (pos === -1) continue;
+      // Check if this region is already covered by an existing highlight
+      const alreadyCovered = highlights.some(h =>
+        (h.start <= pos + offset && h.end >= pos + offset + srcTextLower.length) ||
+        (Math.abs(h.start - (pos + offset)) < 10 && Math.abs(h.end - (pos + offset + srcTextLower.length)) < 10)
+      );
+      if (!alreadyCovered) {
+        highlights.push({
+          start: pos + offset,
+          end: pos + offset + src.matched_text.length,
+          text: text.substring(pos, pos + src.matched_text.length),
+          url: src.url,
+          title: src.title,
+          score: src.plagiarism_score,
+        });
+        console.log(`[Winston AI Batch] Added highlight from source textMatched: "${src.matched_text.substring(0, 60)}..." at ${pos}`);
+      }
     }
 
     console.log(`[Winston AI Batch] ✓ Score: ${plagiarismScore}%, ${highlights.length} highlights, ${sources.length} sources`);
@@ -531,8 +593,8 @@ async function searchWinstonAI(text: string): Promise<WinstonPlagiarismResult | 
         for (const highlight of batchResult.highlights) {
           // Check if this highlight overlaps with existing ones
           const isDuplicate = allHighlights.some(existing => 
-            Math.abs(existing.start - highlight.start) < 50 && 
-            Math.abs(existing.end - highlight.end) < 50
+            Math.abs(existing.start - highlight.start) < 10 && 
+            Math.abs(existing.end - highlight.end) < 10
           );
           
           if (!isDuplicate) {
@@ -681,33 +743,7 @@ async function searchWinstonAILegacy(text: string): Promise<WinstonPlagiarismRes
       score: number;
     }> = [];
 
-    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
-      data.indexes.forEach((index: any, i: number) => {
-        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
-        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
-        const seq = index.sequence ?? index.text ?? index.content ?? null;
-
-        let bestSource: any = null;
-        if (Array.isArray(data.sources) && data.sources.length > 0) {
-          bestSource = data.sources[i % data.sources.length] || data.sources[0];
-        }
-
-        const sourceUrl = bestSource?.url ?? bestSource?.link ?? '';
-        const sourceTitle = bestSource?.title ?? bestSource?.name ?? 'Unknown Source';
-        const sourceScore = bestSource?.percentPlagiarized ?? bestSource?.percent_plagiarized ?? 
-                           bestSource?.score ?? bestSource?.matchScore ?? plagiarismScore;
-
-        highlights.push({
-          start: startIdx,
-          end: endIdx,
-          text: seq || searchText.substring(startIdx, endIdx),
-          url: sourceUrl,
-          title: sourceTitle,
-          score: sourceScore,
-        });
-      });
-    }
-
+    // Process sources first so we can match them to indexes
     const sources: Array<{
       url: string;
       title: string;
@@ -731,6 +767,71 @@ async function searchWinstonAILegacy(text: string): Promise<WinstonPlagiarismRes
           matched_text: srcText,
         });
       });
+    }
+
+    // Helper: find best source for a highlight by comparing text content
+    function findBestSourceLegacy(hlText: string, srcs: typeof sources): typeof sources[0] | null {
+      if (!hlText || srcs.length === 0) return srcs[0] || null;
+      const hlLower = hlText.toLowerCase().trim();
+      let bestMatch: typeof sources[0] | null = null;
+      let bestOverlap = 0;
+      for (const src of srcs) {
+        if (!src.matched_text) continue;
+        const srcLower = src.matched_text.toLowerCase().trim();
+        if (srcLower.includes(hlLower) || hlLower.includes(srcLower)) {
+          const overlap = Math.min(hlLower.length, srcLower.length);
+          if (overlap > bestOverlap) { bestOverlap = overlap; bestMatch = src; }
+        } else {
+          const hlWords = new Set(hlLower.split(/\s+/).filter(w => w.length > 3));
+          const srcWords = srcLower.split(/\s+/).filter(w => w.length > 3);
+          const overlap = srcWords.filter(w => hlWords.has(w)).length;
+          if (overlap > bestOverlap) { bestOverlap = overlap; bestMatch = src; }
+        }
+      }
+      return bestMatch || srcs[0] || null;
+    }
+
+    if (Array.isArray(data.indexes) && data.indexes.length > 0) {
+      data.indexes.forEach((index: any, i: number) => {
+        const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
+        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
+        const seq = index.sequence ?? index.text ?? index.content ?? null;
+        const hlText = seq || searchText.substring(startIdx, endIdx);
+
+        const bestSource = findBestSourceLegacy(hlText, sources);
+
+        highlights.push({
+          start: startIdx,
+          end: endIdx,
+          text: hlText,
+          url: bestSource?.url || '',
+          title: bestSource?.title || 'Unknown Source',
+          score: bestSource?.plagiarism_score || plagiarismScore,
+        });
+      });
+    }
+
+    // Also generate highlights from sources[].matched_text not covered by indexes
+    for (const src of sources) {
+      if (!src.matched_text || src.matched_text.length < 20) continue;
+      const srcTextLower = src.matched_text.toLowerCase().trim();
+      const textLower = searchText.toLowerCase();
+      const pos = textLower.indexOf(srcTextLower);
+      if (pos === -1) continue;
+      const alreadyCovered = highlights.some(h =>
+        (h.start <= pos && h.end >= pos + srcTextLower.length) ||
+        (Math.abs(h.start - pos) < 10 && Math.abs(h.end - (pos + srcTextLower.length)) < 10)
+      );
+      if (!alreadyCovered) {
+        highlights.push({
+          start: pos,
+          end: pos + src.matched_text.length,
+          text: searchText.substring(pos, pos + src.matched_text.length),
+          url: src.url,
+          title: src.title,
+          score: src.plagiarism_score,
+        });
+      }
     }
 
     const result: WinstonPlagiarismResult = {
@@ -876,12 +977,12 @@ const STOP_WORDS = new Set([
 function extractKeyPhrases(title: string, concept: string): string[] {
   const phrases: string[] = [];
 
-  // 1. Always include the full title (cleaned)
+  // Only use the title — Serper requests are title-based only
   const cleanTitle = title.replace(/^bu thematic area:\s*/i, '').trim();
   if (cleanTitle.length >= 10) phrases.push(cleanTitle);
 
-  // 2. Build a pool of tokens from title + first 3000 chars of concept
-  const textPool = `${cleanTitle}. ${concept.substring(0, 3000)}`;
+  // Build token pool from title ONLY
+  const textPool = cleanTitle;
 
   // Tokenise into sentences then words
   const sentences = textPool
@@ -1001,12 +1102,11 @@ async function searchSerpForMatches(
   console.log(`[Serper Match Search] Searching for similar research: "${cleanTitle.substring(0, 80)}"`);
 
   // ── 1. Search multiple queries in parallel to find similar research ──
-  const conceptSnippet = proposedConcept.substring(0, 300).replace(/\n/g, ' ').trim();
+  // Only use the title — no concept text in Serper requests
   const searchQueries = [
     cleanTitle,                                                         // exact title
     `"${cleanTitle}" thesis OR research OR study`,                      // title + academic context
     `${cleanTitle} similar research paper`,                             // broader search
-    `${conceptSnippet.substring(0, 150)} research`,                    // concept-based
   ];
 
   // Run Google + Scholar searches in parallel for all queries
@@ -1626,12 +1726,13 @@ async function performWebSimilarityScan(
   // Sort sources by match%
   sources.sort((a, b) => b.matchPercentage - a.matchPercentage);
 
-  // Merge overlapping global highlights (keep highest confidence)
-  allHighlights.sort((a, b) => a.start - b.start || b.confidence - a.confidence);
+  // Merge overlapping highlights ONLY within the same source URL
+  // This preserves per-source attribution so the frontend can assign different colors.
+  allHighlights.sort((a, b) => a.sourceUrl.localeCompare(b.sourceUrl) || a.start - b.start || b.confidence - a.confidence);
   const merged: WebHighlightSpan[] = [];
   for (const h of allHighlights) {
     const prev = merged[merged.length - 1];
-    if (prev && h.start < prev.end) {
+    if (prev && prev.sourceUrl === h.sourceUrl && h.start < prev.end) {
       if (h.end > prev.end) prev.end = h.end;
       if (h.confidence > prev.confidence) {
         prev.matchType = h.matchType;
@@ -1640,8 +1741,15 @@ async function performWebSimilarityScan(
       }
     } else merged.push({ ...h });
   }
+  // Re-sort by position for the frontend
+  merged.sort((a, b) => a.start - b.start || b.confidence - a.confidence);
 
-  const totalChars = merged.reduce((s, h) => s + (h.end - h.start), 0);
+  // Calculate overall similarity from deduplicated character coverage
+  const charCoverage = new Uint8Array(proposedLen);
+  for (const h of merged) {
+    for (let i = h.start; i < h.end && i < proposedLen; i++) charCoverage[i] = 1;
+  }
+  const totalChars = charCoverage.reduce((s, v) => s + v, 0);
   const overall    = proposedLen > 0 ? Math.min(Math.round((totalChars / proposedLen) * 100), 100) : 0;
   const scanned    = pageTexts.filter(p => p.text.length >= 100).length;
 

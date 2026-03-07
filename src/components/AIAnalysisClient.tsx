@@ -26,6 +26,11 @@ type HlSpan = {
   color: HlColor;
   /** The actual sentence from the source page that matched this span */
   matchedSourceText?: string;
+  /** Additional sources that also match this text region (for overlapping highlights) */
+  additionalSources?: Array<{
+    matchType: string; source: string; url: string;
+    color: HlColor; matchedSourceText?: string;
+  }>;
 };
 type TextSegment =
   | { text: string; highlighted: false }
@@ -196,15 +201,17 @@ function getHighlightedSegments(
       const needle = (ms.proposedText || '').trim();
       if (needle.length < 10 || coveredNeedles.has(needle)) continue;
       coveredNeedles.add(needle);
-      // Check if this text region is already covered by an existing span
+      // Check if this text region is already covered by a span from the SAME source
       const found = fuzzyFindInText(text, needle);
       if (!found) continue;
-      const alreadyCovered = spans.some(
-        s => (found.start >= s.start && found.start < s.end) ||
-             (found.end > s.start && found.end <= s.end) ||
-             (found.start <= s.start && found.end >= s.end)
+      const alreadyCoveredBySameSource = spans.some(
+        s => s.url === src.url && (
+          (found.start >= s.start && found.start < s.end) ||
+          (found.end > s.start && found.end <= s.end) ||
+          (found.start <= s.start && found.end >= s.end)
+        )
       );
-      if (alreadyCovered) continue;
+      if (alreadyCoveredBySameSource) continue;
       addWebSpan(found.start, found.end, {
         matchType: ms.matchType,
         sourceUrl: src.url,
@@ -220,13 +227,15 @@ function getHighlightedSegments(
     if (needle.length < 10) continue;
     const found = fuzzyFindInText(text, needle);
     if (!found) continue;
-    const alreadyCovered = spans.some(
-      s => (found.start >= s.start && found.start < s.end) ||
-           (found.end > s.start && found.end <= s.end) ||
-           (found.start <= s.start && found.end >= s.end)
-    );
-    if (alreadyCovered) continue;
     const hlUrl = (h.sourceUrl && h.sourceUrl !== 'N/A' ? h.sourceUrl : '') || h.serpResults?.[0]?.link || '';
+    const alreadyCoveredBySameSource = spans.some(
+      s => s.url === hlUrl && (
+        (found.start >= s.start && found.start < s.end) ||
+        (found.end > s.start && found.end <= s.end) ||
+        (found.start <= s.start && found.end >= s.end)
+      )
+    );
+    if (alreadyCoveredBySameSource) continue;
     spans.push({
       start: found.start, end: found.end,
       matchType: h.matchType || 'Unknown',
@@ -243,38 +252,76 @@ function getHighlightedSegments(
     if (needle.length < 8) continue;
     const found = fuzzyFindInText(text, needle);
     if (!found) continue;
-    const covered = spans.some(
-      s => (found.start >= s.start && found.start < s.end) ||
-           (found.end > s.start && found.end <= s.end) ||
-           (found.start <= s.start && found.end >= s.end)
+    const phUrl = ph.bestUrl || '';
+    const coveredBySameSource = spans.some(
+      s => s.url === phUrl && (
+        (found.start >= s.start && found.start < s.end) ||
+        (found.end > s.start && found.end <= s.end) ||
+        (found.start <= s.start && found.end >= s.end)
+      )
     );
-    if (covered) continue;
+    if (coveredBySameSource) continue;
     spans.push({
       start: found.start, end: found.end,
-      matchType: 'Phrase Match', source: ph.bestSource || '', url: ph.bestUrl || '',
-      color: sourceUrlToColor.get(ph.bestUrl || '') || 'blue',
+      matchType: 'Phrase Match', source: ph.bestSource || '', url: phUrl,
+      color: sourceUrlToColor.get(phUrl) || 'blue',
     });
   }
 
   if (spans.length === 0) return [{ text, highlighted: false }];
 
-  // Sort & merge overlapping spans (keep first source's color for overlapping regions)
+  // ── Interval-splitting merge: preserves per-source colors ──
+  // Instead of merging overlapping spans into one (losing source info),
+  // split at all boundary points so each sub-segment keeps its source color.
   spans.sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // Collect all unique boundary points
+  const boundaries = new Set<number>();
+  for (const s of spans) { boundaries.add(s.start); boundaries.add(s.end); }
+  const sortedBounds = Array.from(boundaries).sort((a, b) => a - b);
+
   const merged: HlSpan[] = [];
-  for (const s of spans) {
-    const prev = merged[merged.length - 1];
-    if (prev && s.start < prev.end) {
-      // Overlapping spans - expand the region but keep first source's color
-      if (s.end > prev.end) prev.end = s.end;
-      // Keep the first source's information (don't override)
+  for (let i = 0; i < sortedBounds.length - 1; i++) {
+    const segStart = sortedBounds[i];
+    const segEnd = sortedBounds[i + 1];
+    // Find all original spans that cover this sub-interval
+    const covering = spans.filter(s => s.start <= segStart && s.end >= segEnd);
+    if (covering.length === 0) continue;
+    // Pick the most specific (narrowest) span as primary — this ensures
+    // a source-specific match shows its own color instead of being hidden
+    // behind a larger span from a different source.
+    covering.sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    const primary = covering[0];
+    const segment: HlSpan = {
+      start: segStart, end: segEnd,
+      matchType: primary.matchType, source: primary.source,
+      url: primary.url, color: primary.color,
+      matchedSourceText: primary.matchedSourceText,
+    };
+    if (covering.length > 1) {
+      segment.additionalSources = covering.slice(1).map(s => ({
+        matchType: s.matchType, source: s.source,
+        url: s.url, color: s.color, matchedSourceText: s.matchedSourceText,
+      }));
+    }
+    merged.push(segment);
+  }
+
+  // Re-merge adjacent sub-segments that share the same primary source to avoid fragmentation
+  const consolidated: HlSpan[] = [];
+  for (const seg of merged) {
+    const prev = consolidated[consolidated.length - 1];
+    if (prev && prev.end === seg.start && prev.url === seg.url && prev.color === seg.color
+        && JSON.stringify(prev.additionalSources || []) === JSON.stringify(seg.additionalSources || [])) {
+      prev.end = seg.end; // extend
     } else {
-      merged.push({ ...s });
+      consolidated.push({ ...seg });
     }
   }
 
   const result: TextSegment[] = [];
   let pos = 0;
-  for (const span of merged) {
+  for (const span of consolidated) {
     if (span.start > pos) result.push({ text: text.slice(pos, span.start), highlighted: false });
     result.push({ text: text.slice(span.start, span.end), highlighted: true, span });
     pos = span.end;
@@ -318,6 +365,7 @@ export default function AIAnalysisClient() {
   const [proposedText, setProposedText] = useState<string>('')
   const [selectedSpanIdx, setSelectedSpanIdx] = useState<number | null>(null)
   const [webScan, setWebScan] = useState<any>(null)
+  const [expandedSourceSeqs, setExpandedSourceSeqs] = useState<Set<number>>(new Set())
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -1508,28 +1556,31 @@ export default function AIAnalysisClient() {
                           {(() => {
                             // Extract unique sources with their colors from segments
                             const sourceMap = new Map<string, { label: string; color: string; url: string }>();
+                            const colorMap: Record<string, string> = {
+                              'yellow': 'bg-yellow-200 text-yellow-800',
+                              'orange': 'bg-orange-200 text-orange-800',
+                              'rose': 'bg-rose-200 text-rose-800',
+                              'blue': 'bg-blue-100 text-blue-700',
+                              'green': 'bg-green-200 text-green-800',
+                              'purple': 'bg-purple-200 text-purple-800',
+                              'teal': 'bg-teal-200 text-teal-800',
+                              'indigo': 'bg-indigo-200 text-indigo-800',
+                              'pink': 'bg-pink-200 text-pink-800',
+                              'lime': 'bg-lime-200 text-lime-800',
+                            };
+                            const addToMap = (url: string, source: string, color: string) => {
+                              if (url && !sourceMap.has(url)) {
+                                let label = source;
+                                if (!label) { try { label = new URL(url).hostname; } catch { label = url; } }
+                                sourceMap.set(url, { label, color: colorMap[color] || colorMap.blue, url });
+                              }
+                            };
                             segments.forEach(seg => {
                               if (seg.highlighted) {
                                 const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
-                                if (sp.url && !sourceMap.has(sp.url)) {
-                                  const colorMap = {
-                                    'yellow': 'bg-yellow-200 text-yellow-800',
-                                    'orange': 'bg-orange-200 text-orange-800',
-                                    'rose': 'bg-rose-200 text-rose-800',
-                                    'blue': 'bg-blue-100 text-blue-700',
-                                    'green': 'bg-green-200 text-green-800',
-                                    'purple': 'bg-purple-200 text-purple-800',
-                                    'teal': 'bg-teal-200 text-teal-800',
-                                    'indigo': 'bg-indigo-200 text-indigo-800',
-                                    'pink': 'bg-pink-200 text-pink-800',
-                                    'lime': 'bg-lime-200 text-lime-800',
-                                  };
-                                  sourceMap.set(sp.url, {
-                                    label: sp.source || new URL(sp.url).hostname,
-                                    color: colorMap[sp.color as keyof typeof colorMap] || colorMap.blue,
-                                    url: sp.url
-                                  });
-                                }
+                                addToMap(sp.url, sp.source, sp.color);
+                                // Also register additional sources from overlapping highlights
+                                sp.additionalSources?.forEach(as => addToMap(as.url, as.source, as.color));
                               }
                             });
                             return Array.from(sourceMap.values()).map((src, idx) => (
@@ -1550,47 +1601,13 @@ export default function AIAnalysisClient() {
                           {segments.map((seg, si) => {
                             if (!seg.highlighted) return <span key={si}>{seg.text}</span>;
                             const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
-                            const isOpen = selectedSpanIdx === si;
                             return (
-                              <span key={si} className="relative inline">
-                                <button
-                                  onClick={() => setSelectedSpanIdx(isOpen ? null : si)}
-                                  className={`${bgClass(sp.color)} rounded px-0.5 cursor-pointer hover:brightness-90 transition-all ${isOpen ? 'ring-2 ring-offset-1 ring-purple-500' : ''}`}
-                                  title={`${sp.matchType} — click for source`}
-                                >
-                                  {seg.text}
-                                </button>
-                                {isOpen && (
-                                  <span className="absolute top-full left-0 z-30 mt-1.5 w-[26rem] bg-white border border-gray-200 rounded-xl shadow-xl p-3 text-left text-xs text-gray-700 block">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <div className="flex items-center gap-2">
-                                        <span className={`font-bold text-[10px] px-1.5 py-0.5 rounded ${badgeClass(sp.color)}`}>{sp.matchType}</span>
-                                        <span className={`w-3 h-3 rounded-full ${bgClass(sp.color)} border border-gray-300`} title="Source color indicator"></span>
-                                      </div>
-                                      <button onClick={(e) => { e.stopPropagation(); setSelectedSpanIdx(null); }} className="text-gray-400 hover:text-gray-600 font-bold text-base leading-none">✕</button>
-                                    </div>
-                                    {/* Side-by-side comparison */}
-                                    <div className="grid grid-cols-2 gap-2 mb-2">
-                                      <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-2">
-                                        <div className="text-[9px] font-bold text-yellow-700 uppercase tracking-wider mb-1">Your Research</div>
-                                        <p className="text-[11px] text-gray-800 leading-snug line-clamp-4">{seg.text}</p>
-                                      </div>
-                                      <div className="rounded-lg bg-red-50 border border-red-200 p-2">
-                                        <div className="text-[9px] font-bold text-red-700 uppercase tracking-wider mb-1">Matched in Source</div>
-                                        <p className="text-[11px] text-gray-800 leading-snug line-clamp-4">
-                                          {sp.matchedSourceText ? sp.matchedSourceText : <span className="italic text-gray-400">See source page</span>}
-                                        </p>
-                                      </div>
-                                    </div>
-
-                                    {sp.url ? (
-                                      <a href={sp.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium text-[11px]">
-                                        View on internet
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                      </a>
-                                    ) : <p className="text-gray-400 italic text-[10px]">No URL available</p>}
-                                  </span>
-                                )}
+                              <span
+                                key={si}
+                                className={`${bgClass(sp.color)} rounded px-0.5`}
+                                title={sp.matchType}
+                              >
+                                {seg.text}
                               </span>
                             );
                           })}
@@ -1625,67 +1642,128 @@ export default function AIAnalysisClient() {
                               Source Breakdown ({sources.length} source{sources.length !== 1 ? 's' : ''})
                             </div>
                             <div className="space-y-2">
-                              {sources.map((src: any, si: number) => (
-                                <div key={si} className="rounded-xl border bg-gray-50 p-3">
-                                  <div className="flex items-center justify-between gap-3 mb-2">
-                                    <a href={src.url} target="_blank" rel="noopener noreferrer"
-                                       className="text-xs font-semibold text-blue-700 hover:underline line-clamp-1 flex-1">
-                                      {src.title || src.url}
-                                    </a>
-                                    <span className={`shrink-0 text-sm font-extrabold ${
-                                      src.matchPercentage >= 51 ? 'text-red-600' :
-                                      src.matchPercentage >= 26 ? 'text-orange-500' :
-                                      src.matchPercentage >= 11 ? 'text-amber-500' : 'text-emerald-600'
-                                    }`}>{src.matchPercentage}%</span>
-                                  </div>
-                                  <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden mb-2">
-                                    <div className={`h-full rounded-full ${
-                                      src.matchPercentage >= 51 ? 'bg-red-500' :
-                                      src.matchPercentage >= 26 ? 'bg-orange-400' :
-                                      src.matchPercentage >= 11 ? 'bg-yellow-400' : 'bg-emerald-400'
-                                    }`} style={{ width: `${src.matchPercentage}%` }} />
-                                  </div>
-                                  <div className="text-[10px] text-gray-500 flex items-center gap-3">
-                                    <span>{src.highlights?.length ?? 0} matched passage{(src.highlights?.length ?? 0) !== 1 ? 's' : ''}</span>
-                                    <a href={src.url} target="_blank" rel="noopener noreferrer"
-                                       className="ml-auto text-blue-500 hover:underline truncate max-w-[200px]">{src.url}</a>
-                                  </div>
-                                  {src.matchedSentences?.length > 0 && (
-                                    <div className="mt-2 space-y-2">
-                                      {src.matchedSentences.slice(0, 4).map((pair: any, mi: number) => (
-                                        <div key={mi} className="rounded-lg border overflow-hidden">
-                                          <div className="grid grid-cols-2 divide-x text-[10px]">
-                                            <div className="bg-yellow-50 p-2">
-                                              <div className="font-bold text-yellow-700 text-[9px] uppercase tracking-wider mb-1">Your Research</div>
-                                              <p className="text-gray-800 leading-snug line-clamp-3 italic">&ldquo;{typeof pair === 'string' ? pair : pair.proposedText}&rdquo;</p>
-                                            </div>
-                                            <div className="bg-red-50 p-2">
-                                              <div className="font-bold text-red-700 text-[9px] uppercase tracking-wider mb-1 flex items-center justify-between">
-                                                <span>Matched Source</span>
-                                                {typeof pair !== 'string' && (
-                                                  <span className={`px-1 rounded text-[8px] font-bold ${
-                                                    pair.matchType === 'exact' ? 'bg-yellow-200 text-yellow-800' :
-                                                    pair.matchType === 'near' ? 'bg-orange-200 text-orange-800' :
-                                                    'bg-rose-200 text-rose-700'
-                                                  }`}>{pair.confidence}%</span>
-                                                )}
-                                              </div>
-                                              <p className="text-gray-800 leading-snug line-clamp-3 italic">
-                                                {typeof pair === 'string'
-                                                  ? <span className="text-gray-400">See source page</span>
-                                                  : pair.sourceText
-                                                  ? <>&ldquo;{pair.sourceText}&rdquo;</>  
-                                                  : <span className="text-gray-400 not-italic">See source page</span>
-                                                }
-                                              </p>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ))}
+                              {sources.map((src: any, si: number) => {
+                                // Gather matching sequences for this source
+                                const sequences: string[] = [];
+                                // Primary: use src.matchedSentences (source-specific from backend)
+                                if (src.matchedSentences?.length > 0) {
+                                  for (const ms of src.matchedSentences.slice(0, 5)) {
+                                    const txt = typeof ms === 'string' ? ms : ms.proposedText || ms.sourceText || '';
+                                    if (txt && !sequences.some(s => s.includes(txt) || txt.includes(s))) {
+                                      sequences.push(txt);
+                                    }
+                                  }
+                                }
+                                // Secondary: from highlighted segments matching this source
+                                if (sequences.length === 0) {
+                                  segments.forEach(seg => {
+                                    if (!seg.highlighted) return;
+                                    const sp = (seg as { text: string; highlighted: true; span: HlSpan }).span;
+                                    if (sp.url === src.url) {
+                                      sequences.push(seg.text);
+                                    } else {
+                                      const extra = sp.additionalSources?.find(a => a.url === src.url);
+                                      if (extra) sequences.push(seg.text);
+                                    }
+                                  });
+                                }
+                                // Merge consecutive short fragments into one passage
+                                const merged: string[] = [];
+                                for (const s of sequences) {
+                                  const prev = merged[merged.length - 1];
+                                  if (prev && prev.length < 80 && s.length < 80) {
+                                    merged[merged.length - 1] = prev + s;
+                                  } else {
+                                    merged.push(s);
+                                  }
+                                }
+                                // Deduplicate
+                                const unique = Array.from(new Set(merged)).filter(Boolean);
+
+                                const pct = src.matchPercentage ?? 0;
+                                const isExpanded = expandedSourceSeqs.has(si);
+                                const radius = 18;
+                                const circumference = 2 * Math.PI * radius;
+                                const strokeOffset = circumference - (pct / 100) * circumference;
+                                const ringColor = pct >= 50 ? '#ef4444' : pct >= 25 ? '#f97316' : '#eab308';
+
+                                return (
+                                  <div key={si} className="rounded-xl border bg-gray-50 p-3">
+                                    <div className="flex items-start gap-3">
+                                      {/* Circular percentage ring */}
+                                      <div className="shrink-0 relative w-11 h-11">
+                                        <svg className="w-11 h-11 -rotate-90" viewBox="0 0 44 44">
+                                          <circle cx="22" cy="22" r={radius} fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                                          <circle cx="22" cy="22" r={radius} fill="none" stroke={ringColor} strokeWidth="4"
+                                            strokeDasharray={circumference} strokeDashoffset={strokeOffset}
+                                            strokeLinecap="round" />
+                                        </svg>
+                                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold" style={{ color: ringColor }}>
+                                          {pct}%
+                                        </span>
+                                      </div>
+
+                                      <div className="flex-1 min-w-0">
+                                        <h4 className="text-xs font-semibold text-slate-800 leading-snug line-clamp-2">
+                                          {src.title || src.url}
+                                        </h4>
+                                        <a href={src.url} target="_blank" rel="noopener noreferrer"
+                                          className="text-[10px] text-blue-600 hover:underline truncate block mt-0.5">
+                                          {src.url}
+                                        </a>
+                                      </div>
+
+                                      <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        pct >= 50 ? 'bg-red-100 text-red-700' :
+                                        pct >= 25 ? 'bg-orange-100 text-orange-700' :
+                                        'bg-amber-100 text-amber-700'
+                                      }`}>
+                                        {pct}% Match
+                                      </span>
                                     </div>
-                                  )}
-                                </div>
-                              ))}
+
+                                    {/* Matching Sequences toggle */}
+                                    {unique.length > 0 && (
+                                      <div className="mt-2">
+                                        <button
+                                          onClick={() => {
+                                            setExpandedSourceSeqs(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(si)) next.delete(si);
+                                              else next.add(si);
+                                              return next;
+                                            });
+                                          }}
+                                          className="flex items-center justify-between w-full text-left"
+                                        >
+                                          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                            Matching Sequences ({unique.length})
+                                          </span>
+                                          <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full ${
+                                            isExpanded ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'
+                                          }`}>
+                                            {isExpanded ? 'Hide' : 'Show'}
+                                          </span>
+                                        </button>
+
+                                        {isExpanded && (
+                                          <div className="mt-1.5 space-y-1.5">
+                                            {unique.slice(0, 5).map((seq: string, mi: number) => (
+                                              <div key={mi} className="bg-white border border-gray-200 rounded-lg px-2.5 py-2">
+                                                <p className="text-[11px] text-gray-700 leading-relaxed">
+                                                  <span className="text-gray-400">... </span>
+                                                  {seq.length > 200 ? seq.slice(0, 200) + ' ...' : seq}
+                                                  {seq.length <= 200 && <span className="text-gray-400"> ...</span>}
+                                                </p>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
