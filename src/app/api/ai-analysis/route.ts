@@ -2141,7 +2141,7 @@ const prompt = [
     // -------------------------
 const modelPriority = [
   // 1️⃣ Primary (Gemini – fast & lowest cost)
-    { provider: "openai", model: "" },
+    { provider: "openai", model: "gpt-5.2" },
   { provider: "google", model: "gemini-2.5-flash" },
 
   // 2️⃣ Free / low-cost fallback
