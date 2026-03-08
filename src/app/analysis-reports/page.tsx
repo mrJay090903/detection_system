@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState, useEffect, Suspense, useMemo, useCallback } from "react"
+import { useState, useEffect, Suspense, useMemo, useCallback, useRef } from "react"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { 
@@ -53,7 +53,6 @@ function AnalysisReportsContent() {
   const [copyscapeSummary, setCopyscapeSummary] = useState<any>(null)
   const [error, setError] = useState<{ message: string; details?: string; isQuotaError?: boolean; retryAfter?: number } | null>(null)
   const [retryCount, setRetryCount] = useState(0)
-  const [expandedSourceSeqs, setExpandedSourceSeqs] = useState<Set<number>>(new Set())
 
   const lexicalSimilarity = parseFloat(searchParams.get('lexicalSimilarity') || '0')
   const semanticSimilarity = parseFloat(searchParams.get('semanticSimilarity') || '0')
@@ -2029,115 +2028,14 @@ function AnalysisReportsContent() {
                             </div>
                           </div>
                           <div className="p-6 max-h-[600px] overflow-y-auto">
-                            <div className="text-sm leading-relaxed text-slate-800 whitespace-pre-wrap font-[system-ui]">
-                              {(() => {
-                                if (!userConcept) return <span className="text-slate-400 italic">No text available</span>;
-                                
-                                // Build source URL → color mapping (10 distinct colors)
-                                const hlColors = [
-                                  { bg: 'bg-yellow-200', border: 'border-yellow-400', badge: 'bg-yellow-500/30 text-yellow-300', dot: 'bg-yellow-400' },
-                                  { bg: 'bg-orange-200', border: 'border-orange-400', badge: 'bg-orange-500/30 text-orange-300', dot: 'bg-orange-400' },
-                                  { bg: 'bg-rose-200', border: 'border-rose-400', badge: 'bg-rose-500/30 text-rose-300', dot: 'bg-rose-400' },
-                                  { bg: 'bg-green-200', border: 'border-green-400', badge: 'bg-green-500/30 text-green-300', dot: 'bg-green-400' },
-                                  { bg: 'bg-purple-200', border: 'border-purple-400', badge: 'bg-purple-500/30 text-purple-300', dot: 'bg-purple-400' },
-                                  { bg: 'bg-teal-200', border: 'border-teal-400', badge: 'bg-teal-500/30 text-teal-300', dot: 'bg-teal-400' },
-                                  { bg: 'bg-indigo-200', border: 'border-indigo-400', badge: 'bg-indigo-500/30 text-indigo-300', dot: 'bg-indigo-400' },
-                                  { bg: 'bg-blue-200', border: 'border-blue-400', badge: 'bg-blue-500/30 text-blue-300', dot: 'bg-blue-400' },
-                                  { bg: 'bg-pink-200', border: 'border-pink-400', badge: 'bg-pink-500/30 text-pink-300', dot: 'bg-pink-400' },
-                                  { bg: 'bg-lime-200', border: 'border-lime-400', badge: 'bg-lime-500/30 text-lime-300', dot: 'bg-lime-400' },
-                                ];
-                                const urlToColorIdx = new Map<string, number>();
-                                let colorIdx = 0;
-                                winstonHighlights.forEach((h: any) => {
-                                  if (h.url && !urlToColorIdx.has(h.url)) {
-                                    urlToColorIdx.set(h.url, colorIdx % hlColors.length);
-                                    colorIdx++;
-                                  }
-                                });
-
-                                // Sort highlights by start position
-                                const sortedHighlights = [...winstonHighlights].sort((a: any, b: any) => a.start - b.start);
-                                
-                                // Build segments using interval-splitting to show different sources
-                                // with different colors, even when highlights overlap
-                                const boundaries = new Set<number>();
-                                sortedHighlights.forEach((h: any) => { boundaries.add(h.start); boundaries.add(h.end); });
-                                const sortedBounds = Array.from(boundaries).sort((a, b) => a - b);
-
-                                type HlSeg = { text: string; highlight?: any; index: number };
-                                const splitSegs: HlSeg[] = [];
-                                for (let bi = 0; bi < sortedBounds.length - 1; bi++) {
-                                  const segS = sortedBounds[bi];
-                                  const segE = sortedBounds[bi + 1];
-                                  // Find all highlights covering this sub-interval
-                                  const covering = sortedHighlights.filter((h: any) => h.start <= segS && h.end >= segE);
-                                  if (covering.length === 0) continue;
-                                  // Pick the narrowest (most specific) span as primary
-                                  covering.sort((a: any, b: any) => (a.end - a.start) - (b.end - b.start));
-                                  splitSegs.push({ text: userConcept.slice(segS, segE), highlight: covering[0], index: bi });
-                                }
-
-                                // Re-merge adjacent segments with same source to avoid visual fragmentation
-                                const segments: HlSeg[] = [];
-                                let cursor = 0;
-                                for (const seg of splitSegs) {
-                                  const segStart = sortedBounds[seg.index];
-                                  // Add gap text before this segment
-                                  if (segStart > cursor) {
-                                    segments.push({ text: userConcept.slice(cursor, segStart), index: segments.length * 2 });
-                                  }
-                                  const prev = segments[segments.length - 1];
-                                  if (prev?.highlight && prev.highlight.url === seg.highlight?.url) {
-                                    prev.text += seg.text; // merge adjacent same-source
-                                  } else {
-                                    segments.push({ text: seg.text, highlight: seg.highlight, index: segments.length * 2 + 1 });
-                                  }
-                                  cursor = sortedBounds[seg.index + 1];
-                                }
-                                // Add remaining text
-                                if (cursor < userConcept.length) {
-                                  segments.push({ text: userConcept.slice(cursor), index: segments.length * 2 });
-                                }
-
-                                // Color legend
-                                const legend = Array.from(urlToColorIdx.entries()).map(([url, ci]) => ({
-                                  url,
-                                  title: winstonHighlights.find((h: any) => h.url === url)?.title || url,
-                                  color: hlColors[ci],
-                                }));
-                                
-                                return (
-                                  <>
-                                    {/* Color legend */}
-                                    {legend.length > 0 && (
-                                      <div className="flex flex-wrap gap-2 mb-4 pb-3 border-b border-slate-200">
-                                        {legend.map((item, li) => (
-                                          <a key={li} href={item.url} target="_blank" rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors border border-slate-200 max-w-[280px]">
-                                            <span className={`w-3 h-3 rounded-full shrink-0 ${item.color.dot}`}></span>
-                                            <span className="truncate">{item.title}</span>
-                                          </a>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {segments.map((seg) => {
-                                      if (!seg.highlight) return <span key={seg.index}>{seg.text}</span>;
-                                      const ci = urlToColorIdx.get(seg.highlight.url) ?? 0;
-                                      const c = hlColors[ci];
-                                      return (
-                                        <span
-                                          key={seg.index}
-                                          className={`${c.bg} border-b-2 ${c.border} rounded-sm px-0.5 inline`}
-                                          title={seg.highlight.title || ''}
-                                        >
-                                          {seg.text}
-                                        </span>
-                                      );
-                                    })}
-                                  </>
-                                );
-                              })()}
-                            </div>
+                            {userConcept
+                              ? <WinstonHighlighter
+                                  text={userConcept}
+                                  highlights={winstonHighlights}
+                                  sources={winstonSources}
+                                />
+                              : <span className="text-slate-400 italic text-sm">No text available</span>
+                            }
                           </div>
                         </div>
                         )}
@@ -2151,34 +2049,14 @@ function AnalysisReportsContent() {
                             </div>
                             <div className="divide-y divide-slate-100">
                               {winstonSources.filter((s: any) => s.plagiarismScore > 0).map((source: any, idx: number) => {
-                                // Gather matching sequences for this source from winstonHighlights
-                                const sequences: string[] = [];
-                                // Primary: use source.matchedText (source-specific from Winston API)
-                                if (source.matchedText) {
-                                  sequences.push(source.matchedText);
-                                }
-                                // Secondary: add highlights that match this source URL
-                                winstonHighlights
-                                  .filter((h: any) => h.url === source.url && h.text)
-                                  .forEach((h: any) => {
-                                    // Avoid duplicating text already from matchedText
-                                    const existing = sequences.some(s => s.includes(h.text) || h.text.includes(s));
-                                    if (!existing) sequences.push(h.text);
-                                  });
-                                // Tertiary: fall back to any winstonHighlights when no URL-specific
-                                // highlights exist for this source (deduplication may have dropped them)
-                                if (sequences.length === 0 && winstonHighlights.length > 0) {
-                                  winstonHighlights
-                                    .filter((h: any) => h.text && h.text.trim().length > 15)
-                                    .slice(0, 5)
-                                    .forEach((h: any) => {
-                                      if (!sequences.some(s => s.includes(h.text) || h.text.includes(s))) {
-                                        sequences.push(h.text);
-                                      }
-                                    });
-                                }
+                                // Determine the highlight color for this source (same ordering as the highlighted-text section)
+                                const hlDotColors = ['bg-yellow-400','bg-orange-400','bg-rose-400','bg-green-400','bg-purple-400','bg-teal-400','bg-indigo-400','bg-blue-400','bg-pink-400','bg-lime-400'];
+                                const uniqueUrlsForColor: string[] = [];
+                                winstonSources.forEach((s: any) => { if (s.url && !uniqueUrlsForColor.includes(s.url)) uniqueUrlsForColor.push(s.url); });
+                                winstonHighlights.forEach((h: any) => { if (h.url && !uniqueUrlsForColor.includes(h.url)) uniqueUrlsForColor.push(h.url); });
+                                const srcColorIdx = source.url ? Math.max(0, uniqueUrlsForColor.indexOf(source.url)) % hlDotColors.length : 0;
+                                const dotColor = hlDotColors[srcColorIdx];
                                 const pct = Math.round(source.plagiarismScore);
-                                const isExpanded = expandedSourceSeqs.has(idx);
                                 // SVG circular progress ring
                                 const radius = 18;
                                 const circumference = 2 * Math.PI * radius;
@@ -2203,8 +2081,9 @@ function AnalysisReportsContent() {
                                       </div>
 
                                       <div className="flex-1 min-w-0">
-                                        {/* Title */}
-                                        <h4 className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2">
+                                        {/* Title with highlight-color indicator */}
+                                        <h4 className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2 flex items-center gap-1.5">
+                                          <span className={`w-3 h-3 rounded-full shrink-0 ${dotColor}`}></span>
                                           {source.title || 'Untitled Source'}
                                         </h4>
                                         {/* URL */}
@@ -2224,45 +2103,6 @@ function AnalysisReportsContent() {
                                       </span>
                                     </div>
 
-                                    {/* Matching Sequences toggle */}
-                                    {sequences.length > 0 && (
-                                      <div className="mt-3">
-                                        <button
-                                          onClick={() => {
-                                            setExpandedSourceSeqs(prev => {
-                                              const next = new Set(prev);
-                                              if (next.has(idx)) next.delete(idx);
-                                              else next.add(idx);
-                                              return next;
-                                            });
-                                          }}
-                                          className="flex items-center justify-between w-full text-left"
-                                        >
-                                          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                                            Matching Sequences ({sequences.length})
-                                          </span>
-                                          <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
-                                            isExpanded ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-600'
-                                          }`}>
-                                            {isExpanded ? 'Hide' : 'Show'}
-                                          </span>
-                                        </button>
-
-                                        {isExpanded && (
-                                          <div className="mt-2 space-y-2">
-                                            {sequences.map((seq: string, si: number) => (
-                                              <div key={si} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
-                                                <p className="text-xs text-slate-700 leading-relaxed">
-                                                  <span className="text-slate-400">... </span>
-                                                  {seq.length > 200 ? seq.slice(0, 200) + ' ...' : seq}
-                                                  {seq.length <= 200 && <span className="text-slate-400"> ...</span>}
-                                                </p>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
                                   </div>
                                 );
                               })}
@@ -2554,6 +2394,130 @@ function AnalysisReportsContent() {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// WinstonHighlighter — mark.js powered, per-source color highlighting
+// ---------------------------------------------------------------------------
+const HL_CSS_COLORS  = ['#fef08a','#fed7aa','#fecdd3','#bbf7d0','#e9d5ff','#99f6e4','#c7d2fe','#bfdbfe','#fbcfe8','#d9f99d'];
+const HL_BORDER_HEX  = ['#facc15','#fb923c','#fb7185','#4ade80','#c084fc','#2dd4bf','#818cf8','#60a5fa','#f472b6','#a3e635'];
+const HL_DOT_TW      = ['bg-yellow-400','bg-orange-400','bg-rose-400','bg-green-400','bg-purple-400','bg-teal-400','bg-indigo-400','bg-blue-400','bg-pink-400','bg-lime-400'];
+
+function WinstonHighlighter({
+  text,
+  highlights,
+  sources,
+}: {
+  text: string;
+  highlights: any[];
+  sources: any[];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const { urlToColor, legend } = useMemo(() => {
+    const urlToColor = new Map<string, { bg: string; border: string; dot: string }>();
+    let idx = 0;
+    const register = (url: string) => {
+      if (url && !urlToColor.has(url)) {
+        urlToColor.set(url, {
+          bg:     HL_CSS_COLORS[idx % HL_CSS_COLORS.length],
+          border: HL_BORDER_HEX[idx % HL_BORDER_HEX.length],
+          dot:    HL_DOT_TW[idx % HL_DOT_TW.length],
+        });
+        idx++;
+      }
+    };
+    sources.forEach((s: any) => register(s.url));
+    highlights.forEach((h: any) => register(h.url));
+    const legend = Array.from(urlToColor.entries()).map(([url, c]) => ({
+      url,
+      title: sources.find((s: any) => s.url === url)?.title
+          || highlights.find((h: any) => h.url === url)?.title
+          || url,
+      dot: c.dot,
+    }));
+    return { urlToColor, legend };
+  }, [sources, highlights]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !text || !highlights.length) return;
+
+    import('mark.js').then(({ default: Mark }) => {
+      const instance = new Mark(el);
+      instance.unmark({
+        done: () => {
+          // Interval-split: assign each sub-interval to the narrowest covering highlight
+          const sorted = [...highlights].sort((a: any, b: any) => a.start - b.start);
+          const bnds = Array.from(
+            new Set(sorted.flatMap((h: any) => [h.start, h.end]))
+          ).sort((a, b) => a - b);
+
+          type RangeEntry = { start: number; length: number; url: string };
+          const merged: RangeEntry[] = [];
+          for (let bi = 0; bi < bnds.length - 1; bi++) {
+            const s = bnds[bi], e = bnds[bi + 1];
+            const covering = sorted.filter((h: any) => h.start <= s && h.end >= e);
+            if (!covering.length) continue;
+            covering.sort((a: any, b: any) => (a.end - a.start) - (b.end - b.start));
+            const url = covering[0].url;
+            const prev = merged[merged.length - 1];
+            if (prev && prev.url === url && prev.start + prev.length === s) {
+              prev.length += e - s; // merge adjacent same-source
+            } else {
+              merged.push({ start: s, length: e - s, url });
+            }
+          }
+
+          if (!merged.length) return;
+
+          const startToUrl = new Map(merged.map(r => [r.start, r.url]));
+
+          instance.markRanges(
+            merged.map(r => ({ start: r.start, length: r.length })),
+            {
+              element: 'mark',
+              className: 'hl-plagiarism',
+              each: (node: Element, range: { start: number; length: number }) => {
+                const url   = startToUrl.get(range.start);
+                const color = url ? urlToColor.get(url) : undefined;
+                const html  = node as HTMLElement;
+                html.style.backgroundColor = color?.bg     ?? '#fef08a';
+                html.style.borderBottom    = `2px solid ${color?.border ?? '#facc15'}`;
+                html.style.borderRadius    = '2px';
+                html.style.padding         = '0 1px';
+                html.style.cursor          = 'default';
+                if (url) html.title = sources.find((s: any) => s.url === url)?.title ?? url;
+              },
+            }
+          );
+        },
+      });
+    });
+  }, [text, highlights, sources, urlToColor]);
+
+  return (
+    <>
+      {legend.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4 pb-3 border-b border-slate-200">
+          {legend.map((item, li) => (
+            <a key={li} href={item.url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors border border-slate-200 max-w-[280px]">
+              <span className={`w-3 h-3 rounded-full shrink-0 ${item.dot}`} />
+              <span className="truncate">{item.title}</span>
+            </a>
+          ))}
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className="text-sm leading-relaxed text-slate-800 whitespace-pre-wrap font-[system-ui]"
+      >
+        {text}
+      </div>
+    </>
+  );
+}
+// ---------------------------------------------------------------------------
 
 export default function AnalysisReportsPage() {
   return (

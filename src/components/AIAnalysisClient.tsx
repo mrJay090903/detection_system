@@ -1667,14 +1667,6 @@ export default function AIAnalysisClient() {
                                     }
                                   });
                                 }
-                                // Tertiary: fall back to any highlighted segments when source has no
-                                // directly attributed highlights (e.g. Winston-merged sources)
-                                if (sequences.length === 0) {
-                                  const allFlagged = segments.filter(s => s.highlighted);
-                                  for (const seg of allFlagged.slice(0, 5)) {
-                                    if (seg.text && seg.text.trim().length > 15) sequences.push(seg.text);
-                                  }
-                                }
                                 // Merge consecutive short fragments into one passage
                                 const merged: string[] = [];
                                 for (const s of sequences) {

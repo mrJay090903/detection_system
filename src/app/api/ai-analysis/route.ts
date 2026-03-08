@@ -426,56 +426,97 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
       });
     }
 
-    // Helper: find ALL sources that match a highlight by comparing text content
-    function findMatchingSourcesForText(hlText: string, srcs: typeof sources): typeof sources {
-      if (!hlText || srcs.length === 0) return srcs.length > 0 ? [srcs[0]] : [];
-      const hlLower = hlText.toLowerCase().trim();
-      const hlWords = new Set(hlLower.split(/\s+/).filter(w => w.length > 3));
-      const matched: typeof sources = [];
-      for (const src of srcs) {
-        if (!src.matched_text) {
-          // If source has no matched_text, include it as a fallback candidate
-          matched.push(src);
-          continue;
-        }
-        const srcLower = src.matched_text.toLowerCase().trim();
-        // Check containment
-        if (srcLower.includes(hlLower) || hlLower.includes(srcLower)) {
-          matched.push(src);
-          continue;
-        }
-        // Word-level overlap: require at least 20% overlap
-        const srcWords = srcLower.split(/\s+/).filter(w => w.length > 3);
-        const overlap = srcWords.filter(w => hlWords.has(w)).length;
-        const ratio = hlWords.size > 0 ? overlap / hlWords.size : 0;
-        if (ratio >= 0.2 || overlap >= 3) {
-          matched.push(src);
-        }
+    // Helper: find the BEST SINGLE source for a highlight.
+    // Priority order:
+    //   1. sourceIndex in the index record (Winston AI's direct pointer into sources[])
+    //   2. Direct URL field in the index record
+    //   3. Text-containment: highlight text appears inside source's matched_text
+    //   4. Best word-overlap score (≥ 25%)
+    //   5. Round-robin by position: distribute remaining unmatched highlights across
+    //      sources so each source gets its own unique color bucket
+    function findBestSourceForHighlight(
+      hlText: string,
+      srcs: typeof sources,
+      indexObj?: any,
+      highlightPositionIdx?: number
+    ): (typeof sources)[0] | null {
+      if (srcs.length === 0) return null;
+
+      // 1. sourceIndex — Winston AI's native per-index source pointer
+      const srcIdx =
+        indexObj?.sourceIndex ?? indexObj?.source_index ??
+        indexObj?.sourceId   ?? indexObj?.source_id ?? null;
+      if (srcIdx !== null && srcIdx !== undefined) {
+        const byIdx = srcs[Number(srcIdx)];
+        if (byIdx) return byIdx;
       }
-      // If nothing matched, fall back to first source
-      return matched.length > 0 ? matched : (srcs[0] ? [srcs[0]] : []);
+
+      // 2. Direct URL field in the index object
+      const directUrl =
+        indexObj?.sourceUrl ?? indexObj?.source_url ?? indexObj?.url ??
+        indexObj?.source    ?? indexObj?.link        ?? '';
+      if (directUrl) {
+        const directSrc = srcs.find(s => s.url === directUrl);
+        if (directSrc) return directSrc;
+      }
+
+      if (!hlText) {
+        // No text to compare — distribute across sources by position index
+        return srcs[(highlightPositionIdx ?? 0) % srcs.length];
+      }
+
+      const hlLower = hlText.toLowerCase().trim();
+      const hlWordSet = new Set(hlLower.split(/\s+/).filter(w => w.length > 3));
+
+      let bestScore = -1;
+      let bestSrc: (typeof srcs)[0] | null = null;
+
+      for (const src of srcs) {
+        if (!src.matched_text) continue;
+        const srcLower = src.matched_text.toLowerCase().trim();
+
+        // 3. Direct containment — definitive match
+        if (srcLower.includes(hlLower) || hlLower.includes(srcLower)) {
+          return src;
+        }
+
+        // 4. Word-level overlap score
+        const srcWordSet = new Set(srcLower.split(/\s+/).filter(w => w.length > 3));
+        let overlap = 0;
+        for (const w of hlWordSet) if (srcWordSet.has(w)) overlap++;
+        const score = hlWordSet.size > 0 ? overlap / hlWordSet.size : 0;
+        if (score > bestScore) { bestScore = score; bestSrc = src; }
+      }
+
+      if (bestSrc && bestScore >= 0.25) return bestSrc;
+
+      // 5. Distribute unmatched highlights evenly across all sources by position.
+      //    This ensures every source gets at least some distinctly-colored highlights
+      //    instead of everything falling back to source #0.
+      return srcs[(highlightPositionIdx ?? 0) % srcs.length];
     }
 
     if (Array.isArray(data.indexes) && data.indexes.length > 0) {
       console.log(`[Winston AI Batch] Raw indexes count: ${data.indexes.length}, sources count: ${data.sources?.length || 0}`);
-      data.indexes.forEach((index: any, i: number) => {
+      if (data.indexes.length > 0) {
+        console.log(`[Winston AI Batch] Sample index fields: ${Object.keys(data.indexes[0]).join(', ')}`);
+      }
+      data.indexes.forEach((index: any, posIdx: number) => {
         const startIdx = index.startIndex ?? index.start_index ?? index.start ?? 0;
-        const endIdx = index.endIndex ?? index.end_index ?? index.end ?? 0;
-        const seq = index.sequence ?? index.text ?? index.content ?? null;
+        const endIdx   = index.endIndex   ?? index.end_index   ?? index.end   ?? 0;
+        const seq    = index.sequence ?? index.text ?? index.content ?? null;
         const hlText = seq || text.substring(startIdx, endIdx);
 
-        // Create a highlight entry for EACH matching source so each source
-        // gets properly attributed highlights
-        const matchingSources = findMatchingSourcesForText(hlText, sources);
+        const bestSrc = findBestSourceForHighlight(hlText, sources, index, posIdx);
 
-        for (const src of matchingSources) {
+        if (bestSrc) {
           highlights.push({
             start: startIdx + offset,
-            end: endIdx + offset,
-            text: hlText,
-            url: src.url || '',
-            title: src.title || 'Unknown Source',
-            score: src.plagiarism_score || plagiarismScore,
+            end:   endIdx   + offset,
+            text:  hlText,
+            url:   bestSrc.url   || '',
+            title: bestSrc.title || 'Unknown Source',
+            score: bestSrc.plagiarism_score || plagiarismScore,
           });
         }
       });
@@ -488,12 +529,15 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
       const textLower = text.toLowerCase();
       const pos = textLower.indexOf(srcTextLower);
       if (pos === -1) continue;
-      // Check if this region is already covered by an existing highlight
-      const alreadyCovered = highlights.some(h =>
-        (h.start <= pos + offset && h.end >= pos + offset + srcTextLower.length) ||
-        (Math.abs(h.start - (pos + offset)) < 10 && Math.abs(h.end - (pos + offset + srcTextLower.length)) < 10)
+      // Only skip if THIS SAME SOURCE URL already has a highlight at this same position.
+      // Allow different sources to each have their own highlight for the same position.
+      const alreadyCoveredBySameSource = highlights.some(h =>
+        h.url === src.url && (
+          (h.start <= pos + offset && h.end >= pos + offset + srcTextLower.length) ||
+          (Math.abs(h.start - (pos + offset)) < 10 && Math.abs(h.end - (pos + offset + srcTextLower.length)) < 10)
+        )
       );
-      if (!alreadyCovered) {
+      if (!alreadyCoveredBySameSource) {
         highlights.push({
           start: pos + offset,
           end: pos + offset + src.matched_text.length,
@@ -502,7 +546,7 @@ async function searchWinstonAISingleBatch(text: string, offset: number = 0): Pro
           title: src.title,
           score: src.plagiarism_score,
         });
-        console.log(`[Winston AI Batch] Added highlight from source textMatched: "${src.matched_text.substring(0, 60)}..." at ${pos}`);
+        console.log(`[Winston AI Batch] Added highlight from source textMatched: "${src.matched_text.substring(0, 60)}..." at ${pos} for ${src.url.substring(0, 60)}`);
       }
     }
 
@@ -820,11 +864,13 @@ async function searchWinstonAILegacy(text: string): Promise<WinstonPlagiarismRes
       const textLower = searchText.toLowerCase();
       const pos = textLower.indexOf(srcTextLower);
       if (pos === -1) continue;
-      const alreadyCovered = highlights.some(h =>
-        (h.start <= pos && h.end >= pos + srcTextLower.length) ||
-        (Math.abs(h.start - pos) < 10 && Math.abs(h.end - (pos + srcTextLower.length)) < 10)
+      const alreadyCoveredBySameSource = highlights.some(h =>
+        h.url === src.url && (
+          (h.start <= pos && h.end >= pos + srcTextLower.length) ||
+          (Math.abs(h.start - pos) < 10 && Math.abs(h.end - (pos + srcTextLower.length)) < 10)
+        )
       );
-      if (!alreadyCovered) {
+      if (!alreadyCoveredBySameSource) {
         highlights.push({
           start: pos,
           end: pos + src.matched_text.length,
