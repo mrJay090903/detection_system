@@ -317,7 +317,7 @@ interface WinstonPlagiarismResult {
 // ============================================================================
 
 async function searchWinstonAISingleBatch(text: string, offset: number = 0): Promise<WinstonPlagiarismResult | null> {
-  const apiKey = process.env.WINSTON_AI_API_KEY;
+  const apiKey = (process.env.WINSTON_AI_API_KEY || '').trim();
 
   if (!apiKey || apiKey === 'your_api_key_here') {
     console.log('[Winston AI Batch] API key not configured, skipping');
