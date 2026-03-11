@@ -104,15 +104,15 @@ function AnalysisReportsContent() {
       score: displaySemantic * 100, 
       label: 'Concept Similarity (AI Semantic)', 
       description: 'AI evaluation of core research problem similarity',
-      status: (displaySemantic * 100) < 15 ? 'low' : (displaySemantic * 100) < 30 ? 'medium' : 'high',
-      color: (displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'
+      status: (displaySemantic * 100) < 15 ? 'safe' : 'revision',
+      color: (displaySemantic * 100) < 15 ? 'bg-green-500' : 'bg-red-500'
     },
     overall: { 
       score: displayOverall * 100, 
       label: 'Overall Assessment', 
       description: 'Reflects concept similarity per academic standards',
-      status: (displayOverall * 100) < 15 ? 'low' : (displayOverall * 100) < 30 ? 'medium' : 'high',
-      color: (displayOverall * 100) < 15 ? 'bg-blue-600' : (displayOverall * 100) < 30 ? 'bg-amber-500' : 'bg-red-600'
+      status: (displayOverall * 100) < 15 ? 'safe' : 'revision',
+      color: (displayOverall * 100) < 15 ? 'bg-green-600' : 'bg-red-600'
     }
   }
 
@@ -732,7 +732,7 @@ function AnalysisReportsContent() {
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden"
             >
-              <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-6 py-5">
+              <div className="bg-gradient-to-r from-indigo-800 via-purple-700 to-pink-800 px-6 py-5">
                 <div className="flex items-center gap-3 mb-2">
                   <BarChart3 className="w-6 h-6 text-white" />
                   <h2 className="text-xl font-bold text-white">Analysis Summary</h2>
@@ -765,42 +765,45 @@ function AnalysisReportsContent() {
                     <div className="text-xs text-slate-500 mt-1">Text Similarity</div>
                   </div>
                   <div className="text-center p-3 bg-slate-50 rounded-lg border border-slate-100">
-                    <div className={`text-2xl font-bold ${(displaySemantic * 100) < 15 ? 'text-green-700' : (displaySemantic * 100) < 30 ? 'text-amber-700' : 'text-red-700'}`}>{(displaySemantic * 100).toFixed(0)}%</div>
+                    <div className={`text-2xl font-bold ${(displaySemantic * 100) < 15 ? 'text-green-700' : 'text-red-700'}`}>{(displaySemantic * 100).toFixed(0)}%</div>
                     <div className="text-xs text-slate-500 mt-1">Concept Similarity</div>
                   </div>
                   <div className={`text-center p-3 rounded-lg border ${
-                    (displayOverall * 100) < 15 ? 'bg-green-50 border-green-200' :
-                    (displayOverall * 100) < 30 ? 'bg-amber-50 border-amber-200' :
-                    'bg-red-50 border-red-200'
+                    (displayOverall * 100) < 15 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
                   }`}>
                     <div className={`text-2xl font-bold ${
-                      (displayOverall * 100) < 15 ? 'text-green-700' :
-                      (displayOverall * 100) < 30 ? 'text-amber-700' :
-                      'text-red-700'
+                      (displayOverall * 100) < 15 ? 'text-green-700' : 'text-red-700'
                     }`}>{(displayOverall * 100).toFixed(1)}%</div>
                     <div className="text-xs text-slate-500 mt-1">Overall Score</div>
+                    <div className={`mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full inline-block ${
+                      (displayOverall * 100) < 15 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {(displayOverall * 100) < 15 ? 'SAFE' : 'FOR REVISION'}
+                    </div>
                   </div>
                 </div>
                 
                 {/* Verdict Banner */}
-                <div className={`flex items-center gap-3 p-4 rounded-xl ${
+                <div className={`flex items-center gap-4 p-4 rounded-xl ${
                   (displayOverall * 100) < 15 
                     ? 'bg-green-50 border border-green-200' 
-                    : (displayOverall * 100) < 30 
-                    ? 'bg-amber-50 border border-amber-200'
                     : 'bg-red-50 border border-red-200'
                 }`}>
-                  {(displayOverall * 100) < 15 ? (
-                    <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                  )}
+                  <div className="shrink-0">
+                    {(displayOverall * 100) < 15 ? (
+                      <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-green-100 border-2 border-green-400 text-green-800 font-extrabold text-sm tracking-wide">
+                        <CheckCircle className="w-4 h-4" /> SAFE
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-red-100 border-2 border-red-400 text-red-800 font-extrabold text-sm tracking-wide">
+                        <AlertTriangle className="w-4 h-4" /> FOR REVISION
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm font-medium text-slate-700">
                     {(displayOverall * 100) < 15 
                       ? "Your research shows good originality with minimal overlap. Proceed with confidence."
-                      : (displayOverall * 100) < 30
-                      ? "Some similarities detected. Review the detailed sections below for guidance."
-                      : "Significant similarities found. Revision is strongly recommended before submission."}
+                      : "Similarities detected. Revision is required before submission."}
                   </p>
                 </div>
               </div>
@@ -913,21 +916,24 @@ function AnalysisReportsContent() {
                 <div key={key} className="bg-white p-5 rounded-2xl shadow-lg border border-slate-200 hover:shadow-xl transition-shadow">
                   <div className="flex justify-between items-start mb-3">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide leading-tight">{data.label}</span>
-                    {data.status === 'low' ? 
+                    {(data.status === 'low' || data.status === 'safe') ? 
                       <CheckCircle className="w-4 h-4 text-green-500 shrink-0" /> : 
-                      data.status === 'medium' ?
-                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" /> :
                       <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
                     }
                   </div>
                   <div className="flex items-end gap-2 mb-3">
                     <span className="text-3xl font-bold text-slate-900">{data.score.toFixed(1)}%</span>
                     <span className={`text-xs font-medium mb-1 px-2 py-0.5 rounded-full ${
+                      data.status === 'safe' ? 'bg-green-100 text-green-700' :
+                      data.status === 'revision' ? 'bg-red-100 text-red-700' :
                       data.status === 'low' ? 'bg-green-100 text-green-700' :
                       data.status === 'medium' ? 'bg-amber-100 text-amber-700' :
                       'bg-red-100 text-red-700'
                     }`}>
-                      {data.status === 'low' ? 'Low' : data.status === 'medium' ? 'Medium' : 'High'}
+                      {data.status === 'safe' ? 'Safe' :
+                       data.status === 'revision' ? 'For Revision' :
+                       data.status === 'low' ? 'Low' :
+                       data.status === 'medium' ? 'Medium' : 'High'}
                     </span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
@@ -1011,55 +1017,11 @@ function AnalysisReportsContent() {
                     animate={{ opacity: 1, y: 0 }}
                     className="space-y-6"
                   >
-                    {/* Step 1: Final Verdict */}
-                    <div className={`rounded-2xl shadow-lg overflow-hidden ${
-                      sections.problemComparison === 'DIFFERENT' 
-                        ? 'border border-green-200' 
-                        : 'border border-amber-200'
-                    }`}>
-                      <div className={`px-6 py-4 ${
-                        sections.problemComparison === 'DIFFERENT'
-                          ? 'bg-gradient-to-r from-green-600 to-emerald-600'
-                          : 'bg-gradient-to-r from-amber-600 to-orange-600'
-                      }`}>
-                        <div className="flex items-center gap-3 text-white">
-                          <Shield className="w-5 h-5" />
-                          <h3 className="text-lg font-bold">Final Verdict</h3>
-                        </div>
-                      </div>
-                      <div className="p-6 bg-white">
-                        <p className="text-lg font-bold text-slate-900 mb-4">{sections.finalVerdict}</p>
-                        
-                        {/* Status Badges */}
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
-                            sections.problemComparison === 'DIFFERENT' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {sections.problemComparison === 'DIFFERENT' ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                            Problem: {sections.problemComparison}
-                          </span>
-                          
-                          {sections.acceptanceStatus && (
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${
-                              ['ACCEPTABLE', 'ACCEPTED', 'APPROVED', 'REVIEW'].includes(sections.acceptanceStatus)
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-red-100 text-red-800'
-                            }`}>
-                              {['ACCEPTABLE', 'ACCEPTED', 'APPROVED', 'REVIEW'].includes(sections.acceptanceStatus) 
-                                ? <CheckCircle className="w-3.5 h-3.5" /> 
-                                : <AlertTriangle className="w-3.5 h-3.5" />}
-                              {['ACCEPTABLE', 'ACCEPTED', 'APPROVED', 'REVIEW'].includes(sections.acceptanceStatus) ? 'ACCEPTABLE' : sections.acceptanceStatus}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+     
 
                     {/* Step 2: Similarity Score Cards - Clean Grid */}
                     <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-4">
+                      <div className="bg-gradient-to-r from-purple-800 to-pink-700 px-6 py-4">
                         <div className="flex items-center gap-3 text-white">
                           <BarChart3 className="w-5 h-5" />
                           <h3 className="text-lg font-bold">Similarity Scores</h3>
@@ -1115,8 +1077,7 @@ function AnalysisReportsContent() {
                         {/* Score Legend */}
                         <div className="mt-4 flex items-center gap-4 justify-center flex-wrap text-xs text-slate-500">
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span> Below 15%: Safe</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span> 15-30%: Review</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> Above 30%: Revise</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> 15% and above: For Revision</span>
                         </div>
                       </div>
                     </div>
@@ -1124,7 +1085,7 @@ function AnalysisReportsContent() {
                     {/* Step 3: Justification */}
                     {sections.justification && (
                       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4">
+                        <div className="bg-gradient-to-r from-indigo-800 to-blue-700 px-6 py-4">
                           <div className="flex items-center gap-3 text-white">
                             <ClipboardList className="w-5 h-5" />
                             <h3 className="text-lg font-bold">AI Justification</h3>
@@ -1153,7 +1114,7 @@ function AnalysisReportsContent() {
                   >
                     {/* Side-by-Side Comparison */}
                     <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4">
+                      <div className="bg-gradient-to-r from-indigo-800 to-purple-700 px-6 py-4">
                         <div className="flex items-center gap-3 text-white">
                           <BookOpen className="w-5 h-5" />
                           <div>
@@ -1251,7 +1212,7 @@ function AnalysisReportsContent() {
                   >
                     {/* Visual Score Comparison */}
                     <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-4">
+                      <div className="bg-gradient-to-r from-purple-800 to-pink-700 px-6 py-4">
                         <div className="flex items-center gap-3 text-white">
                           <TrendingUp className="w-5 h-5" />
                           <div>
@@ -1280,28 +1241,33 @@ function AnalysisReportsContent() {
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${(displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'}`}></div>
+                              <div className={`w-3 h-3 rounded-full ${(displaySemantic * 100) < 15 ? 'bg-green-500' : 'bg-red-500'}`}></div>
                               <span className="text-sm font-semibold text-slate-700">Concept Similarity (AI Semantic)</span>
                             </div>
-                            <span className={`text-lg font-bold ${(displaySemantic * 100) < 15 ? 'text-green-700' : (displaySemantic * 100) < 30 ? 'text-amber-700' : 'text-red-700'}`}>{(displaySemantic * 100).toFixed(1)}%</span>
+                            <span className={`text-lg font-bold ${(displaySemantic * 100) < 15 ? 'text-green-700' : 'text-red-700'}`}>{(displaySemantic * 100).toFixed(1)}%</span>
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                            <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(displaySemantic * 100, 100)}%` }} transition={{ duration: 1, delay: 0.2 }} className={`h-3 rounded-full ${(displaySemantic * 100) < 15 ? 'bg-green-500' : (displaySemantic * 100) < 30 ? 'bg-amber-500' : 'bg-red-500'}`} />
+                            <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(displaySemantic * 100, 100)}%` }} transition={{ duration: 1, delay: 0.2 }} className={`h-3 rounded-full ${(displaySemantic * 100) < 15 ? 'bg-green-500' : 'bg-red-500'}`} />
                           </div>
-                          <p className="text-xs text-slate-500 mt-1">AI evaluation of whether the core research problem, goals, and scope are fundamentally the same.</p>
+                          <p className="text-xs text-slate-500 mt-1">AI evaluation of whether the core research problem, goals, and scope are fundamentally the similar.</p>
                         </div>
                         
                         {/* Overall Bar */}
                         <div className="pt-3 border-t border-slate-200">
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${(displayOverall * 100) < 15 ? 'bg-green-600' : (displayOverall * 100) < 30 ? 'bg-amber-600' : 'bg-red-600'}`}></div>
+                              <div className={`w-3 h-3 rounded-full ${(displayOverall * 100) < 15 ? 'bg-green-800' : 'bg-red-600'}`}></div>
                               <span className="text-sm font-bold text-slate-800">Overall Assessment</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                (displayOverall * 100) < 15 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {(displayOverall * 100) < 15 ? 'SAFE' : 'FOR REVISION'}
+                              </span>
                             </div>
-                            <span className={`text-xl font-bold ${(displayOverall * 100) < 15 ? 'text-green-700' : (displayOverall * 100) < 30 ? 'text-amber-700' : 'text-red-700'}`}>{(displayOverall * 100).toFixed(1)}%</span>
+                            <span className={`text-xl font-bold ${(displayOverall * 100) < 15 ? 'text-green-700' : 'text-red-700'}`}>{(displayOverall * 100).toFixed(1)}%</span>
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-4 overflow-hidden">
-                            <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(displayOverall * 100, 100)}%` }} transition={{ duration: 1.2, delay: 0.4 }} className={`h-4 rounded-full ${(displayOverall * 100) < 15 ? 'bg-green-600' : (displayOverall * 100) < 30 ? 'bg-amber-600' : 'bg-red-600'}`} />
+                            <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(displayOverall * 100, 100)}%` }} transition={{ duration: 1.2, delay: 0.4 }} className={`h-4 rounded-full ${(displayOverall * 100) < 15 ? 'bg-green-600' : 'bg-red-600'}`} />
                           </div>
                           <p className="text-xs text-slate-500 mt-1">Weighted blend: 40% text similarity + 60% concept similarity. Prioritizes conceptual overlap for plagiarism detection.</p>
                         </div>
@@ -1310,7 +1276,7 @@ function AnalysisReportsContent() {
 
                     {/* Understanding the Scores */}
                     <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4">
+                      <div className="bg-gradient-to-r from-indigo-800 to-blue-700 px-6 py-4">
                         <div className="flex items-center gap-3 text-white">
                           <Info className="w-5 h-5" />
                           <h3 className="text-lg font-bold">Understanding the Scores</h3>
@@ -1331,7 +1297,7 @@ function AnalysisReportsContent() {
                               <Sparkles className="w-4 h-4" /> What is Concept Similarity?
                             </h4>
                             <p className="text-xs text-slate-700 leading-relaxed">
-                              Concept similarity (semantic) is an AI evaluation of whether both studies address the same core problem, target the same users, and aim for the same deliverables. This is the more important metric — two studies using different words can still be conceptually identical.
+                              Concept similarity (semantic) is an AI evaluation of whether both studies address the similar core problem, target the similar users, and aim for the similar deliverables. This is the more important metric — two studies using different words can still be conceptually identical.
                             </p>
                           </div>
                         </div>
@@ -1342,15 +1308,11 @@ function AnalysisReportsContent() {
                           <div className="space-y-2">
                             <div className="flex items-start gap-3 text-xs">
                               <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-green-100 text-green-800 font-bold">Below 15%</span>
-                              <span className="text-slate-600">Your research is clearly different. Safe to proceed with minimal changes.</span>
+                              <span className="text-slate-600">Your research is clearly different. <strong>Safe</strong> to proceed.</span>
                             </div>
                             <div className="flex items-start gap-3 text-xs">
-                              <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">15% — 30%</span>
-                              <span className="text-slate-600">Some overlap detected. Review the specific areas of similarity and consider adjustments.</span>
-                            </div>
-                            <div className="flex items-start gap-3 text-xs">
-                              <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-red-100 text-red-800 font-bold">Above 30%</span>
-                              <span className="text-slate-600">Significant similarity. Revision strongly recommended to differentiate your research.</span>
+                              <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded bg-red-100 text-red-800 font-bold">15% and above</span>
+                              <span className="text-slate-600">Similarity detected. <strong>Revision is required</strong> before submission.</span>
                             </div>
                           </div>
                         </div>
@@ -1967,7 +1929,7 @@ function AnalysisReportsContent() {
                         }`}>
                           <div className={`px-6 py-4 ${
                             winstonSummary.isPlagiarized 
-                              ? 'bg-gradient-to-r from-red-600 to-rose-600' 
+                              ? 'bg-gradient-to-r from-red-900 to-rose-700' 
                               : 'bg-gradient-to-r from-green-600 to-emerald-600'
                           }`}>
                             <div className="flex items-center gap-3 text-white">
@@ -2018,7 +1980,7 @@ function AnalysisReportsContent() {
                             </div>
                           
                           </div>
-                          <div className="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600">
+                          <div className="px-6 py-4 bg-gradient-to-r from-indigo-900 to-purple-700">
                             <div className="flex items-center gap-3 text-white">
                               <Highlighter className="w-5 h-5" />
                               <div>
@@ -2256,7 +2218,7 @@ function AnalysisReportsContent() {
                     }`}>
                       <div className={`px-6 py-4 ${
                         sections.problemComparison === 'DIFFERENT'
-                          ? 'bg-gradient-to-r from-green-600 to-emerald-600'
+                          ? 'bg-gradient-to-r from-green-900 to-emerald-600'
                           : 'bg-gradient-to-r from-red-600 to-rose-600'
                       }`}>
                         <div className="flex items-center gap-3 text-white">
@@ -2276,23 +2238,23 @@ function AnalysisReportsContent() {
                             <span className="text-lg font-bold text-blue-800">{(displayLexical * 100).toFixed(1)}%</span>
                           </div>
                           <div className={`p-3 rounded-xl border text-center ${
-                            (displaySemantic * 100) < 15 ? 'bg-green-50 border-green-100' : (displaySemantic * 100) < 30 ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100'
+                            (displaySemantic * 100) < 15 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'
                           }`}>
                             <span className={`text-[10px] font-medium block mb-1 ${
-                              (displaySemantic * 100) < 15 ? 'text-green-500' : (displaySemantic * 100) < 30 ? 'text-amber-500' : 'text-red-500'
+                              (displaySemantic * 100) < 15 ? 'text-green-500' : 'text-red-500'
                             }`}>Concept Similarity</span>
                             <span className={`text-lg font-bold ${
-                              (displaySemantic * 100) < 15 ? 'text-green-800' : (displaySemantic * 100) < 30 ? 'text-amber-800' : 'text-red-800'
+                              (displaySemantic * 100) < 15 ? 'text-green-800' : 'text-red-800'
                             }`}>{(displaySemantic * 100).toFixed(1)}%</span>
                           </div>
                           <div className={`p-3 rounded-xl border text-center ${
-                            (displayOverall * 100) < 15 ? 'bg-green-50 border-green-100' : (displayOverall * 100) < 30 ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100'
+                            (displayOverall * 100) < 15 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'
                           }`}>
                             <span className={`text-[10px] font-medium block mb-1 ${
-                              (displayOverall * 100) < 15 ? 'text-green-500' : (displayOverall * 100) < 30 ? 'text-amber-500' : 'text-red-500'
+                              (displayOverall * 100) < 15 ? 'text-green-500' : 'text-red-500'
                             }`}>Overall Score</span>
                             <span className={`text-lg font-bold ${
-                              (displayOverall * 100) < 15 ? 'text-green-800' : (displayOverall * 100) < 30 ? 'text-amber-800' : 'text-red-800'
+                              (displayOverall * 100) < 15 ? 'text-green-800' : 'text-red-800'
                             }`}>{(displayOverall * 100).toFixed(1)}%</span>
                           </div>
                           <div className={`p-3 rounded-xl border text-center ${
@@ -2377,10 +2339,10 @@ function AnalysisReportsContent() {
 
                       return (
                         <div className="space-y-3">
-                          {sectionCard('Main Issues', mainIssues, <AlertTriangle className="w-4 h-4" />, 'bg-gradient-to-r from-red-600 to-rose-600', 'bg-red-400')}
-                          {sectionCard('Required Changes', requiredChanges, <Target className="w-4 h-4" />, 'bg-gradient-to-r from-orange-600 to-amber-600', 'bg-orange-400')}
-                          {sectionCard('Suggested Improvements', suggested, <Lightbulb className="w-4 h-4" />, 'bg-gradient-to-r from-blue-600 to-indigo-600', 'bg-blue-400')}
-                          {sectionCard('Strengths', strengths, <CheckCircle className="w-4 h-4" />, 'bg-gradient-to-r from-green-600 to-emerald-600', 'bg-green-400')}
+                          {sectionCard('Main Issues', mainIssues, <AlertTriangle className="w-4 h-4" />, 'bg-gradient-to-r from-red-900 to-rose-600', 'bg-red-400')}
+                          {sectionCard('Required Changes', requiredChanges, <Target className="w-4 h-4" />, 'bg-gradient-to-r from-orange-900 to-amber-600', 'bg-orange-400')}
+                          {sectionCard('Suggested Improvements', suggested, <Lightbulb className="w-4 h-4" />, 'bg-gradient-to-r from-blue-900 to-indigo-600', 'bg-blue-400')}
+                          {sectionCard('Strengths', strengths, <CheckCircle className="w-4 h-4" />, 'bg-gradient-to-r from-green-600 to-emerald-900', 'bg-green-400')}
                         </div>
                       )
                     })()}

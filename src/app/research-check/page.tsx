@@ -707,28 +707,14 @@ export default function ResearchCheckPage() {
                                   <div className="flex items-start gap-3">
                                     <div className="w-3 h-3 rounded-full bg-green-500 mt-1"></div>
                                     <div className="flex-1">
-                                      <p className="text-sm font-medium text-gray-800">Below 10-15%: Safe & Acceptable</p>
+                                      <p className="text-sm font-medium text-gray-800">Below 15%: Safe</p>
                                       <p className="text-xs text-gray-600">Generally considered acceptable for research publications and postgraduate theses.</p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-start gap-3">
-                                    <div className="w-3 h-3 rounded-full bg-yellow-500 mt-1"></div>
-                                    <div className="flex-1">
-                                      <p className="text-sm font-medium text-gray-800">15-20%: Borderline</p>
-                                      <p className="text-xs text-gray-600">May be acceptable but requires careful review and proper citations.</p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-start gap-3">
-                                    <div className="w-3 h-3 rounded-full bg-orange-500 mt-1"></div>
-                                    <div className="flex-1">
-                                      <p className="text-sm font-medium text-gray-800">Above 20%: Requires Revision</p>
-                                      <p className="text-xs text-gray-600">Typically requires revision before submission.</p>
                                     </div>
                                   </div>
                                   <div className="flex items-start gap-3">
                                     <div className="w-3 h-3 rounded-full bg-red-500 mt-1"></div>
                                     <div className="flex-1">
-                                      <p className="text-sm font-medium text-gray-800">Above 30%: Often Rejected</p>
+                                      <p className="text-sm font-medium text-gray-800">Above 15%: Revision</p>
                                       <p className="text-xs text-gray-600">Significant revision required; may be rejected without substantial changes.</p>
                                     </div>
                                   </div>
