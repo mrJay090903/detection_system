@@ -2055,6 +2055,12 @@ const prompt = [
 "",
 "Problem Comparison Result: [SAME / SIMILAR / DIFFERENT]",
 "",
+"Problem Comparison:",
+"- Problem Alignment: [Identify and compare the core problem statements of both studies. State if they address the same issue, a related variation, or entirely different problems based on specific problem definitions.]",
+"- Goal Consistency: [Evaluate and compare intended goals/outcomes. State whether both studies aim for identical, similar, or distinct results in relation to the problem being solved.]",
+"- Contextual Relevance: [Compare operational context, including users, environment, and application setting. State whether context is the same, related, or different.]",
+"- Data and System Flow Comparison: [Compare input data requirements and output behavior/results. Identify key overlaps and key differences in how each system processes information and produces outcomes.]",
+"",
 "Cosine Similarity (Textual): [use provided score]%",
 "",
 "=== FIELD SCORES ===",
@@ -2074,6 +2080,11 @@ const prompt = [
 "",
 "Justification:",
 "[2-3 detailed academic paragraphs explaining overlaps and differences across all 4 fields. Explain how cosine similarity aligns or misleads.]",
+"",
+"Similarity Analysis:",
+"- Text Similarity Analysis: [Explain what the cosine score means for lexical overlap]",
+"- Concept Similarity Analysis: [Explain what the final conceptual score means for idea overlap]",
+"- Overall Interpretation: [State SAFE or FOR REVISION with concise rationale]",
 "",
 "Final Verdict:",
 "[Either 'Not the same research concept' OR 'Same research concept']",
@@ -2680,7 +2691,7 @@ const modelPriority = [
     // Parse AI-calculated similarity percentages from new structured format
     const proposedResearchMatch = analysis.match(/Proposed Research:\s*([\s\S]+?)(?=\n\nExisting Research:|\nExisting Research:)/);
     const existingResearchMatch = analysis.match(/Existing Research:\s*([\s\S]+?)(?=\n\nProblem Comparison Result:|\nProblem Comparison Result:)/);
-    const problemComparisonMatch = analysis.match(/Problem Comparison Result:\s*(SAME|DIFFERENT)/i);
+    const problemComparisonMatch = analysis.match(/Problem Comparison Result:\s*(SAME|SIMILAR|DIFFERENT)/i);
     const cosineTextualMatch = analysis.match(/Cosine Similarity \(Textual\):\s*(\d+(?:\.\d+)?)\s*%/i);
     const finalConceptMatch = analysis.match(/Final Conceptual Similarity:\s*(\d+(?:\.\d+)?)\s*%/i);
     const finalVerdictMatch = analysis.match(/Final Verdict:\s*(.+?)(?=\n\n|BREAKDOWN|$)/i);

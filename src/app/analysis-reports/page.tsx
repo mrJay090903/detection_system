@@ -122,6 +122,7 @@ function AnalysisReportsContent() {
       proposedResearch: '',
       existingResearch: '',
       problemComparison: '',
+      problemComparisonDetails: null,
       textSimilarity: '',
       conceptSimilarity: '',
       acceptanceStatus: '',
@@ -133,6 +134,7 @@ function AnalysisReportsContent() {
       problemIdentityCheck: '',
       detailedComparison: '',
       similarityAnalysis: '',
+      similarityAnalysisDetails: null,
       recommendations: ''
     }
 
@@ -145,8 +147,27 @@ function AnalysisReportsContent() {
     if (existingMatch) sections.existingResearch = existingMatch[1].trim()
 
     // Extract Problem Comparison Result
-    const comparisonMatch = text.match(/Problem Comparison Result:\s*(SAME|DIFFERENT)/i)
+    const comparisonMatch = text.match(/Problem Comparison Result:\s*(SAME|SIMILAR|DIFFERENT)/i)
     if (comparisonMatch) sections.problemComparison = comparisonMatch[1].toUpperCase()
+
+    // Extract structured Problem Comparison details (new prompt format)
+    const problemComparisonBlockMatch = text.match(/Problem Comparison:\s*([\s\S]+?)(?=\n\nCosine Similarity|\nCosine Similarity|$)/i)
+    if (problemComparisonBlockMatch) {
+      const block = problemComparisonBlockMatch[1]
+      const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const extractLine = (label: string) => {
+        const labelPattern = new RegExp(`(?:^|\\n)\\s*[-•]?\\s*${escapeRegExp(label)}\\s*:\\s*([^\\n]+)`, 'i')
+        const m = block.match(labelPattern)
+        return m ? m[1].trim() : ''
+      }
+
+      sections.problemComparisonDetails = {
+        problemAlignment: extractLine('Problem Alignment') || extractLine('Problem/Need'),
+        goalConsistency: extractLine('Goal Consistency') || extractLine('Objectives'),
+        contextualRelevance: extractLine('Contextual Relevance') || extractLine('Scope/Context'),
+        dataSystemFlow: extractLine('Data and System Flow Comparison') || extractLine('Inputs/Outputs'),
+      }
+    }
 
     // Extract Text Similarity
     const textSimMatch = text.match(/Cosine Similarity \(Textual\):\s*(\d+(?:\.\d+)?)\s*%/i)
@@ -225,8 +246,23 @@ function AnalysisReportsContent() {
     if (detailedMatch) sections.detailedComparison = detailedMatch[0].trim()
 
     // Extract Similarity Analysis
-    const analysisMatch = text.match(/Similarity Analysis:[\s\S]+?(?=\n\nRecommendations:|\nRecommendations:)/i)
-    if (analysisMatch) sections.similarityAnalysis = analysisMatch[0].trim()
+    const analysisMatch = text.match(/Similarity Analysis:\s*([\s\S]+?)(?=\n\nRecommendations:|\nRecommendations:|\n\nFinal Verdict:|\nFinal Verdict:|$)/i)
+    if (analysisMatch) {
+      sections.similarityAnalysis = analysisMatch[1].trim()
+
+      const block = analysisMatch[1]
+      const extractSimilarityLine = (label: string) => {
+        const labelPattern = new RegExp(`(?:^|\\n)\\s*[-•]?\\s*${label}\\s*:\\s*([^\\n]+)`, 'i')
+        const m = block.match(labelPattern)
+        return m ? m[1].trim() : ''
+      }
+
+      sections.similarityAnalysisDetails = {
+        textSimilarityAnalysis: extractSimilarityLine('Text Similarity Analysis'),
+        conceptSimilarityAnalysis: extractSimilarityLine('Concept Similarity Analysis'),
+        overallInterpretation: extractSimilarityLine('Overall Interpretation'),
+      }
+    }
 
     // Extract Recommendations (stop before TEXT MATCH HIGHLIGHTS or end)
     const recommendationsMatch = text.match(/Recommendations:\s*([\s\S]+?)(?=\n=== TEXT MATCH HIGHLIGHTS|TEXT MATCH HIGHLIGHTS|$)/i)
@@ -1167,6 +1203,28 @@ function AnalysisReportsContent() {
                             }`}>{sections.problemComparison || 'UNKNOWN'}</span>
                           </div>
                         </div>
+
+                        {/* Structured Problem Comparison Details */}
+                        {(sections.problemComparisonDetails?.problemAlignment ||
+                          sections.problemComparisonDetails?.goalConsistency ||
+                          sections.problemComparisonDetails?.contextualRelevance ||
+                          sections.problemComparisonDetails?.dataSystemFlow) && (
+                          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Detailed Problem Comparison</h4>
+                            {sections.problemComparisonDetails?.problemAlignment && (
+                              <div className="text-sm text-slate-700"><span className="font-semibold text-slate-800">Problem Alignment:</span> {sections.problemComparisonDetails.problemAlignment}</div>
+                            )}
+                            {sections.problemComparisonDetails?.goalConsistency && (
+                              <div className="text-sm text-slate-700"><span className="font-semibold text-slate-800">Goal Consistency:</span> {sections.problemComparisonDetails.goalConsistency}</div>
+                            )}
+                            {sections.problemComparisonDetails?.contextualRelevance && (
+                              <div className="text-sm text-slate-700"><span className="font-semibold text-slate-800">Contextual Relevance:</span> {sections.problemComparisonDetails.contextualRelevance}</div>
+                            )}
+                            {sections.problemComparisonDetails?.dataSystemFlow && (
+                              <div className="text-sm text-slate-700"><span className="font-semibold text-slate-800">Data and System Flow Comparison:</span> {sections.problemComparisonDetails.dataSystemFlow}</div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1320,7 +1378,10 @@ function AnalysisReportsContent() {
                     </div>
 
                     {/* Detailed Analysis Text (if AI provided it) */}
-                    {sections.similarityAnalysis && (
+                    {(sections.similarityAnalysis ||
+                      sections.similarityAnalysisDetails?.textSimilarityAnalysis ||
+                      sections.similarityAnalysisDetails?.conceptSimilarityAnalysis ||
+                      sections.similarityAnalysisDetails?.overallInterpretation) && (
                       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
                         <div className="bg-gradient-to-r from-slate-700 to-slate-900 px-6 py-4">
                           <div className="flex items-center gap-3 text-white">
@@ -1329,6 +1390,24 @@ function AnalysisReportsContent() {
                           </div>
                         </div>
                         <div className="p-6 space-y-3">
+                          {sections.similarityAnalysisDetails?.textSimilarityAnalysis && (
+                            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                              <span className="font-semibold text-slate-800 text-sm">Text Similarity Analysis:</span>
+                              <span className="text-sm text-slate-600 ml-1">{sections.similarityAnalysisDetails.textSimilarityAnalysis}</span>
+                            </div>
+                          )}
+                          {sections.similarityAnalysisDetails?.conceptSimilarityAnalysis && (
+                            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                              <span className="font-semibold text-slate-800 text-sm">Concept Similarity Analysis:</span>
+                              <span className="text-sm text-slate-600 ml-1">{sections.similarityAnalysisDetails.conceptSimilarityAnalysis}</span>
+                            </div>
+                          )}
+                          {sections.similarityAnalysisDetails?.overallInterpretation && (
+                            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                              <span className="font-semibold text-slate-800 text-sm">Overall Interpretation:</span>
+                              <span className="text-sm text-slate-600 ml-1">{sections.similarityAnalysisDetails.overallInterpretation}</span>
+                            </div>
+                          )}
                           {(sections.similarityAnalysis || '').split('\n').filter((line: string) => line.trim()).map((line: string, idx: number) => {
                             const cleaned = line.replace(/^[-•]\s*/, '').trim();
                             const hasColon = cleaned.includes(':') && cleaned.indexOf(':') < 40;

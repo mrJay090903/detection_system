@@ -689,7 +689,7 @@ export default function ResearchCheckPage() {
                                     <div>
                                       <p className="font-bold text-green-800 mb-2">✓ Acceptable Similarity Level</p>
                                       <p className="text-sm text-green-700">
-                                        Below 10-15% is generally considered safe and acceptable for research publications 
+                                        Below 10-15% is generally considered pass and acceptable for research publications 
                                         and postgraduate theses. Ensure all references are properly cited.
                                       </p>
                                     </div>
