@@ -432,13 +432,7 @@ const LandingPage = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
           >
-             <motion.div 
-               whileHover={{ scale: 1.1, rotate: 5 }}
-               transition={{ type: "spring", stiffness: 300 }}
-               className="w-36 h-36 md:w-44 md:h-44 bg-white rounded-full border-4 border-blue-200 flex items-center justify-center overflow-hidden shadow-xl  "
-             >
-                <Image src="/assets/bu-logo.png" width={176} height={176} alt="BU Logo" className="object-cover" />
-             </motion.div>
+             
              <motion.div 
                whileHover={{ scale: 1.1, rotate: -5 }}
                transition={{ type: "spring", stiffness: 300 }}

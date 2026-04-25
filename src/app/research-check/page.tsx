@@ -408,10 +408,10 @@ export default function ResearchCheckPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden bg-white border border-gray-200 shadow">
-                <Image src="/assets/bu-logo.png" width={40} height={40} alt="BU Logo" className="object-cover" />
+                <Image src="/assets/bup-logo.png" width={40} height={40} alt="BU Logo" className="object-cover" />
               </div>
               <div className="font-bold tracking-wide text-lg">
-                <span className="text-[#3896DA]">BICOL</span> <span className="text-[#F86D1B]">UNIVERSITY</span>
+                <span className="text-[#3896DA]">BICOL</span> <span className="text-[#F86D1B]">UNIVERSITY</span> <span className="text-[#acacac]">POLANGUI</span>
               </div>
             </div>
             <Link href="/">
