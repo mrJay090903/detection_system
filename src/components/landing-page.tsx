@@ -54,9 +54,28 @@ const LandingPage = () => {
 {/* ================= HERO SECTION ================= */}
 <section className="relative w-full min-h-[700px] flex flex-col overflow-hidden">
   
-  {/* Background with Enhanced Gradient and Pattern */}
-  <div className="absolute inset-0 bg-gradient-to-br from-[#2d4a5f] via-[#4a667d] to-[#7a6a5a] z-0">
-    <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
+  {/* Background image with overlay for text readability */}
+  <div className="absolute inset-0 z-0">
+    <div className="absolute inset-y-0 right-0 left-6 md:left-12 lg:left-100">
+      <Image
+        src="/assets/hero-background.jpg"
+        alt="Campus background"
+        fill
+        priority
+        className="object-cover"
+        style={{
+          objectPosition: '10% center',
+          filter: 'brightness(0.84) contrast(1.08) saturate(1.05)',
+        }}
+      />
+    </div>
+    <div
+      className="absolute inset-0"
+      style={{
+        backgroundImage:
+          'linear-gradient(90deg, rgba(8, 21, 37, 1) 0%, rgba(8, 21, 37, 1) 38%, rgba(8, 21, 37, 0.72) 62%, rgba(8, 21, 37, 0) 82%), linear-gradient(270deg, rgba(8, 21, 37, 0.5) 0%, rgba(8, 21, 37, 0) 28%)',
+      }}
+    ></div>
   </div>
 
   {/* Navbar */}
@@ -91,11 +110,11 @@ const LandingPage = () => {
   </motion.nav>
 
   {/* Main Content */}
-  <div className="container mx-auto px-6 flex-grow flex flex-col md:flex-row items-center relative z-10 mt-8 md:mt-0">
+  <div className="container mx-auto px-6 flex-grow flex items-center relative z-10 mt-8 md:mt-0 py-12">
     
     {/* Left Text Content */}
     <motion.div 
-      className="w-full md:w-1/2 space-y-8 pt-10 md:pt-0"
+      className="w-full md:w-3/5 space-y-8 pt-10 md:pt-0"
       initial="initial"
       animate="animate"
       variants={staggerContainer}
@@ -168,25 +187,6 @@ const LandingPage = () => {
       </motion.div>
 
 
-    </motion.div>
-
-    {/* Right Image Area */}
-    <motion.div 
-      initial={{ opacity: 0, x: 100 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.8 }}
-      className="w-full md:w-1/2 h-[500px] md:h-auto flex justify-center md:justify-end items-center relative mt-12 md:mt-0 overflow-hidden"
-    >
-      <div className="relative w-full h-full max-w-[600px] flex items-center justify-center translate-y-50">
-         <Image
-           src="/assets/bu-torch.svg"
-           alt="BU Torch Sculpture"
-           width={600}
-           height={700}
-           className="object-contain object-center drop-shadow-2xl scale-170"
-           priority
-         />
-      </div>
     </motion.div>
   </div>
 </section>
