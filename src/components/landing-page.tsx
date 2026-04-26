@@ -487,7 +487,7 @@ const LandingPage = () => {
         </div>
 
         <div className="container mx-auto px-6 mt-12 pt-8 border-t border-gray-800 text-center text-xs">
-          © 2025 Research Similarity Detection System. All rights reserved.
+  © {new Date().getFullYear()} Research Similarity Detection System. All rights reserved.
         </div>
       </footer>
 
